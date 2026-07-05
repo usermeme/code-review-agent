@@ -8,13 +8,17 @@ async function main(): Promise<void> {
   const services = await buildServices(cfg);
   const app = createApp(services);
 
-  const server = app.listen(cfg.server.port, () => {
+  try {
+    await app.listen({ port: cfg.server.port, host: '0.0.0.0' });
     logger.info({ port: cfg.server.port }, 'code-review-agent listening');
-  });
+  } catch (error) {
+    logger.error({ err: error }, 'failed to start fastify server');
+    process.exit(1);
+  }
 
   const shutdown = async (): Promise<void> => {
     logger.info('shutting down');
-    server.close();
+    await app.close();
     await services.close();
     process.exit(0);
   };

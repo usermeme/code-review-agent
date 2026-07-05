@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import express, { type Express, type Request, type RequestHandler, type Response } from 'express';
+import fastify, { type FastifyInstance } from 'fastify';
 import { getRepoInstallationId } from '../github/app-auth.js';
 import { logger } from '../util/logger.js';
 import type { Services } from '../wiring.js';
@@ -13,75 +13,85 @@ export function bearerMatches(header: string | undefined, token: string): boolea
   return got.length === expected.length && timingSafeEqual(got, expected);
 }
 
-/** Express 4 drops rejected promises from async handlers; route them to next(). */
-function asyncHandler(fn: (req: Request, res: Response) => Promise<void>): RequestHandler {
-  return (req, res, next) => {
-    fn(req, res).catch(next);
-  };
-}
-
-export function createApp(services: Services): Express {
+export function createApp(services: Services): FastifyInstance {
   const router = new WebhookRouter(services);
-  const app = express();
+  const app = fastify({ logger: false });
 
-  app.get('/healthz', (_req, res) => {
-    res.json({ ok: true });
+  // Custom parser to keep rawBody string for GitHub signature verification
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    try {
+      (req as any).rawBody = body;
+      const json = JSON.parse(body as string);
+      done(null, json);
+    } catch (err: any) {
+      err.statusCode = 400;
+      done(err, undefined);
+    }
   });
 
-  // Raw body capture: the HMAC must run over the exact bytes GitHub sent.
-  app.post(
-    '/webhook',
-    express.raw({ type: '*/*', limit: '25mb' }),
-    asyncHandler(async (req, res) => {
-      const signature = req.header('x-hub-signature-256') ?? '';
-      const eventName = req.header('x-github-event') ?? '';
-      const rawBody = (req.body as Buffer).toString('utf8');
+  app.get('/healthz', async () => {
+    return { ok: true };
+  });
 
-      if (!signature || !(await router.verify(rawBody, signature))) {
-        res.status(401).json({ error: 'invalid signature' });
-        return;
-      }
+  app.post('/webhook', async (req, reply) => {
+    const signatureHeader = req.headers['x-hub-signature-256'];
+    const eventNameHeader = req.headers['x-github-event'];
 
-      res.status(202).json({ ok: true });
-      try {
-        router.route(eventName, JSON.parse(rawBody) as WebhookPayload);
-      } catch (error) {
-        logger.error({ event: eventName, err: error }, 'webhook routing failed');
-      }
-    }),
-  );
+    const signature = (Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader) ?? '';
+    const eventName = (Array.isArray(eventNameHeader) ? eventNameHeader[0] : eventNameHeader) ?? '';
+    const rawBody = (req as any).rawBody ?? '';
 
-  app.post(
-    '/admin/backfill/:owner/:repo',
-    express.json(),
-    asyncHandler(async (req, res) => {
-      // Fail closed: an unset ADMIN_TOKEN must not leave this endpoint open.
-      // The service is publicly reachable (it also serves GitHub webhooks),
-      // and backfill drives heavy GitHub/embedding work for any installed repo.
-      const adminToken = process.env['ADMIN_TOKEN'];
-      if (!adminToken) {
-        logger.warn('rejecting /admin/backfill: ADMIN_TOKEN is not configured');
-        res.status(503).json({ error: 'admin endpoint disabled: ADMIN_TOKEN not configured' });
-        return;
+    if (!signature || !(await router.verify(rawBody, signature))) {
+      reply.status(401);
+      return { error: 'invalid signature' };
+    }
+
+    reply.status(202);
+    // Send early reply to GitHub and close connection, then route in the background
+    void reply.send({ ok: true });
+
+    try {
+      router.route(eventName, req.body as WebhookPayload);
+    } catch (error) {
+      logger.error({ event: eventName, err: error }, 'webhook routing failed');
+    }
+  });
+
+  app.post('/admin/backfill/:owner/:repo', async (req, reply) => {
+    const adminToken = process.env['ADMIN_TOKEN'];
+    if (!adminToken) {
+      logger.warn('rejecting /admin/backfill: ADMIN_TOKEN is not configured');
+      reply.status(503);
+      return { error: 'admin endpoint disabled: ADMIN_TOKEN not configured' };
+    }
+
+    const authHeader = req.headers['authorization'];
+    const auth = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+
+    if (!bearerMatches(auth, adminToken)) {
+      reply.status(401);
+      return { error: 'unauthorized' };
+    }
+
+    const { owner, repo } = req.params as { owner: string; repo: string };
+    const body = req.body as { installationId?: number } | undefined;
+
+    try {
+      const installationId = Number(body?.installationId) || (await getRepoInstallationId(services.app, owner, repo));
+      reply.status(202);
+      void reply.send({ started: true });
+
+      void backfillRepo(services, { installationId, owner, repo }).catch((error: unknown) =>
+        logger.error({ owner, repo, err: error }, 'backfill failed'),
+      );
+    } catch (error) {
+      logger.error({ owner, repo, err: error }, 'backfill start failed');
+      if (!reply.sent) {
+        reply.status(500);
+        return { error: 'backfill failed to start' };
       }
-      if (!bearerMatches(req.header('authorization'), adminToken)) {
-        res.status(401).json({ error: 'unauthorized' });
-        return;
-      }
-      const { owner, repo } = req.params as { owner: string; repo: string };
-      const body = req.body as { installationId?: number } | undefined;
-      try {
-        const installationId = Number(body?.installationId) || (await getRepoInstallationId(services.app, owner, repo));
-        res.status(202).json({ started: true });
-        void backfillRepo(services, { installationId, owner, repo }).catch((error: unknown) =>
-          logger.error({ owner, repo, err: error }, 'backfill failed'),
-        );
-      } catch (error) {
-        logger.error({ owner, repo, err: error }, 'backfill start failed');
-        if (!res.headersSent) res.status(500).json({ error: 'backfill failed to start' });
-      }
-    }),
-  );
+    }
+  });
 
   return app;
 }
