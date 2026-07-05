@@ -36,21 +36,27 @@ export function flattenAdf(node: AdfNode | undefined): string {
   }
 }
 
+const JIRA_TICKET_ID_REGEX = /\b([A-Z][A-Z0-9]+-\d+)\b/g;
+
 export class JiraProvider implements TicketProvider {
   readonly name = 'jira' as const;
+  private readonly urlPattern?: RegExp;
 
-  constructor(private readonly cfg: JiraConfig) {}
+  constructor(private readonly cfg: JiraConfig) {
+    if (cfg.baseUrl) {
+      const host = cfg.baseUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      this.urlPattern = new RegExp(`${host.replace(/\./g, '\\.')}/browse/([A-Z][A-Z0-9]+-\\d+)`, 'g');
+    }
+  }
 
   extractRefs(text: string): string[] {
     const refs = new Set<string>();
-    for (const match of text.matchAll(/\b([A-Z][A-Z0-9]+-\d+)\b/g)) {
+    for (const match of text.matchAll(JIRA_TICKET_ID_REGEX)) {
       refs.add(match[1]!);
     }
     // Also catch full browse URLs on the configured host.
-    if (this.cfg.baseUrl) {
-      const host = this.cfg.baseUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
-      const urlPattern = new RegExp(`${host.replace(/\./g, '\\.')}/browse/([A-Z][A-Z0-9]+-\\d+)`, 'g');
-      for (const match of text.matchAll(urlPattern)) refs.add(match[1]!);
+    if (this.urlPattern) {
+      for (const match of text.matchAll(this.urlPattern)) refs.add(match[1]!);
     }
     return [...refs];
   }
@@ -59,7 +65,7 @@ export class JiraProvider implements TicketProvider {
     const base = this.cfg.baseUrl.replace(/\/$/, '');
     const response = await fetch(`${base}/rest/api/3/issue/${ref}?fields=summary,description,subtasks,status`, {
       headers: {
-        Authorization: 'Basic ' + Buffer.from(`${this.cfg.email}:${this.cfg.apiToken}`).toString('base64'),
+        Authorization: 'Basic ' + btoa(`${this.cfg.email}:${this.cfg.apiToken}`),
         Accept: 'application/json',
       },
     });
@@ -88,7 +94,7 @@ export class JiraProvider implements TicketProvider {
       // Jira has no first-class AC field on every project; extract checklist-style lines.
       acceptanceCriteria: description
         .split('\n')
-        .filter((line) => /^- /.test(line.trim()))
+        .filter((line) => line.trim().startsWith('- '))
         .map((line) => line.trim().slice(2)),
       subtasks: (issue.fields.subtasks ?? []).map((subtask) => ({
         title: subtask.fields?.summary ?? '',

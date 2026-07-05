@@ -5,6 +5,9 @@ interface ClickUpConfig {
   apiToken: string;
 }
 
+const CLICKUP_URL_REGEX = /app\.clickup\.com\/t\/([a-z0-9]+)/gi;
+const CLICKUP_ID_REGEX = /#(?:CU-)?([a-z0-9]{6,})\b/gi;
+
 export class ClickUpProvider implements TicketProvider {
   readonly name = 'clickup' as const;
 
@@ -12,10 +15,10 @@ export class ClickUpProvider implements TicketProvider {
 
   extractRefs(text: string): string[] {
     const refs = new Set<string>();
-    for (const match of text.matchAll(/app\.clickup\.com\/t\/([a-z0-9]+)/gi)) {
+    for (const match of text.matchAll(CLICKUP_URL_REGEX)) {
       refs.add(match[1]!);
     }
-    for (const match of text.matchAll(/#(?:CU-)?([a-z0-9]{6,})\b/gi)) {
+    for (const match of text.matchAll(CLICKUP_ID_REGEX)) {
       refs.add(match[1]!.toLowerCase());
     }
     return [...refs];

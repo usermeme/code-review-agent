@@ -5,7 +5,7 @@ import PQueue from 'p-queue';
 import { z } from 'zod';
 import { renderWithLineNumbers } from '../../context/changed-files.service.js';
 import { annotateDiff } from '../../../integrations/github/diff.service.js';
-import type { PrFile } from '../../../integrations/github/pr.service.js';
+import type { PrDiff } from '../../../integrations/vcs/types/vcs.types.js';
 import { generateJson } from '../../../integrations/model/generate.service.js';
 import { logger } from '../../../core/logger/logger.service.js';
 import { resolveInsideCheckout } from '../../../common/utils/safe-path.util.js';
@@ -61,7 +61,7 @@ export interface VerifyParams {
   llm: BaseLlm;
   checkoutDir: string;
   findings: Finding[];
-  files: PrFile[];
+  files: PrDiff[];
   concurrency: number;
 }
 
@@ -129,24 +129,26 @@ async function verifyOne(
   );
   const excerpt = renderWithLineNumbers(lines, { start, end });
 
+  const findingPayload: Record<string, unknown> = {
+    title: finding.title,
+    severity: finding.severity,
+    path: finding.path,
+    startLine: finding.startLine,
+    endLine: finding.endLine,
+    body: finding.body,
+  };
+  if (finding.suggestion) {
+    findingPayload.suggestion = finding.suggestion;
+  }
+
+  const patchContext = patch
+    ? `What this PR changed in ${finding.path} (NEW-side line numbers prefixed):\n${annotateDiff(patch)}`
+    : `(No patch available for ${finding.path} in this PR.)`;
+
   const prompt = [
     'Finding under review:',
-    JSON.stringify(
-      {
-        title: finding.title,
-        severity: finding.severity,
-        path: finding.path,
-        startLine: finding.startLine,
-        endLine: finding.endLine,
-        body: finding.body,
-        ...(finding.suggestion ? { suggestion: finding.suggestion } : {}),
-      },
-      null,
-      2,
-    ),
-    patch
-      ? `What this PR changed in ${finding.path} (NEW-side line numbers prefixed):\n${annotateDiff(patch)}`
-      : `(No patch available for ${finding.path} in this PR.)`,
+    JSON.stringify(findingPayload, null, 2),
+    patchContext,
     `Actual content of ${finding.path} at the PR head, around the flagged lines:\n${excerpt}`,
   ].join('\n\n');
 

@@ -25,7 +25,11 @@ export class ClaudeLlm extends BaseLlm {
   constructor(options: ClaudeLlmOptions | { model: string }) {
     super({ model: options.model });
     this.options = options;
-    this.client = 'client' in options && options.client ? options.client : new Anthropic();
+    if ('client' in options && options.client) {
+      this.client = options.client;
+    } else {
+      this.client = new Anthropic();
+    }
   }
 
   override async *generateContentAsync(

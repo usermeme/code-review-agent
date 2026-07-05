@@ -15,7 +15,10 @@ const RELEASE_IF_OWNER = 'if redis.call("get", KEYS[1]) == ARGV[1] then return r
 export async function acquireLock(redis: Redis, key: string, ttlSeconds: number): Promise<string | null> {
   const token = randomUUID();
   const result = await redis.set(key, token, 'EX', ttlSeconds, 'NX');
-  return result === 'OK' ? token : null;
+  if (result === 'OK') {
+    return token;
+  }
+  return null;
 }
 
 export async function releaseLock(redis: Redis, key: string, token: string): Promise<void> {

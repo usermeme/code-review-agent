@@ -53,9 +53,11 @@ export async function generateJson<T>(
   return result.data;
 }
 
+const FENCED_JSON_REGEX = /```(?:json)?\s*\n([\s\S]*?)\n```/;
+
 /** Extracts the first parseable JSON value from model output (raw, fenced, or embedded). */
 export function extractJson(text: string): unknown {
-  const fenced = /```(?:json)?\s*\n([\s\S]*?)\n```/.exec(text);
+  const fenced = FENCED_JSON_REGEX.exec(text);
   const candidates = [text, fenced?.[1], text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)];
   for (const candidate of candidates) {
     if (!candidate) continue;
@@ -73,7 +75,7 @@ async function collectText(llm: BaseLlm, request: LlmRequest): Promise<string> {
   for await (const response of llm.generateContentAsync(request)) {
     if (response.partial) continue;
     for (const part of response.content?.parts ?? []) {
-      if (part.text && !part.thought) text += part.text;
+      if (part.text && !('thought' in part && part.thought)) text += part.text;
     }
   }
   return text;

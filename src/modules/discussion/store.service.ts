@@ -44,16 +44,20 @@ export class DiscussionStore {
     private readonly embedder: Embedder,
   ) {}
 
+  private getConflictClause(hasProviderId: boolean): string {
+    if (hasProviderId) {
+      return 'ON CONFLICT (provider_id) DO NOTHING';
+    }
+    return `ON CONFLICT (repo, source, coalesce(pr_number, -1), coalesce(file_path, ''), md5(body))
+           WHERE provider_id IS NULL DO NOTHING`;
+  }
+
   async insert(entry: DiscussionEntry): Promise<void> {
     const body = entry.body.trim();
     if (!body) return;
     // Rows without a provider id (bot findings) dedupe on content via the
     // partial unique index — a NULL provider_id never conflicts with anything.
-    const onConflict =
-      entry.providerId != null
-        ? 'ON CONFLICT (provider_id) DO NOTHING'
-        : `ON CONFLICT (repo, source, coalesce(pr_number, -1), coalesce(file_path, ''), md5(body))
-           WHERE provider_id IS NULL DO NOTHING`;
+    const onConflict = this.getConflictClause(entry.providerId != null);
     const [embedding] = await this.embedder.embed([body.slice(0, 8000)]);
     await this.pool.query(
       `INSERT INTO discussions (repo, pr_number, source, author, file_path, body, provider_id, platform_installation_id, created_at, embedding)
@@ -67,7 +71,7 @@ export class DiscussionStore {
         entry.filePath ?? null,
         body,
         entry.providerId ?? null,
-        entry.platformInstallationId ? Number(entry.platformInstallationId) : null,
+        entry.platformInstallationId ?? null,
         entry.createdAt,
         toVectorLiteral(embedding!),
       ],

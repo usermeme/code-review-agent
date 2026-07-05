@@ -5,7 +5,7 @@ import { BaseLlm, type LlmRequest, type LlmResponse } from '@google/adk';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Finding } from '../schemas/review.schema.js';
 import { verifyFindings } from './verifier.agent.js';
-import type { PrFile } from '../../../integrations/github/pr.service.js';
+import type { PrDiff } from '../../../integrations/vcs/types/vcs.types.js';
 
 /** Answers each verification call by matching the finding title in the prompt. */
 class FakeLlm extends BaseLlm {
@@ -40,7 +40,7 @@ function finding(overrides: Partial<Finding>): Finding {
   };
 }
 
-const FILES: PrFile[] = [
+const FILES: PrDiff[] = [
   {
     filename: 'src/a.ts',
     status: 'modified',

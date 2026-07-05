@@ -13,6 +13,11 @@ const instruction =
     const changedFiles = ctx.state.get<string>(STATE.changedFiles) ?? '';
     const architecture = ctx.state.get<string>(STATE.ctxArchitecture) ?? '(repo context not loaded)';
     const errorHandling = ctx.state.get<string>(STATE.ctxErrorHandling) ?? '';
+
+    const changedFilesContext = changedFiles
+      ? `\nFull content of the changed files (left column = 1-based line numbers; large files show windowed\nregions around the changes). Use this to check the surrounding code before asserting a finding —\nmost false positives come from judging a hunk in isolation:\n${changedFiles}\n`
+      : '';
+
     return `You hunt for real defects in a pull request. Report only problems, not style.
 
 Look for: logic bugs; race conditions and other concurrency hazards; performance regressions
@@ -35,16 +40,7 @@ ${errorHandling}
 Pull request diff (annotated: the left column is the NEW-side line number — use exactly those
 numbers for startLine/endLine):
 ${diff}
-${
-  changedFiles
-    ? `
-Full content of the changed files (left column = 1-based line numbers; large files show windowed
-regions around the changes). Use this to check the surrounding code before asserting a finding —
-most false positives come from judging a hunk in isolation:
-${changedFiles}
-`
-    : ''
-}
+${changedFilesContext}
 Report uncertain findings too, with an honest "confidence" value — a downstream orchestrator filters
 and deduplicates. Respond with JSON only.`;
   };

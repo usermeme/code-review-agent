@@ -54,7 +54,10 @@ export async function runReview(deps: ReviewDeps, request: ReviewRequest): Promi
   ]);
 
   // Fallback for PR diff: join patch fields
-  const prDiffString = files.map(f => f.patch).join('\n');
+  const prDiffString = files
+    .filter(f => f.patch)
+    .map(f => `diff --git a/${f.previousFilename || f.filename} b/${f.filename}\n--- a/${f.previousFilename || f.filename}\n+++ b/${f.filename}\n${f.patch}`)
+    .join('\n');
 
   const tickets = await fetchLinkedTickets(deps.ticketProviders, [pr.title, pr.body, pr.headSha].join('\n'));
   
@@ -134,18 +137,22 @@ export async function runReview(deps: ReviewDeps, request: ReviewRequest): Promi
       }
     }
 
-    // const unanchored = plan.findings.map(f => ({ path: f.path, line: f.endLine, body: `**[${f.severity}] ${f.title}**\n\n${f.body}${f.suggestion ? `\n\n\`\`\`suggestion\n${f.suggestion}\n\`\`\`` : ''}` }));
-    
-    // Note: the github specific review publisher was handling splitFindings. 
-    // Now we rely on the CodeReviewPublisher.
-    // For now we just pass comments.
-    const comments = plan.findings.map(f => ({
-      path: f.path,
-      line: f.endLine,
-      body: `**[${f.severity}] ${f.title}**\n\n${f.body}${f.suggestion ? `\n\n\`\`\`suggestion\n${f.suggestion}\n\`\`\`` : ''}`
-    }));
+    const comments = plan.findings.map(f => {
+      let body = `**[${f.severity}] ${f.title}**\n\n${f.body}`;
+      if (f.suggestion) {
+        body += `\n\n\`\`\`suggestion\n${f.suggestion}\n\`\`\``;
+      }
+      return {
+        path: f.path,
+        line: f.endLine,
+        body
+      };
+    });
 
-    const generalSummary = plan.summary + (plan.ticketCoverage ? `\n\n### Ticket coverage\n${plan.ticketCoverage}` : '');
+    let generalSummary = plan.summary;
+    if (plan.ticketCoverage) {
+      generalSummary += `\n\n### Ticket coverage\n${plan.ticketCoverage}`;
+    }
 
     await publisher.publishReview(
       request.repo,
@@ -171,7 +178,9 @@ export async function runReview(deps: ReviewDeps, request: ReviewRequest): Promi
 }
 
 function severityRank(severity: string): number {
-  return severity === 'critical' ? 0 : severity === 'major' ? 1 : 2;
+  if (severity === 'critical') return 0;
+  if (severity === 'major') return 1;
+  return 2;
 }
 
 async function checkoutPrHead(cloneUrl: string, branchOrSha: string, token: string, repoFull: string, prNumber: number): Promise<ClonedRepo | null> {

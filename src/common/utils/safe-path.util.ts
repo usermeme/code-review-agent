@@ -13,12 +13,27 @@ import { resolve, sep } from 'node:path';
  * unreadable-file handling applies.
  */
 export async function resolveInsideCheckout(dir: string, relPath: string): Promise<string | null> {
-  const lexical = resolve(dir, relPath);
-  if (lexical !== dir && !lexical.startsWith(dir + sep)) return null;
+  const resolvedPath = resolve(dir, relPath);
+  if (resolvedPath !== dir && !resolvedPath.startsWith(dir + sep)) {
+    return null;
+  }
+
+  let realDirPath: string;
   try {
-    const [real, realDir] = await Promise.all([realpath(lexical), realpath(dir)]);
-    return real === realDir || real.startsWith(realDir + sep) ? real : null;
+    realDirPath = await realpath(dir);
   } catch {
-    return lexical;
+    return null;
+  }
+
+  try {
+    const realPath = await realpath(resolvedPath);
+    const isInsideCheckout = realPath === realDirPath || realPath.startsWith(realDirPath + sep);
+    if (isInsideCheckout) {
+      return realPath;
+    }
+    
+    return null;
+  } catch {
+    return resolvedPath;
   }
 }

@@ -1,6 +1,6 @@
 import type { Octokit } from 'octokit';
 import type { PlatformClient } from '../vcs/interfaces/vcs-client.interface.js';
-import type { RepositoryIdentifier, PullRequestDetails, PrDiff } from '../vcs/types/vcs.types.js';
+import type { RepositoryIdentifier, PullRequestDetails, PrDiff, HistoricalDiscussion, FileChangeStatus } from '../vcs/types/vcs.types.js';
 
 export class GithubClient implements PlatformClient {
   constructor(private readonly octokit: Octokit, private readonly installationToken: string) {}
@@ -17,13 +17,19 @@ export class GithubClient implements PlatformClient {
       number: pr.number,
       title: pr.title,
       body: pr.body ?? '',
-      state: pr.merged ? 'merged' : pr.state === 'closed' ? 'closed' : 'open',
-      isDraft: !!pr.draft,
+      state: this.determinePrState(pr.merged, pr.state),
+      isDraft: Boolean(pr.draft),
       baseSha: pr.base.sha,
       headSha: pr.head.sha,
       authorUsername: pr.user?.login ?? 'unknown',
       url: pr.html_url,
     };
+  }
+
+  private determinePrState(isMerged: boolean, githubState: string): PullRequestDetails['state'] {
+    if (isMerged) return 'merged';
+    if (githubState === 'closed') return 'closed';
+    return 'open';
   }
 
   async getPrFiles(repo: RepositoryIdentifier, prNumber: number): Promise<PrDiff[]> {
@@ -34,14 +40,18 @@ export class GithubClient implements PlatformClient {
       per_page: 100,
     });
 
-    return files.map((f) => ({
-      filename: f.filename,
-      previousFilename: f.previous_filename,
-      status: (f.status === 'removed' ? 'deleted' : f.status) as import('../vcs/types/vcs.types.js').FileChangeStatus,
-      patch: f.patch ?? '',
-      additions: f.additions,
-      deletions: f.deletions,
-    }));
+    return files.map((file) => {
+      const mappedStatus = file.status === 'removed' ? 'deleted' : file.status;
+
+      return {
+        filename: file.filename,
+        previousFilename: file.previous_filename,
+        status: mappedStatus as FileChangeStatus,
+        patch: file.patch ?? '',
+        additions: file.additions,
+        deletions: file.deletions,
+      };
+    });
   }
 
   async getIssue(repo: RepositoryIdentifier, issueNumber: number): Promise<unknown> {
@@ -53,12 +63,18 @@ export class GithubClient implements PlatformClient {
     return data;
   }
 
-  async *getHistoricalDiscussions(repo: RepositoryIdentifier): AsyncIterableIterator<import('../vcs/types/vcs.types.js').HistoricalDiscussion> {
+  async *getHistoricalDiscussions(repo: RepositoryIdentifier): AsyncIterableIterator<HistoricalDiscussion> {
+    yield* this.fetchIssueComments(repo);
+    yield* this.fetchReviewComments(repo);
+  }
+
+  private async *fetchIssueComments(repo: RepositoryIdentifier): AsyncIterableIterator<HistoricalDiscussion> {
     const issueComments = this.octokit.paginate.iterator(this.octokit.rest.issues.listCommentsForRepo, {
       owner: repo.owner,
       repo: repo.name,
       per_page: 100,
     });
+
     for await (const { data } of issueComments) {
       for (const comment of data) {
         if (comment.user?.type === 'Bot') continue;
@@ -77,12 +93,15 @@ export class GithubClient implements PlatformClient {
         };
       }
     }
+  }
 
+  private async *fetchReviewComments(repo: RepositoryIdentifier): AsyncIterableIterator<HistoricalDiscussion> {
     const reviewComments = this.octokit.paginate.iterator(this.octokit.rest.pulls.listReviewCommentsForRepo, {
       owner: repo.owner,
       repo: repo.name,
       per_page: 100,
     });
+
     for await (const { data } of reviewComments) {
       for (const comment of data) {
         if (comment.user?.type === 'Bot') continue;

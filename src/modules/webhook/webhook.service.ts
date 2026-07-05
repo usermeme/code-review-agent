@@ -3,22 +3,21 @@ import { runReview } from '../review/review.service.js';
 import type { DiscussionEntry } from '../discussion/store.service.js';
 import { logger } from '../../core/logger/logger.service.js';
 import type { Services } from '../../wiring.js';
-import { acquireReviewLock, releaseReviewLock } from "../review/review-lock.service.js";
+import { acquireReviewLock, releaseReviewLock } from '../review/review-lock.service.js';
 import type { WebhookRequest, NormalizedWebhookEvent } from '../../integrations/vcs/interfaces/webhook-adapter.interface.js';
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function patternToRegExp(pattern: string): RegExp {
+  const regexString = '^' + pattern.split('*').map(escapeRegExp).join('[^/]*') + '$';
+  return new RegExp(regexString);
+}
 
 export function repoAllowed(fullName: string, allowlist: string[]): boolean {
   if (allowlist.length === 0) return true;
-  return allowlist.some((pattern) => {
-    const regex = new RegExp(
-      '^' +
-        pattern
-          .split('*')
-          .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-          .join('[^/]*') +
-        '$',
-    );
-    return regex.test(fullName);
-  });
+  return allowlist.some((pattern) => patternToRegExp(pattern).test(fullName));
 }
 
 export class WebhookRouter {
@@ -28,11 +27,19 @@ export class WebhookRouter {
     this.queue = new PQueue({ concurrency: services.cfg.server.concurrency });
   }
 
+  private getWebhookSecret(providerId: string): string {
+    const providersConfig = this.services.cfg.providers as Record<string, { webhookSecret?: string }>;
+    const secret = providersConfig[providerId]?.webhookSecret;
+    if (!secret) {
+      throw new Error(`webhook secret not configured for provider ${providerId}`);
+    }
+    return secret;
+  }
+
   async handle(req: WebhookRequest): Promise<boolean> {
     for (const adapter of this.services.webhookAdapters) {
       if (adapter.canHandle(req)) {
-        const secret = (this.services.cfg.providers as Record<string, { webhookSecret?: string }>)?.[adapter.providerId]?.webhookSecret;
-        if (!secret) throw new Error(`webhook secret not configured for provider ${adapter.providerId}`);
+        const secret = this.getWebhookSecret(adapter.providerId);
         if (!(await adapter.verifySignature(req, secret))) {
           throw new Error('invalid signature');
         }

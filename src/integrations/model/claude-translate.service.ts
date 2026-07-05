@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { FinishReason, type Content, type ContentUnion, type Part, type Schema } from '@google/genai';
+import type { FinishReason, Content, Part, Schema } from '@google/genai';
 import type { LlmRequest, LlmResponse } from '@google/adk';
 
 /**
@@ -33,17 +33,61 @@ export function genaiSchemaToJsonSchema(schema: Schema): Record<string, unknown>
   return out;
 }
 
-function systemText(systemInstruction: ContentUnion | undefined): string | undefined {
+function systemText(systemInstruction: unknown): string | undefined {
   if (!systemInstruction) return undefined;
   if (typeof systemInstruction === 'string') return systemInstruction;
-  const parts: Part[] = Array.isArray(systemInstruction)
-    ? systemInstruction.map((p) => (typeof p === 'string' ? { text: p } : p))
-    : ((systemInstruction as Content).parts ?? []);
+  let parts: Part[];
+  if (Array.isArray(systemInstruction)) {
+    parts = systemInstruction.map((p: unknown) => (typeof p === 'string' ? { text: p } : (p as Part)));
+  } else {
+    parts = (systemInstruction as Content).parts ?? [];
+  }
   const text = parts
     .map((p) => p.text ?? '')
     .filter(Boolean)
     .join('\n');
   return text || undefined;
+}
+
+function processContentPart(
+  part: Part,
+  pendingIdsByName: Map<string, string[]>,
+  getId: () => string,
+): Anthropic.ContentBlockParam | undefined {
+  if ('thought' in part && part.thought) return undefined;
+  if (part.text !== undefined && part.text !== '') {
+    return { type: 'text', text: part.text };
+  }
+  if (part.functionCall) {
+    const name = part.functionCall.name ?? 'unknown_tool';
+    const id = part.functionCall.id ?? getId();
+    const queue = pendingIdsByName.get(name) ?? [];
+    queue.push(id);
+    pendingIdsByName.set(name, queue);
+    return {
+      type: 'tool_use',
+      id,
+      name,
+      input: part.functionCall.args ?? {},
+    };
+  }
+  if (part.functionResponse) {
+    const name = part.functionResponse.name ?? 'unknown_tool';
+    const id = part.functionResponse.id ?? pendingIdsByName.get(name)?.shift();
+    if (part.functionResponse.id) {
+      const queue = pendingIdsByName.get(name);
+      if (queue) {
+        const idx = queue.indexOf(part.functionResponse.id);
+        if (idx >= 0) queue.splice(idx, 1);
+      }
+    }
+    return {
+      type: 'tool_result',
+      tool_use_id: id ?? getId(),
+      content: JSON.stringify(part.functionResponse.response ?? {}),
+    };
+  }
+  return undefined;
 }
 
 /**
@@ -56,43 +100,15 @@ export function contentsToMessages(contents: Content[]): Anthropic.MessageParam[
   const messages: Anthropic.MessageParam[] = [];
   const pendingIdsByName = new Map<string, string[]>();
   let generated = 0;
+  const getId = () => `toolu_gen_${generated++}`;
 
   for (const content of contents) {
     const role: 'user' | 'assistant' = content.role === 'model' ? 'assistant' : 'user';
     const blocks: Anthropic.ContentBlockParam[] = [];
 
     for (const part of content.parts ?? []) {
-      if (part.thought) continue;
-      if (part.text !== undefined && part.text !== '') {
-        blocks.push({ type: 'text', text: part.text });
-      } else if (part.functionCall) {
-        const name = part.functionCall.name ?? 'unknown_tool';
-        const id = part.functionCall.id ?? `toolu_gen_${generated++}`;
-        const queue = pendingIdsByName.get(name) ?? [];
-        queue.push(id);
-        pendingIdsByName.set(name, queue);
-        blocks.push({
-          type: 'tool_use',
-          id,
-          name,
-          input: part.functionCall.args ?? {},
-        });
-      } else if (part.functionResponse) {
-        const name = part.functionResponse.name ?? 'unknown_tool';
-        const id = part.functionResponse.id ?? pendingIdsByName.get(name)?.shift();
-        if (part.functionResponse.id) {
-          const queue = pendingIdsByName.get(name);
-          if (queue) {
-            const idx = queue.indexOf(part.functionResponse.id);
-            if (idx >= 0) queue.splice(idx, 1);
-          }
-        }
-        blocks.push({
-          type: 'tool_result',
-          tool_use_id: id ?? `toolu_gen_${generated++}`,
-          content: JSON.stringify(part.functionResponse.response ?? {}),
-        });
-      }
+      const block = processContentPart(part, pendingIdsByName, getId);
+      if (block) blocks.push(block);
     }
 
     if (blocks.length === 0) continue;
@@ -147,10 +163,10 @@ export function toAnthropicRequest(
   if (tools.length > 0) request.tools = tools;
 
   if (options.thinking) {
-    request.thinking = { type: 'adaptive' };
+    (request as Anthropic.MessageCreateParamsNonStreaming & { thinking?: unknown }).thinking = { type: 'adaptive' };
   }
 
-  const outputConfig: Anthropic.OutputConfig = {};
+  const outputConfig: Record<string, unknown> = {};
   if (options.effort) outputConfig.effort = options.effort;
   // ADK sets responseSchema when the agent declares an outputSchema; map it to
   // Anthropic structured outputs so AgentTool's JSON.parse never fails.
@@ -161,17 +177,19 @@ export function toAnthropicRequest(
       schema: genaiSchemaToJsonSchema(responseSchema),
     };
   }
-  if (Object.keys(outputConfig).length > 0) request.output_config = outputConfig;
+  if (Object.keys(outputConfig).length > 0) {
+    (request as Anthropic.MessageCreateParamsNonStreaming & { output_config?: unknown }).output_config = outputConfig;
+  }
 
   return request;
 }
 
 const STOP_REASON_MAP: Record<string, FinishReason> = {
-  end_turn: FinishReason.STOP,
-  stop_sequence: FinishReason.STOP,
-  tool_use: FinishReason.STOP,
-  max_tokens: FinishReason.MAX_TOKENS,
-  refusal: FinishReason.SAFETY,
+  end_turn: 'STOP' as FinishReason,
+  stop_sequence: 'STOP' as FinishReason,
+  tool_use: 'STOP' as FinishReason,
+  max_tokens: 'MAX_TOKENS' as FinishReason,
+  refusal: 'SAFETY' as FinishReason,
 };
 
 export function fromAnthropicMessage(message: Anthropic.Message): LlmResponse {

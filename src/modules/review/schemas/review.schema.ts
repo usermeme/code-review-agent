@@ -43,9 +43,11 @@ export const reviewPlanSchema = z.object({
 });
 export type ReviewPlan = z.infer<typeof reviewPlanSchema>;
 
+const JSON_FENCE_REGEX = /```(?:json)?\s*\n([\s\S]*?)\n```/;
+
 /** Extracts and validates the ReviewPlan JSON from the orchestrator's final text. */
 export function parseReviewPlan(text: string): ReviewPlan | null {
-  const fenced = /```(?:json)?\s*\n([\s\S]*?)\n```/.exec(text);
+  const fenced = JSON_FENCE_REGEX.exec(text);
   const candidates = [fenced?.[1], text, text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)];
   for (const candidate of candidates) {
     if (!candidate) continue;

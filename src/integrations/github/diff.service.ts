@@ -6,33 +6,46 @@
  * anchorableLines in review-publisher.ts, which decides what GitHub accepts
  * as an inline-comment anchor.
  */
-export function annotateDiff(diff: string): string {
-  const out: string[] = [];
-  let newLine = 0;
-  let inHunk = false;
+const HUNK_HEADER_REGEX = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
-  for (const row of diff.split('\n')) {
-    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(row);
-    if (hunk) {
-      newLine = Number(hunk[1]);
-      inHunk = true;
-      out.push(row);
+export function annotateDiff(diff: string): string {
+  const annotatedLines: string[] = [];
+  let currentNewLineNumber = 0;
+  let isInsideHunk = false;
+
+  for (const line of diff.split('\n')) {
+    const hunkHeaderMatch = HUNK_HEADER_REGEX.exec(line);
+    
+    if (hunkHeaderMatch) {
+      currentNewLineNumber = Number(hunkHeaderMatch[1]);
+      isInsideHunk = true;
+      annotatedLines.push(line);
       continue;
     }
-    if (row.startsWith('diff ')) inHunk = false;
-    if (!inHunk) {
-      out.push(row);
+
+    if (line.startsWith('diff ')) {
+      isInsideHunk = false;
+    }
+
+    if (!isInsideHunk) {
+      annotatedLines.push(line);
       continue;
     }
-    if (row.startsWith('+') || row.startsWith(' ')) {
-      out.push(`${String(newLine).padStart(5)} | ${row}`);
-      newLine++;
+
+    const isAdditionOrContext = line.startsWith('+') || line.startsWith(' ');
+    
+    if (isAdditionOrContext) {
+      const paddedLineNumber = String(currentNewLineNumber).padStart(5);
+      annotatedLines.push(`${paddedLineNumber} | ${line}`);
+      currentNewLineNumber++;
     } else {
-      // '-' lines and '\ No newline at end of file' have no new-side number.
-      out.push(`      | ${row}`);
+      // Removed lines ('-') and special markers like '\ No newline at end of file'
+      // do not correspond to a line number on the new side of the diff.
+      annotatedLines.push(`      | ${line}`);
     }
   }
-  return out.join('\n');
+  
+  return annotatedLines.join('\n');
 }
 
 export interface LineRange {
@@ -40,13 +53,25 @@ export interface LineRange {
   end: number;
 }
 
+const HUNK_HEADER_GLOBAL_REGEX = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
+
 /** NEW-side line ranges covered by the hunks of a single-file patch. */
 export function newSideHunkRanges(patch: string): LineRange[] {
   const ranges: LineRange[] = [];
-  for (const match of patch.matchAll(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm)) {
-    const start = Number(match[1]);
-    const count = match[2] === undefined ? 1 : Number(match[2]);
-    if (count > 0) ranges.push({ start, end: start + count - 1 });
+  
+  for (const match of patch.matchAll(HUNK_HEADER_GLOBAL_REGEX)) {
+    const startLine = Number(match[1]);
+    
+    // If the count (match[2]) is omitted in the header, it defaults to 1 line
+    const lineCount = match[2] === undefined ? 1 : Number(match[2]);
+    
+    if (lineCount > 0) {
+      ranges.push({ 
+        start: startLine, 
+        end: startLine + lineCount - 1 
+      });
+    }
   }
+  
   return ranges;
 }

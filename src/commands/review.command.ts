@@ -12,7 +12,7 @@ async function main(): Promise<void> {
       repo: { type: 'string' },
       pr: { type: 'string' },
       installation: { type: 'string' },
-    },
+    } as const,
   });
   const [owner, repo] = (values.repo ?? '').split('/');
   const prNumber = Number(values.pr);
@@ -23,9 +23,12 @@ async function main(): Promise<void> {
 
   const services = await buildServices(loadConfig());
   try {
-    const installationId = values.installation
-      ? Number(values.installation)
-      : await getRepoInstallationId(services.app, owner, repo);
+    let installationId: number;
+    if (values.installation) {
+      installationId = Number(values.installation);
+    } else {
+      installationId = await getRepoInstallationId(services.app, owner, repo);
+    }
     await runReview(services.reviewDeps, {
       providerId: 'github',
       installationId: String(installationId),

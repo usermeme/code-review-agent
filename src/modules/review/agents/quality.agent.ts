@@ -14,6 +14,11 @@ const instruction =
     const patterns = ctx.state.get<string>(STATE.ctxPatterns) ?? '(repo context not loaded)';
     const agentDocs = ctx.state.get<string>(STATE.ctxAgentDocs) ?? '';
     const modules = ctx.state.get<string>(STATE.ctxModules) ?? '';
+
+    const changedFilesContext = changedFiles
+      ? `\nFull content of the changed files (left column = 1-based line numbers; large files show windowed\nregions around the changes). Judge structure and duplication against the whole file, not the hunk:\n${changedFiles}\n`
+      : '';
+
     return `You review a pull request for code quality against THIS repository's established conventions.
 
 Look for: antipatterns and code smells (duplication, god functions, dead code, leaky abstractions);
@@ -38,15 +43,7 @@ ${modules}
 Pull request diff (annotated: the left column is the NEW-side line number — use exactly those
 numbers for startLine/endLine):
 ${diff}
-${
-  changedFiles
-    ? `
-Full content of the changed files (left column = 1-based line numbers; large files show windowed
-regions around the changes). Judge structure and duplication against the whole file, not the hunk:
-${changedFiles}
-`
-    : ''
-}
+${changedFilesContext}
 Do not report defects/bugs — a separate agent covers those. Respond with JSON only.`;
   };
 

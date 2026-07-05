@@ -28,30 +28,31 @@ export class GithubWebhookAdapter implements WebhookAdapter {
     return webhooks.verify(req.rawBody, signature);
   }
 
+  private mapEventType(eventName: string, action?: string): NormalizedEventType | null {
+    switch (eventName) {
+      case 'pull_request':
+        if (action === 'opened' || action === 'ready_for_review') return 'pull_request_opened';
+        if (action === 'closed') return 'pull_request_closed';
+        if (action === 'synchronize') return 'pull_request_updated';
+        return null;
+      case 'issue_comment':
+        return 'issue_comment';
+      case 'pull_request_review':
+        return 'pull_request_review';
+      case 'pull_request_review_comment':
+        return 'pull_request_review_comment';
+      default:
+        return null;
+    }
+  }
+
   parseEvent(req: WebhookRequest): NormalizedWebhookEvent | null {
     const eventName = req.headers['x-github-event'];
+    if (!eventName || typeof eventName !== 'string') return null;
+
     const payload = req.body as GithubPayload;
     
-    let eventType: NormalizedEventType | null = null;
-    const prNumber = payload.pull_request?.number;
-    const issueNumber = payload.issue?.number;
-
-    if (eventName === 'pull_request') {
-      if (payload.action === 'opened' || payload.action === 'ready_for_review') {
-        eventType = 'pull_request_opened';
-      } else if (payload.action === 'closed') {
-        eventType = 'pull_request_closed';
-      } else if (payload.action === 'synchronize') {
-        eventType = 'pull_request_updated';
-      }
-    } else if (eventName === 'issue_comment') {
-      eventType = 'issue_comment';
-    } else if (eventName === 'pull_request_review') {
-      eventType = 'pull_request_review';
-    } else if (eventName === 'pull_request_review_comment') {
-      eventType = 'pull_request_review_comment';
-    }
-
+    const eventType = this.mapEventType(eventName, payload.action);
     if (!eventType || !payload.repository?.full_name || !payload.installation?.id) {
       return null;
     }
@@ -65,22 +66,27 @@ export class GithubWebhookAdapter implements WebhookAdapter {
       name,
     };
 
+    const commentOrReviewBody = payload.comment?.body ?? payload.review?.body ?? undefined;
+    const authorLogin = payload.comment?.user?.login ?? payload.review?.user?.login;
+    const commentId = payload.comment?.id ?? payload.review?.id;
+    const timestamp = payload.comment?.created_at ?? payload.review?.submitted_at;
+
     return {
       provider: this.providerId,
       eventType,
       installationId: String(payload.installation.id),
       repo,
-      pullRequestNumber: prNumber,
-      issueNumber,
+      pullRequestNumber: payload.pull_request?.number,
+      issueNumber: payload.issue?.number,
       
       action: payload.action,
       isDraft: Boolean(payload.pull_request?.draft),
       isPr: Boolean(payload.issue?.pull_request),
-      body: payload.comment?.body ?? payload.review?.body ?? undefined,
-      author: payload.comment?.user?.login ?? payload.review?.user?.login,
-      providerCommentId: payload.comment?.id ? String(payload.comment.id) : (payload.review?.id ? String(payload.review.id) : undefined),
+      body: commentOrReviewBody,
+      author: authorLogin,
+      providerCommentId: commentId ? String(commentId) : undefined,
       filePath: payload.comment?.path,
-      createdAt: payload.comment?.created_at ?? payload.review?.submitted_at,
+      createdAt: timestamp,
       senderType: payload.sender?.type,
     };
   }

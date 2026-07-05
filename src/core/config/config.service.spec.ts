@@ -11,25 +11,80 @@ const MINIMAL = {
 };
 
 describe('interpolateEnv', () => {
-  it('substitutes ${VAR} recursively, missing vars become undefined (or filtered in arrays)', () => {
-    const result = interpolateEnv({ a: '${FOO}', b: '${BAR}', nested: ['${BAR}', 'plain'] }, {
-      FOO: 'foo',
-    });
-    expect(result).toEqual({ a: 'foo', b: undefined, nested: ['plain'] });
+  it('substitutes ${VAR} exactly, returning undefined if missing', () => {
+    const result = interpolateEnv({ a: '${FOO}', b: '${BAR}' }, { FOO: 'foo' });
+    expect(result).toEqual({ a: 'foo', b: undefined });
+  });
+
+  it('substitutes ${VAR} within a string, replacing with empty string if missing', () => {
+    const result = interpolateEnv({ url: 'http://${HOST}:${PORT}/api' }, { HOST: 'localhost' });
+    expect(result).toEqual({ url: 'http://localhost:/api' });
+  });
+
+  it('filters out undefined elements from arrays', () => {
+    const result = interpolateEnv(['${FOO}', 'plain', '${BAR}'], { FOO: 'foo' });
+    expect(result).toEqual(['foo', 'plain']);
+  });
+
+  it('leaves non-string primitives unchanged', () => {
+    const result = interpolateEnv({ num: 42, bool: true, nil: null, empty: '' }, {});
+    expect(result).toEqual({ num: 42, bool: true, nil: null, empty: '' });
   });
 });
 
 describe('applyEnvOverrides', () => {
-  it('sets nested keys from CRA__ variables with type coercion', () => {
+  it('sets nested keys from CRA__ variables', () => {
     const config: Record<string, unknown> = { cache: { repoContextTtlSeconds: 1 } };
     applyEnvOverrides(config, {
       CRA__cache__repoContextTtlSeconds: '3600',
-      CRA__triggers__onOpened: 'false',
       UNRELATED: 'x',
     });
     expect(config).toEqual({
       cache: { repoContextTtlSeconds: 3600 },
-      triggers: { onOpened: false },
+    });
+  });
+
+  it('parses boolean and number values correctly', () => {
+    const config: Record<string, unknown> = {};
+    applyEnvOverrides(config, {
+      CRA__isTrue: 'true',
+      CRA__isFalse: 'false',
+      CRA__count: '42',
+      CRA__zero: '0',
+      CRA__text: 'hello',
+    });
+    expect(config).toEqual({
+      isTrue: true,
+      isFalse: false,
+      count: 42,
+      zero: 0,
+      text: 'hello',
+    });
+  });
+
+  it('creates nested objects if they do not exist', () => {
+    const config: Record<string, unknown> = { existing: { keep: true } };
+    applyEnvOverrides(config, {
+      CRA__existing__newKey: 'val',
+      CRA__newRoot__newLeaf: 'val',
+    });
+    expect(config).toEqual({
+      existing: { keep: true, newKey: 'val' },
+      newRoot: { newLeaf: 'val' },
+    });
+  });
+
+  it('ignores empty values or variables not starting with prefix', () => {
+    const config: Record<string, unknown> = { existing: true };
+    applyEnvOverrides(config, {
+      CRA__emptyString: '',
+      CRA__undefinedVar: undefined,
+      OTHER__var: '123',
+    });
+    // empty string is still processed as a string if it's not undefined in env
+    expect(config).toEqual({
+      existing: true,
+      emptyString: '',
     });
   });
 });

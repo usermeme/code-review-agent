@@ -8,44 +8,53 @@ const ENV_OVERRIDE_PREFIX = 'CRA__';
 /** Replaces `${VAR}` placeholders with values from the environment. */
 export function interpolateEnv(value: unknown, env: NodeJS.ProcessEnv = process.env): unknown {
   if (typeof value === 'string') {
-    const match = value.match(/^\$\{(\w+)\}$/);
-    if (match) {
-      const name = match[1]!;
-      const envVal = env[name];
-      return envVal !== undefined && envVal !== '' ? envVal : undefined;
+    const exactMatch = value.match(/^\$\{(\w+)\}$/);
+    if (exactMatch) {
+      const envVal = env[exactMatch[1]!];
+      return envVal ? envVal : undefined;
     }
     return value.replace(/\$\{(\w+)\}/g, (_, name: string) => env[name] ?? '');
   }
+
   if (Array.isArray(value)) {
-    return value.map((v) => interpolateEnv(v, env)).filter((v) => v !== undefined);
+    return value
+      .map((item) => interpolateEnv(item, env))
+      .filter((item) => item !== undefined);
   }
+
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, interpolateEnv(v, env)]),
     );
   }
+
   return value;
 }
 
+const parseEnvValue = (value: string): unknown => {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (value !== '' && !Number.isNaN(Number(value))) return Number(value);
+  return value;
+};
+
 /** Applies `CRA__models__agents__orchestrator=claude` style env overrides. */
 export function applyEnvOverrides(config: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): void {
-  for (const [key, raw] of Object.entries(env)) {
-    if (!key.startsWith(ENV_OVERRIDE_PREFIX) || raw === undefined) continue;
+  for (const [key, rawValue] of Object.entries(env)) {
+    if (!key.startsWith(ENV_OVERRIDE_PREFIX) || rawValue === undefined) continue;
+
     const path = key.slice(ENV_OVERRIDE_PREFIX.length).split('__');
-    let node: Record<string, unknown> = config;
-    for (const segment of path.slice(0, -1)) {
-      const next = node[segment];
-      if (next === null || typeof next !== 'object') {
-        node[segment] = {};
+    const leafKey = path.pop()!;
+
+    let currentNode = config;
+    for (const segment of path) {
+      if (currentNode[segment] === null || typeof currentNode[segment] !== 'object') {
+        currentNode[segment] = {};
       }
-      node = node[segment] as Record<string, unknown>;
+      currentNode = currentNode[segment] as Record<string, unknown>;
     }
-    const leaf = path[path.length - 1]!;
-    let parsed: unknown = raw;
-    if (raw === 'true') parsed = true;
-    else if (raw === 'false') parsed = false;
-    else if (raw !== '' && !Number.isNaN(Number(raw))) parsed = Number(raw);
-    node[leaf] = parsed;
+
+    currentNode[leafKey] = parseEnvValue(rawValue);
   }
 }
 

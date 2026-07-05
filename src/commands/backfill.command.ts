@@ -8,7 +8,7 @@ import { buildServices } from '../wiring.js';
 /** Ingest all historical PR discussions: npm run backfill -- --repo owner/name */
 async function main(): Promise<void> {
   const { values } = parseArgs({
-    options: { repo: { type: 'string' }, installation: { type: 'string' } },
+    options: { repo: { type: 'string' }, installation: { type: 'string' } } as const,
   });
   const [owner, repo] = (values.repo ?? '').split('/');
   if (!owner || !repo) {
@@ -18,9 +18,12 @@ async function main(): Promise<void> {
 
   const services = await buildServices(loadConfig());
   try {
-    const installationId = values.installation
-      ? Number(values.installation)
-      : await getRepoInstallationId(services.app, owner, repo);
+    let installationId: number;
+    if (values.installation) {
+      installationId = Number(values.installation);
+    } else {
+      installationId = await getRepoInstallationId(services.app, owner, repo);
+    }
     const { stored } = await backfillRepo(services, {
       providerId: 'github',
       installationId: String(installationId),

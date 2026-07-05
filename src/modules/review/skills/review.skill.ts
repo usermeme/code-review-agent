@@ -69,9 +69,11 @@ const FALLBACK_SECURITY = `# Security checklist (construct the attack input, don
 
 const cache = new Map<string, ReviewSkill>();
 
+const FRONTMATTER_REGEX = /^---\n[\s\S]*?\n---\n/;
+
 /** Removes the YAML frontmatter block — trigger metadata, not prompt material. */
 export function stripFrontmatter(markdown: string): string {
-  const match = /^---\n[\s\S]*?\n---\n/.exec(markdown);
+  const match = FRONTMATTER_REGEX.exec(markdown);
   return (match ? markdown.slice(match[0].length) : markdown).trim();
 }
 

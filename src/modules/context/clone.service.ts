@@ -17,15 +17,29 @@ export interface ClonedRepo {
  * stack, cmd), so a logged clone error would leak the installation token.
  * Scrub every string field on the error before it propagates.
  */
+function scrubString(value: unknown, token: string): unknown {
+  if (typeof value === 'string') {
+    return value.split(token).join('***');
+  }
+  return value;
+}
+
 export function redactToken(error: unknown, token: string | undefined): unknown {
-  if (!token || !(error instanceof Error)) return error;
-  const scrub = (value: unknown): unknown => (typeof value === 'string' ? value.split(token).join('***') : value);
+  if (!token || !(error instanceof Error)) {
+    return error;
+  }
+
   const e = error as Error & { cmd?: unknown; stderr?: unknown; stdout?: unknown };
-  e.message = scrub(e.message) as string;
-  if (e.stack) e.stack = scrub(e.stack) as string;
-  e.cmd = scrub(e.cmd);
-  e.stderr = scrub(e.stderr);
-  e.stdout = scrub(e.stdout);
+  e.message = scrubString(e.message, token) as string;
+
+  if (e.stack) {
+    e.stack = scrubString(e.stack, token) as string;
+  }
+
+  e.cmd = scrubString(e.cmd, token);
+  e.stderr = scrubString(e.stderr, token);
+  e.stdout = scrubString(e.stdout, token);
+
   return e;
 }
 

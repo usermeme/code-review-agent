@@ -48,10 +48,14 @@ export async function searchRepoFiles(
       maxBuffer: 8 * 1024 * 1024,
     });
     const matches = stdout.split('\n').filter(Boolean);
-    return {
-      matches: matches.slice(0, MAX_SEARCH_MATCHES),
-      ...(matches.length > MAX_SEARCH_MATCHES ? { truncated: true } : {}),
+    const resultMatches = matches.slice(0, MAX_SEARCH_MATCHES);
+    const result: { matches: string[]; truncated?: boolean } = {
+      matches: resultMatches,
     };
+    if (matches.length > MAX_SEARCH_MATCHES) {
+      result.truncated = true;
+    }
+    return result;
   } catch (error) {
     // git grep exits 1 when nothing matches.
     if ((error as { code?: number | string }).code === 1) return { matches: [] };

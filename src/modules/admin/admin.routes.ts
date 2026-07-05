@@ -4,7 +4,7 @@ import { getFirstHeader } from '../../common/utils/headers.util.js';
 import { logger } from '../../core/logger/logger.service.js';
 import type { Services } from '../../wiring.js';
 import { backfillRepo } from './admin.service.js';
-// Github-specific fallback for now
+import type { ProviderId } from '../../integrations/vcs/types/vcs.types.js';
 
 export function bearerMatches(header: string | undefined, token: string): boolean {
   const expected = Buffer.from(`Bearer ${token}`);
@@ -40,7 +40,8 @@ export function adminRoutes(services: Services): FastifyPluginCallback {
 
       const { owner, repo } = req.params;
       const body = req.body;
-      const providerId = (body?.providerId || 'github') as import('../../integrations/vcs/types/vcs.types.js').ProviderId;
+      // Github-specific fallback for now
+      const providerId = (body?.providerId || 'github') as ProviderId;
 
       try {
         const installationId = body?.installationId;

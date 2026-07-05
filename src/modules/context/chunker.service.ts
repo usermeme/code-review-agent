@@ -80,18 +80,17 @@ function extension(path: string): string {
   return dot >= 0 ? path.slice(dot).toLowerCase() : '';
 }
 
-function matchesExtraIgnore(relPath: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => {
+function compileIgnorePatterns(patterns: string[]): RegExp[] {
+  return patterns.map((pattern) => {
     // Minimal glob support: '*' within a segment, '**' anywhere.
-    const regex = new RegExp(
+    const regexString =
       '^' +
-        pattern
-          .split('**')
-          .map((part) => part.split('*').map(escapeRegex).join('[^/]*'))
-          .join('.*') +
-        '$',
-    );
-    return regex.test(relPath);
+      pattern
+        .split('**')
+        .map((part) => part.split('*').map(escapeRegex).join('[^/]*'))
+        .join('.*') +
+      '$';
+    return new RegExp(regexString);
   });
 }
 
@@ -116,6 +115,7 @@ function truncateLongFile(content: string): string {
 
 export async function collectFiles(rootDir: string, extraIgnores: string[] = []): Promise<RepoFile[]> {
   const files: RepoFile[] = [];
+  const extraIgnoreRegexes = compileIgnorePatterns(extraIgnores);
 
   async function walk(dir: string): Promise<void> {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -128,7 +128,7 @@ export async function collectFiles(rootDir: string, extraIgnores: string[] = [])
       }
       if (!entry.isFile()) continue;
       if (IGNORED_FILES.has(entry.name) || BINARY_EXTENSIONS.has(extension(entry.name))) continue;
-      if (matchesExtraIgnore(rel, extraIgnores)) continue;
+      if (extraIgnoreRegexes.some((regex) => regex.test(rel))) continue;
       const info = await stat(full);
       if (info.size > MAX_FILE_BYTES) continue;
       let content: string;
@@ -189,11 +189,11 @@ export function buildChunks(
 
   for (const [label, groupFiles] of [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
     for (const file of groupFiles) {
-      if (chunks.length >= options.maxChunks && (!current || current.tokens + file.tokens > options.maxChunkTokens)) {
+      const fileTokens = Math.min(file.tokens, options.maxChunkTokens);
+      if (chunks.length >= options.maxChunks && (!current || current.tokens + fileTokens > options.maxChunkTokens)) {
         overflow.push(file.path);
         continue;
       }
-      const fileTokens = Math.min(file.tokens, options.maxChunkTokens);
       if (!current || current.tokens + fileTokens > options.maxChunkTokens) {
         current = { label, files: [], tokens: 0 };
         chunks.push(current);
