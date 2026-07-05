@@ -1,12 +1,11 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { FastifyPluginCallback } from 'fastify';
-import { getRepoInstallationId } from '../../integrations/github/app-auth.service.js';
 import { getFirstHeader } from '../../common/utils/headers.util.js';
 import { logger } from '../../core/logger/logger.service.js';
 import type { Services } from '../../wiring.js';
 import { backfillRepo } from './admin.service.js';
+// Github-specific fallback for now
 
-/** Constant-time bearer-token check. */
 export function bearerMatches(header: string | undefined, token: string): boolean {
   const expected = Buffer.from(`Bearer ${token}`);
   const got = Buffer.from(header ?? '');
@@ -19,7 +18,8 @@ interface BackfillParams {
 }
 
 interface BackfillBody {
-  installationId?: number;
+  providerId?: string;
+  installationId?: string;
 }
 
 export function adminRoutes(services: Services): FastifyPluginCallback {
@@ -40,13 +40,22 @@ export function adminRoutes(services: Services): FastifyPluginCallback {
 
       const { owner, repo } = req.params;
       const body = req.body;
+      const providerId = (body?.providerId || 'github') as import('../../integrations/vcs/types/vcs.types.js').ProviderId;
 
       try {
-        const installationId = Number(body?.installationId) || (await getRepoInstallationId(services.app, owner, repo));
+        const installationId = body?.installationId;
+
+        if (!installationId) {
+           return reply.code(400).send({ error: 'installationId is required' });
+        }
 
         void reply.code(202).send({ started: true });
 
-        void backfillRepo(services, { installationId, owner, repo }).catch((error: unknown) =>
+        void backfillRepo(services, { 
+          providerId, 
+          installationId, 
+          repo: { provider: providerId, owner, name: repo } 
+        }).catch((error: unknown) =>
           logger.error({ owner, repo, err: error }, 'backfill failed'),
         );
       } catch (error) {

@@ -11,7 +11,8 @@ export interface DiscussionEntry {
   author: string;
   filePath?: string;
   body: string;
-  githubId?: number;
+  providerId?: string;
+  platformInstallationId?: string;
   createdAt: Date;
 }
 
@@ -31,7 +32,8 @@ interface DiscussionRow {
   author: string;
   file_path: string | null;
   body: string;
-  github_id: string | null;
+  provider_id: string | null;
+  platform_installation_id: string | null;
   created_at: Date;
   score: string;
 }
@@ -45,17 +47,17 @@ export class DiscussionStore {
   async insert(entry: DiscussionEntry): Promise<void> {
     const body = entry.body.trim();
     if (!body) return;
-    // Rows without a GitHub id (bot findings) dedupe on content via the
-    // partial unique index — a NULL github_id never conflicts with anything.
+    // Rows without a provider id (bot findings) dedupe on content via the
+    // partial unique index — a NULL provider_id never conflicts with anything.
     const onConflict =
-      entry.githubId != null
-        ? 'ON CONFLICT (github_id) DO NOTHING'
+      entry.providerId != null
+        ? 'ON CONFLICT (provider_id) DO NOTHING'
         : `ON CONFLICT (repo, source, coalesce(pr_number, -1), coalesce(file_path, ''), md5(body))
-           WHERE github_id IS NULL DO NOTHING`;
+           WHERE provider_id IS NULL DO NOTHING`;
     const [embedding] = await this.embedder.embed([body.slice(0, 8000)]);
     await this.pool.query(
-      `INSERT INTO discussions (repo, pr_number, source, author, file_path, body, github_id, created_at, embedding)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::vector)
+      `INSERT INTO discussions (repo, pr_number, source, author, file_path, body, provider_id, platform_installation_id, created_at, embedding)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector)
        ${onConflict}`,
       [
         entry.repo,
@@ -64,12 +66,13 @@ export class DiscussionStore {
         entry.author,
         entry.filePath ?? null,
         body,
-        entry.githubId ?? null,
+        entry.providerId ?? null,
+        entry.platformInstallationId ? Number(entry.platformInstallationId) : null,
         entry.createdAt,
         toVectorLiteral(embedding!),
       ],
     );
-    logger.debug({ repo: entry.repo, source: entry.source, githubId: entry.githubId }, 'stored discussion');
+    logger.debug({ repo: entry.repo, source: entry.source, providerId: entry.providerId }, 'stored discussion');
   }
 
   async insertMany(entries: DiscussionEntry[]): Promise<number> {
@@ -84,7 +87,7 @@ export class DiscussionStore {
   async search(repo: string, query: string, limit: number): Promise<DiscussionHit[]> {
     const [embedding] = await this.embedder.embed([query.slice(0, 8000)]);
     const { rows } = await this.pool.query<DiscussionRow>(
-      `SELECT repo, pr_number, source, author, file_path, body, github_id, created_at,
+      `SELECT repo, pr_number, source, author, file_path, body, provider_id, platform_installation_id, created_at,
               1 - (embedding <=> $1::vector) AS score
        FROM discussions
        WHERE repo = $2
@@ -99,7 +102,8 @@ export class DiscussionStore {
       author: row.author,
       filePath: row.file_path ?? undefined,
       body: row.body,
-      githubId: row.github_id ? Number(row.github_id) : undefined,
+      providerId: row.provider_id ?? undefined,
+      platformInstallationId: row.platform_installation_id ?? undefined,
       createdAt: row.created_at,
       score: Number(row.score),
     }));

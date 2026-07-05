@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { newSideHunkRanges, type LineRange } from '../../integrations/github/diff.service.js';
-import type { PrFile } from '../../integrations/github/pr.service.js';
+import type { PrDiff } from '../../integrations/vcs/types/vcs.types.js';
 import { resolveInsideCheckout } from '../../common/utils/safe-path.util.js';
 import { estimateTokens } from '../../common/utils/tokens.util.js';
 
@@ -100,7 +100,7 @@ function renderSegments(path: string, lines: string[], ranges: LineRange[]): str
  */
 export async function loadChangedFiles(
   checkoutDir: string,
-  files: PrFile[],
+  files: PrDiff[],
   options: ChangedFilesOptions,
 ): Promise<ChangedFilesResult> {
   const sections: string[] = [];
@@ -109,7 +109,7 @@ export async function loadChangedFiles(
   let budget = options.totalTokenBudget;
 
   for (const file of files) {
-    if (file.status === 'removed') continue;
+    if (file.status === 'deleted') continue;
     const full = await resolveInsideCheckout(checkoutDir, file.filename);
     if (!full) {
       omitted.push(file.filename);

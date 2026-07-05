@@ -3,9 +3,9 @@ import type { AppConfig } from '../../core/config/config.schema.js';
 
 export function createGithubApp(cfg: AppConfig): App {
   return new App({
-    appId: cfg.github.appId,
-    privateKey: Buffer.from(cfg.github.privateKeyBase64, 'base64').toString('utf8'),
-    webhooks: { secret: cfg.github.webhookSecret },
+    appId: cfg.providers.github.appId,
+    privateKey: Buffer.from(cfg.providers.github.privateKeyBase64, 'base64').toString('utf8'),
+    webhooks: { secret: cfg.providers.github.webhookSecret },
   });
 }
 

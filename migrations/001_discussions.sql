@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS discussions (
   author     TEXT NOT NULL,
   file_path  TEXT,
   body       TEXT NOT NULL,
-  github_id  BIGINT UNIQUE,
+  provider_id TEXT UNIQUE,
+  platform_installation_id BIGINT,
   created_at TIMESTAMPTZ NOT NULL,
   embedding  vector(1536) NOT NULL
 );

@@ -8,10 +8,10 @@ import {
   renderChangedFile,
   renderWithLineNumbers,
 } from './changed-files.service.js';
-import type { PrFile } from '../../integrations/github/pr.service.js';
+import type { PrDiff } from '../../integrations/vcs/types/vcs.types.js';
 
-function prFile(overrides: Partial<PrFile>): PrFile {
-  return { filename: 'src/a.ts', status: 'modified', additions: 1, deletions: 0, ...overrides };
+function prFile(overrides: Partial<PrDiff>): PrDiff {
+  return { filename: 'src/a.ts', status: 'modified', patch: '', additions: 1, deletions: 0, ...overrides };
 }
 
 describe('expandRanges', () => {
@@ -79,7 +79,7 @@ describe('loadChangedFiles', () => {
         prFile({ filename: 'src/a.ts' }),
         prFile({ filename: 'missing.ts' }),
         prFile({ filename: 'bin.dat' }),
-        prFile({ filename: 'gone.ts', status: 'removed' }),
+        prFile({ filename: 'gone.ts', status: 'deleted' }),
         prFile({ filename: '../escape.ts' }),
         prFile({ filename: 'link.ts' }),
       ],

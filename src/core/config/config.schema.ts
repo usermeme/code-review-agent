@@ -15,12 +15,15 @@ export const configSchema = z.object({
       concurrency: z.coerce.number().default(2),
     })
     .prefault({}),
-  github: z.object({
-    appId: z.string().min(1),
-    privateKeyBase64: z.string().min(1),
-    webhookSecret: z.string().min(1),
-    reposAllowlist: z.array(z.string()).default([]),
-  }),
+  providers: z
+    .object({
+      github: z.object({
+        appId: z.string().min(1),
+        privateKeyBase64: z.string().min(1),
+        webhookSecret: z.string().min(1),
+        reposAllowlist: z.array(z.string()).default([]),
+      }),
+    }),
   triggers: z
     .object({
       onOpened: z.boolean().default(true),

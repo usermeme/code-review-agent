@@ -3,7 +3,7 @@ import { applyEnvOverrides, interpolateEnv } from './config.service.js';
 import { configSchema } from './config.schema.js';
 
 const MINIMAL = {
-  github: { appId: '1', privateKeyBase64: 'a2V5', webhookSecret: 's' },
+  providers: { github: { appId: '1', privateKeyBase64: 'a2V5', webhookSecret: 's' } },
   models: {
     tiers: { default: { provider: 'gemini', model: 'gemini-2.5-flash' } },
     agents: { orchestrator: 'default' },

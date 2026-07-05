@@ -27,9 +27,9 @@ async function main(): Promise<void> {
       ? Number(values.installation)
       : await getRepoInstallationId(services.app, owner, repo);
     await runReview(services.reviewDeps, {
-      installationId,
-      owner,
-      repo,
+      providerId: 'github',
+      installationId: String(installationId),
+      repo: { provider: 'github', owner, name: repo },
       prNumber,
     });
     logger.info({ repo: values.repo, pr: prNumber }, 'review complete');

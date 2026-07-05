@@ -22,9 +22,9 @@ async function main(): Promise<void> {
       ? Number(values.installation)
       : await getRepoInstallationId(services.app, owner, repo);
     const { stored } = await backfillRepo(services, {
-      installationId,
-      owner,
-      repo,
+      providerId: 'github',
+      installationId: String(installationId),
+      repo: { provider: 'github', owner, name: repo },
     });
     logger.info({ repo: values.repo, stored }, 'backfill complete');
   } finally {

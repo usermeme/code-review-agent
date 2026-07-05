@@ -1,11 +1,10 @@
-import { Webhooks } from '@octokit/webhooks';
 import PQueue from 'p-queue';
 import { runReview } from '../review/review.service.js';
-import { } from '../../core/redis/redis.service.js';
 import type { DiscussionEntry } from '../discussion/store.service.js';
 import { logger } from '../../core/logger/logger.service.js';
 import type { Services } from '../../wiring.js';
 import { acquireReviewLock, releaseReviewLock } from "../review/review-lock.service.js";
+import type { WebhookRequest, NormalizedWebhookEvent } from '../../integrations/vcs/interfaces/webhook-adapter.interface.js';
 
 export function repoAllowed(fullName: string, allowlist: string[]): boolean {
   if (allowlist.length === 0) return true;
@@ -22,190 +21,172 @@ export function repoAllowed(fullName: string, allowlist: string[]): boolean {
   });
 }
 
-function prNumberFromUrl(url: string | undefined): number | undefined {
-  const match = /\/(?:pulls|issues)\/(\d+)$/.exec(url ?? '');
-  return match ? Number(match[1]) : undefined;
-}
-
-interface GithubUser {
-  login?: string;
-  type?: string;
-}
-
-/** The subset of GitHub webhook payload fields this router reads. */
-export interface WebhookPayload {
-  action?: string;
-  repository?: { full_name?: string };
-  installation?: { id?: number };
-  sender?: GithubUser;
-  pull_request?: { number?: number; draft?: boolean };
-  issue?: { number?: number; pull_request?: unknown };
-  comment?: {
-    id?: number;
-    body?: string;
-    user?: GithubUser;
-    path?: string;
-    created_at?: string;
-    issue_url?: string;
-  };
-  review?: {
-    id?: number;
-    body?: string | null;
-    user?: GithubUser;
-    submitted_at?: string;
-  };
-}
-
 export class WebhookRouter {
-  private readonly webhooks: Webhooks;
   private readonly queue: PQueue;
 
   constructor(private readonly services: Services) {
-    this.webhooks = new Webhooks({ secret: services.cfg.github.webhookSecret });
     this.queue = new PQueue({ concurrency: services.cfg.server.concurrency });
   }
 
-  verify(rawBody: string, signature: string): Promise<boolean> {
-    return this.webhooks.verify(rawBody, signature);
+  async handle(req: WebhookRequest): Promise<boolean> {
+    for (const adapter of this.services.webhookAdapters) {
+      if (adapter.canHandle(req)) {
+        const secret = (this.services.cfg.providers as Record<string, { webhookSecret?: string }>)?.[adapter.providerId]?.webhookSecret;
+        if (!secret) throw new Error(`webhook secret not configured for provider ${adapter.providerId}`);
+        if (!(await adapter.verifySignature(req, secret))) {
+          throw new Error('invalid signature');
+        }
+
+        const event = adapter.parseEvent(req);
+        if (event) {
+          this.route(event);
+        }
+        return true;
+      }
+    }
+    return false;
   }
 
-  /** Routes a verified webhook. Returns fast; heavy work goes onto the queue. */
-  route(eventName: string, payload: WebhookPayload): void {
-    const repoFullName = payload.repository?.full_name;
-    if (repoFullName && !repoAllowed(repoFullName, this.services.cfg.github.reposAllowlist)) {
+  route(event: NormalizedWebhookEvent): void {
+    const repoFullName = `${event.repo.owner}/${event.repo.name}`;
+    if (!repoAllowed(repoFullName, this.services.cfg.providers.github.reposAllowlist)) {
       logger.debug({ repo: repoFullName }, 'repo not in allowlist; ignoring event');
       return;
     }
 
-    switch (eventName) {
-      case 'pull_request':
-        this.handlePullRequest(payload);
+    switch (event.eventType) {
+      case 'pull_request_opened':
+      case 'pull_request_updated':
+        this.handlePullRequest(event);
         break;
       case 'issue_comment':
-        this.handleIssueComment(payload);
+        this.handleIssueComment(event);
         break;
       case 'pull_request_review_comment':
-        if (payload.action === 'created') {
-          this.ingest(payload, {
-            source: 'review_comment',
-            body: payload.comment?.body,
-            author: payload.comment?.user?.login,
-            githubId: payload.comment?.id,
-            filePath: payload.comment?.path,
-            prNumber: payload.pull_request?.number,
-            createdAt: payload.comment?.created_at,
-          });
-        }
-        break;
       case 'pull_request_review':
-        if (payload.action === 'submitted') {
-          this.ingest(payload, {
-            source: 'review',
-            body: payload.review?.body ?? undefined,
-            author: payload.review?.user?.login,
-            githubId: payload.review?.id,
-            prNumber: payload.pull_request?.number,
-            createdAt: payload.review?.submitted_at,
-          });
-        }
-        break;
-      default:
+        this.handleReview(event);
         break;
     }
   }
 
-  private handlePullRequest(payload: WebhookPayload): void {
+  private handlePullRequest(event: NormalizedWebhookEvent): void {
     const triggers = this.services.cfg.triggers;
-    const isDraft = Boolean(payload.pull_request?.draft);
-    const shouldReview =
-      (payload.action === 'opened' && triggers.onOpened && !isDraft) ||
-      (payload.action === 'ready_for_review' && triggers.onReadyForReview);
+    const isDraft = Boolean(event.isDraft);
+    
+    const shouldReview = 
+      (event.eventType === 'pull_request_opened' && triggers.onOpened && !isDraft) ||
+      (event.action === 'ready_for_review' && triggers.onReadyForReview);
+
     if (!shouldReview) return;
-    this.enqueueReview(payload, payload.pull_request?.number);
+    this.enqueueReview(event);
   }
 
-  private handleIssueComment(payload: WebhookPayload): void {
-    if (payload.action !== 'created') return;
-    const isPr = Boolean(payload.issue?.pull_request);
+  private handleIssueComment(event: NormalizedWebhookEvent): void {
+    if (event.action !== 'created') return;
+    const isPr = Boolean(event.isPr);
     if (!isPr) return;
-    const body = payload.comment?.body ?? '';
+    const body = event.body ?? '';
 
-    this.ingest(payload, {
+    this.ingest(event, {
       source: 'issue_comment',
       body,
-      author: payload.comment?.user?.login,
-      githubId: payload.comment?.id,
-      prNumber: payload.issue?.number,
-      createdAt: payload.comment?.created_at,
+      author: event.author,
+      providerId: event.providerCommentId,
+      prNumber: event.issueNumber,
+      createdAt: event.createdAt,
     });
 
     const command = this.services.cfg.triggers.reviewCommand;
-    if (payload.sender?.type !== 'Bot' && body.trimStart().startsWith(command)) {
-      this.enqueueReview(payload, payload.issue?.number);
+    if (event.senderType !== 'Bot' && body.trimStart().startsWith(command)) {
+      this.enqueueReview(event);
     }
   }
 
-  private enqueueReview(payload: WebhookPayload, prNumber: number | undefined): void {
-    const installationId = payload.installation?.id;
-    const [owner, repo] = (payload.repository?.full_name ?? '').split('/');
-    if (!installationId || !owner || !repo || !prNumber) {
-      logger.warn({ owner, repo, prNumber, installationId }, 'cannot enqueue review: missing fields');
+  private handleReview(event: NormalizedWebhookEvent): void {
+    if (event.eventType === 'pull_request_review_comment' && event.action === 'created') {
+      this.ingest(event, {
+        source: 'review_comment',
+        body: event.body,
+        author: event.author,
+        providerId: event.providerCommentId,
+        filePath: event.filePath,
+        prNumber: event.pullRequestNumber,
+        createdAt: event.createdAt,
+      });
+    } else if (event.eventType === 'pull_request_review' && event.action === 'submitted') {
+      this.ingest(event, {
+        source: 'review',
+        body: event.body ?? undefined,
+        author: event.author,
+        providerId: event.providerCommentId,
+        prNumber: event.pullRequestNumber,
+        createdAt: event.createdAt,
+      });
+    }
+  }
+
+  private enqueueReview(event: NormalizedWebhookEvent): void {
+    if (!event.installationId || !event.pullRequestNumber) {
+      logger.warn({ event }, 'cannot enqueue review: missing fields');
       return;
     }
-    void this.queue.add(() => this.reviewJob(installationId, owner, repo, prNumber));
+    void this.queue.add(() => this.reviewJob(event));
   }
 
-  private async reviewJob(installationId: number, owner: string, repo: string, prNumber: number): Promise<void> {
-    const { redis, app, reviewDeps } = this.services;
-    const repoFull = `${owner}/${repo}`;
+  private async reviewJob(event: NormalizedWebhookEvent): Promise<void> {
+    const { redis, reviewDeps, getProvider } = this.services;
+    const repoFull = `${event.repo.owner}/${event.repo.name}`;
     let headSha = 'unknown';
     let lockToken: string | null = null;
     try {
-      const octokit = await app.getInstallationOctokit(installationId);
-      const { data: pr } = await octokit.rest.pulls.get({
-        owner,
-        repo,
-        pull_number: prNumber,
-      });
-      headSha = pr.head.sha;
-      lockToken = await acquireReviewLock(redis, repoFull, prNumber, headSha);
+      const provider = getProvider(event.provider);
+      const client = await provider.getClient(event.installationId);
+      const prDetails = await client.getPullRequest(event.repo, event.pullRequestNumber!);
+      headSha = prDetails.headSha;
+
+      lockToken = await acquireReviewLock(redis, repoFull, event.pullRequestNumber!, headSha);
       if (!lockToken) {
-        logger.info({ repo: repoFull, pr: prNumber, headSha }, 'review already ran for this sha; skipping');
+        logger.info({ repo: repoFull, pr: event.pullRequestNumber, headSha }, 'review already ran for this sha; skipping');
         return;
       }
-      await runReview(reviewDeps, { installationId, owner, repo, prNumber });
+      
+      await runReview(reviewDeps, { 
+        providerId: event.provider,
+        installationId: event.installationId, 
+        repo: event.repo, 
+        prNumber: event.pullRequestNumber! 
+      });
     } catch (error) {
-      logger.error({ repo: repoFull, pr: prNumber, err: error }, 'review failed');
-      // Release the lock so a manual /review can retry the same sha.
-      if (lockToken) {
-        await releaseReviewLock(redis, repoFull, prNumber, headSha, lockToken).catch(() => {});
+      logger.error({ repo: repoFull, pr: event.pullRequestNumber, err: error }, 'review failed');
+      if (lockToken && event.pullRequestNumber) {
+        await releaseReviewLock(redis, repoFull, event.pullRequestNumber, headSha, lockToken).catch(() => {});
       }
     }
   }
 
-  /** Every human PR discussion comment feeds the vector store (bots excluded). */
   private ingest(
-    payload: WebhookPayload,
+    event: NormalizedWebhookEvent,
     entry: {
       source: DiscussionEntry['source'];
       body?: string;
       author?: string;
-      githubId?: number;
+      providerId?: string;
       filePath?: string;
       prNumber?: number;
       createdAt?: string;
     },
   ): void {
-    if (!entry.body?.trim() || payload.sender?.type === 'Bot') return;
+    if (!entry.body?.trim() || event.senderType === 'Bot') return;
     void this.services.discussionStore
       .insert({
-        repo: payload.repository?.full_name ?? '',
-        prNumber: entry.prNumber ?? prNumberFromUrl(payload.comment?.issue_url),
+        repo: `${event.repo.owner}/${event.repo.name}`,
+        prNumber: entry.prNumber,
         source: entry.source,
         author: entry.author ?? 'unknown',
         filePath: entry.filePath,
         body: entry.body,
-        githubId: entry.githubId,
+        providerId: entry.providerId ? String(entry.providerId) : undefined, // Mapping providerId to providerId
+        platformInstallationId: event.installationId,
         createdAt: entry.createdAt ? new Date(entry.createdAt) : new Date(),
       })
       .catch((error: unknown) => logger.warn({ err: error }, 'failed to ingest discussion'));

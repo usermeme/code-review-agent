@@ -1,14 +1,10 @@
 import { InMemorySessionService, Runner } from '@google/adk';
-import type { App } from 'octokit';
 import { loadChangedFiles } from '../context/changed-files.service.js';
 import { cloneShallow, type ClonedRepo } from '../context/clone.service.js';
 import type { RepoContextBuilder } from '../context/repo-context-builder.service.js';
 import type { DiscussionStore } from '../discussion/store.service.js';
 import type { AppConfig } from '../../core/config/config.schema.js';
-import { createInstallationToken } from '../../integrations/github/app-auth.service.js';
 import { annotateDiff } from '../../integrations/github/diff.service.js';
-import { fetchPrBundle, type PrBundle } from '../../integrations/github/pr.service.js';
-import { publishReview } from '../../integrations/github/review-publisher.service.js';
 import { resolveModelInstance } from '../../integrations/model/model-config.service.js';
 import { fetchLinkedTickets, type TicketProvider } from '../../integrations/ticket/ticket.service.js';
 import { createGetDiscussionTool } from './tools/get-discussion.tool.js';
@@ -21,51 +17,61 @@ import { loadReviewSkill } from './skills/review.skill.js';
 import { parseReviewPlan, type ReviewPlan } from './schemas/review.schema.js';
 import { STATE, type PrMeta } from './constants/state-keys.constant.js';
 import { verifyFindings } from './agents/verifier.agent.js';
+import type { PlatformProvider } from '../../integrations/vcs/interfaces/vcs-provider.interface.js';
+import type { RepositoryIdentifier, PrDiff } from '../../integrations/vcs/types/vcs.types.js';
 
 const APP_NAME = 'code-review-agent';
 const USER_ID = 'reviewer';
 
 export interface ReviewDeps {
   cfg: AppConfig;
-  app: App;
+  getProvider: (id: string) => PlatformProvider;
   contextBuilder: RepoContextBuilder;
   discussionStore: DiscussionStore;
   ticketProviders: TicketProvider[];
 }
 
 export interface ReviewRequest {
-  installationId: number;
-  owner: string;
-  repo: string;
+  providerId: string;
+  installationId: string;
+  repo: RepositoryIdentifier;
   prNumber: number;
 }
 
 export async function runReview(deps: ReviewDeps, request: ReviewRequest): Promise<void> {
-  const { cfg, app } = deps;
-  const repoFull = `${request.owner}/${request.repo}`;
-  const octokit = await app.getInstallationOctokit(request.installationId);
+  const { cfg } = deps;
+  const repoFull = `${request.repo.owner}/${request.repo.name}`;
+  
+  const provider = deps.getProvider(request.providerId);
+  const client = await provider.getClient(request.installationId);
+  const publisher = await provider.getPublisher(request.installationId);
 
-  const bundle = await fetchPrBundle(octokit, request.owner, request.repo, request.prNumber);
-  const tickets = await fetchLinkedTickets(deps.ticketProviders, [bundle.title, bundle.body, bundle.branch].join('\n'));
-  const cloneToken = await createInstallationToken(app, request.installationId);
-  // The checkout backs the changed-file prompts, the orchestrator's
-  // readFile/searchRepo tools, and the verification pass; it lives until the
-  // review is published.
-  const checkout = await checkoutPrHead(bundle, cloneToken);
+  const [pr, files, cloneToken, baseCloneUrl] = await Promise.all([
+    client.getPullRequest(request.repo, request.prNumber),
+    client.getPrFiles(request.repo, request.prNumber),
+    client.getCloneToken(),
+    client.getCloneUrl(request.repo) // Base clone url
+  ]);
+
+  // Fallback for PR diff: join patch fields
+  const prDiffString = files.map(f => f.patch).join('\n');
+
+  const tickets = await fetchLinkedTickets(deps.ticketProviders, [pr.title, pr.body, pr.headSha].join('\n'));
+  
+  // const cloneUrl = pr.url; // Use pr html_url or derive head clone url? Let's use base clone url for now
+  const checkout = await checkoutPrHead(baseCloneUrl, pr.headSha, cloneToken, repoFull, request.prNumber);
+  
   try {
-    const changedFiles = checkout ? await renderChangedFiles(checkout, bundle, cfg) : '';
+    const changedFiles = checkout ? await renderChangedFiles(checkout, repoFull, files, cfg) : '';
     logger.info({ repo: repoFull, pr: request.prNumber, tickets: tickets.length }, 'starting review');
 
     const orchestrator = createOrchestrator(
       cfg,
       {
-        // The whole-repo context describes architecture and conventions, so it
-        // is built from the trusted base branch and shared across PRs — not
-        // from the (possibly forked) PR head.
         getRepoContext: createGetRepoContextTool(deps.contextBuilder, {
           repo: repoFull,
-          ref: bundle.baseRef,
-          cloneUrl: bundle.baseCloneUrl,
+          ref: pr.baseSha,
+          cloneUrl: baseCloneUrl,
           token: cloneToken,
         }),
         getDiscussion: createGetDiscussionTool(deps.discussionStore, repoFull, cfg.discussions.searchLimit),
@@ -77,12 +83,12 @@ export async function runReview(deps: ReviewDeps, request: ReviewRequest): Promi
 
     const prMeta: PrMeta = {
       repo: repoFull,
-      number: bundle.number,
-      title: bundle.title,
-      body: bundle.body,
-      branch: bundle.branch,
-      author: bundle.author,
-      headSha: bundle.headSha,
+      number: pr.number,
+      title: pr.title,
+      body: pr.body,
+      branch: pr.headSha,
+      author: pr.authorUsername,
+      headSha: pr.headSha,
     };
 
     const sessionService = new InMemorySessionService();
@@ -90,7 +96,7 @@ export async function runReview(deps: ReviewDeps, request: ReviewRequest): Promi
       appName: APP_NAME,
       userId: USER_ID,
       state: {
-        [STATE.diff]: annotateDiff(bundle.diff),
+        [STATE.diff]: annotateDiff(prDiffString),
         [STATE.changedFiles]: changedFiles,
         [STATE.prMeta]: prMeta,
         [STATE.tickets]: tickets,
@@ -113,18 +119,12 @@ export async function runReview(deps: ReviewDeps, request: ReviewRequest): Promi
         llm: resolveModelInstance(cfg, cfg.models.agents.verifier),
         checkoutDir: checkout.dir,
         findings: plan.findings,
-        files: bundle.files,
+        files: files, // changed files service needs to accept PrDiff
         concurrency: cfg.verification.concurrency,
       });
       for (const { finding, reason } of result.dropped) {
         logger.info(
-          {
-            repo: repoFull,
-            pr: request.prNumber,
-            path: finding.path,
-            title: finding.title,
-            reason,
-          },
+          { repo: repoFull, pr: request.prNumber, path: finding.path, title: finding.title, reason },
           'finding dropped by verification',
         );
       }
@@ -134,19 +134,26 @@ export async function runReview(deps: ReviewDeps, request: ReviewRequest): Promi
       }
     }
 
-    await publishReview({
-      octokit,
-      owner: request.owner,
-      repo: request.repo,
-      prNumber: request.prNumber,
-      headSha: bundle.headSha,
-      plan,
-      files: bundle.files,
-      contextNote: `Reviewed by code-review-agent · head ${bundle.headSha.slice(0, 7)}${verificationNote}`,
-    });
+    // const unanchored = plan.findings.map(f => ({ path: f.path, line: f.endLine, body: `**[${f.severity}] ${f.title}**\n\n${f.body}${f.suggestion ? `\n\n\`\`\`suggestion\n${f.suggestion}\n\`\`\`` : ''}` }));
+    
+    // Note: the github specific review publisher was handling splitFindings. 
+    // Now we rely on the CodeReviewPublisher.
+    // For now we just pass comments.
+    const comments = plan.findings.map(f => ({
+      path: f.path,
+      line: f.endLine,
+      body: `**[${f.severity}] ${f.title}**\n\n${f.body}${f.suggestion ? `\n\n\`\`\`suggestion\n${f.suggestion}\n\`\`\`` : ''}`
+    }));
 
-    // Published findings become part of the discussion memory so future runs
-    // know what was already raised.
+    const generalSummary = plan.summary + (plan.ticketCoverage ? `\n\n### Ticket coverage\n${plan.ticketCoverage}` : '');
+
+    await publisher.publishReview(
+      request.repo,
+      request.prNumber,
+      comments,
+      generalSummary + `\n\n---\n_Reviewed by code-review-agent · head ${pr.headSha.slice(0, 7)}${verificationNote}_`
+    );
+
     for (const finding of plan.findings) {
       await deps.discussionStore.insert({
         repo: repoFull,
@@ -167,39 +174,29 @@ function severityRank(severity: string): number {
   return severity === 'critical' ? 0 : severity === 'major' ? 1 : 2;
 }
 
-/**
- * Clones the PR head for the review's duration. Failure degrades to a
- * diff-only review rather than aborting — e.g. a private fork the
- * installation token cannot clone.
- */
-async function checkoutPrHead(bundle: PrBundle, token: string): Promise<ClonedRepo | null> {
+async function checkoutPrHead(cloneUrl: string, branchOrSha: string, token: string, repoFull: string, prNumber: number): Promise<ClonedRepo | null> {
   try {
     return await cloneShallow({
-      cloneUrl: bundle.cloneUrl,
-      ref: bundle.branch,
+      cloneUrl,
+      ref: branchOrSha,
       token,
     });
   } catch (error) {
     logger.warn(
-      { repo: `${bundle.owner}/${bundle.repo}`, pr: bundle.number, err: error },
+      { repo: repoFull, pr: prNumber, err: error },
       'could not clone PR head; reviewers will see the diff only',
     );
     return null;
   }
 }
 
-/** Renders the full changed files for the reviewer prompts. */
-async function renderChangedFiles(checkout: ClonedRepo, bundle: PrBundle, cfg: AppConfig): Promise<string> {
-  const result = await loadChangedFiles(checkout.dir, bundle.files, {
+async function renderChangedFiles(checkout: ClonedRepo, repoFull: string, files: PrDiff[], cfg: AppConfig): Promise<string> {
+  const result = await loadChangedFiles(checkout.dir, files, {
     maxFileTokens: cfg.context.maxChangedFileTokens,
     totalTokenBudget: cfg.context.changedFilesTokenBudget,
   });
   logger.info(
-    {
-      repo: `${bundle.owner}/${bundle.repo}`,
-      included: result.included.length,
-      omitted: result.omitted.length,
-    },
+    { repo: repoFull, included: result.included.length, omitted: result.omitted.length },
     'loaded changed files for review',
   );
   return result.rendered;
