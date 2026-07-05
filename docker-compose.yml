@@ -1,0 +1,50 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: reviews
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d reviews']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '8080:8080'
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/reviews
+    env_file:
+      - .env
+    # Startup runs DB migrations before serving, and pg.Pool does not retry the
+    # first connection — wait until Postgres actually accepts connections, not
+    # just until its container has started.
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

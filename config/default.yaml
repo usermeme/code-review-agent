@@ -1,0 +1,82 @@
+server:
+  port: 8080
+  concurrency: 2
+
+github:
+  appId: ${GITHUB_APP_ID}
+  privateKeyBase64: ${GITHUB_PRIVATE_KEY}
+  webhookSecret: ${GITHUB_WEBHOOK_SECRET}
+  # Glob patterns; empty list = allow every repo the app is installed on.
+  reposAllowlist: []
+
+triggers:
+  onOpened: true
+  onReadyForReview: true
+  reviewCommand: '/review'
+  maxFindings: 12
+
+models:
+  tiers:
+    default:
+      provider: gemini
+      model: gemini-3.5-flash
+    thinking:
+      provider: gemini
+      model: gemini-3.1-pro
+    claude:
+      provider: anthropic
+      model: claude-opus-4-8
+    claude-thinking:
+      provider: anthropic
+      model: claude-opus-4-8
+      thinking: true
+      effort: high
+  agents:
+    orchestrator: claude
+    ticketComparison: default
+    codeProblems: claude-thinking
+    codeQuality: thinking
+    contextSummarizer: thinking
+    verifier: claude
+
+# Adversarial verification: every finding that survives the orchestrator is
+# re-checked against the real file content by a model prompted to refute it.
+verification:
+  enabled: true
+  concurrency: 4
+
+embeddings:
+  model: gemini-embedding-001
+  dimensions: 1536
+
+cache:
+  redisUrl: ${REDIS_URL}
+  repoContextTtlSeconds: 604800 # 7 days
+
+context:
+  maxChunkTokens: 60000
+  maxChunks: 40
+  summaryConcurrency: 5
+  extraIgnores: []
+  # Budgets for full changed-file content shown to reviewer agents
+  maxChangedFileTokens: 8000
+  changedFilesTokenBudget: 48000
+
+discussions:
+  databaseUrl: ${DATABASE_URL}
+  searchLimit: 8
+
+skills:
+  # Path to the code-review skill folder (SKILL.md + references/security.md),
+  # e.g. ~/skills/code-review. Empty -> embedded snapshot of the same skill.
+  codeReviewDir: ${CODE_REVIEW_SKILL_DIR}
+
+tickets:
+  jira:
+    enabled: false
+    baseUrl: ${JIRA_BASE_URL}
+    email: ${JIRA_EMAIL}
+    apiToken: ${JIRA_API_TOKEN}
+  clickup:
+    enabled: false
+    apiToken: ${CLICKUP_API_TOKEN}
