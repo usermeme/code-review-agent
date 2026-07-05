@@ -99,7 +99,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   agent:
-    image: ghcr.io/<your-github-username-or-org>/code-review-agent:latest
+    image: ghcr.io/usermeme/code-review-agent:latest
     ports:
       - '8080:8080'
     env_file:
