@@ -8,15 +8,15 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "review": "tsx src/cli/review.ts",
-    "backfill": "tsx src/cli/backfill.ts",
-    "migrate": "tsx src/cli/migrate.ts",
+    "review": "tsx src/commands/review.command.ts",
+    "backfill": "tsx src/commands/backfill.command.ts",
+    "migrate": "tsx src/commands/migrate.command.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

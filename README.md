@@ -46,7 +46,18 @@ whole-repo context document and a vector memory of past review discussions:
 
 Every agent's model is selectable in `config/default.yaml` (`models.agents.*` → named tiers).
 Gemini works natively; Claude models run through a custom `ClaudeLlm` adapter
-(`src/models/claude-llm.ts`) with adaptive thinking and structured outputs.
+(`src/integrations/model/claude-llm.service.ts`) with adaptive thinking and structured outputs.
+
+## Architecture
+
+This project strictly adheres to a domain-driven, modular structure inspired by NestJS:
+- **`src/core/`**: App-wide infrastructure (`redis`, `config`, `logger`).
+- **`src/common/`**: Reusable generic utilities (`headers`, `safe-path`).
+- **`src/integrations/`**: External service wrappers (`github`, `model`, `ticket`).
+- **`src/modules/`**: Domain-driven features (`admin`, `webhook`, `review`, `discussion`, `context`).
+  - Review components are explicitly suffixed (`.agent.ts`, `.skill.ts`, `.tool.ts`).
+- **`src/commands/`**: CLI jobs (`review`, `backfill`, `migrate`).
+- **Unit Tests**: Co-located strictly beside their implementations as `.spec.ts`.
 
 ## How to Use & Deploy
 

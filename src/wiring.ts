@@ -1,17 +1,18 @@
 import type { Redis } from 'ioredis';
 import type pg from 'pg';
 import type { App } from 'octokit';
-import { RepoContextCache, createRedis } from './cache/redis.js';
-import type { AppConfig } from './config/schema.js';
-import { RepoContextBuilder } from './context/repo-context-builder.js';
-import { createPool, runMigrations } from './discussions/db.js';
-import { GeminiEmbedder } from './discussions/embeddings.js';
-import { DiscussionStore } from './discussions/store.js';
-import { createGithubApp } from './github/app-auth.js';
-import { resolveModelInstance } from './models/model-config.js';
-import { registerModels } from './models/registry.js';
-import { createProviders, type TicketProvider } from './tickets/provider.js';
-import type { ReviewDeps } from './agents/run-review.js';
+import { createRedis } from './core/redis/redis.service.js';
+import type { AppConfig } from './core/config/config.schema.js';
+import { RepoContextBuilder } from './modules/context/repo-context-builder.service.js';
+import { createPool, runMigrations } from './modules/discussion/db.service.js';
+import { GeminiEmbedder } from './modules/discussion/embeddings.service.js';
+import { DiscussionStore } from './modules/discussion/store.service.js';
+import { createGithubApp } from './integrations/github/app-auth.service.js';
+import { resolveModelInstance } from './integrations/model/model-config.service.js';
+import { registerModels } from './integrations/model/registry.service.js';
+import { createProviders, type TicketProvider } from './integrations/ticket/ticket.service.js';
+import type { ReviewDeps } from './modules/review/review.service.js';
+import { RepoContextCache } from './modules/context/repo-context-cache.service.js';
 
 export interface Services {
   cfg: AppConfig;
@@ -27,24 +28,19 @@ export interface Services {
 
 export async function buildServices(cfg: AppConfig): Promise<Services> {
   registerModels();
-
   const redis = createRedis(cfg.cache.redisUrl);
   const pool = createPool(cfg.discussions.databaseUrl);
   await runMigrations(pool);
-
   const embedder = new GeminiEmbedder(cfg.embeddings.model, cfg.embeddings.dimensions);
   const discussionStore = new DiscussionStore(pool, embedder);
-
   const cache = new RepoContextCache(redis, cfg.cache.repoContextTtlSeconds, cfg.cache.repoContextMaxAgeSeconds);
   const contextBuilder = new RepoContextBuilder(
     cache,
     resolveModelInstance(cfg, cfg.models.agents.contextSummarizer),
     cfg.context,
   );
-
   const app = createGithubApp(cfg);
   const ticketProviders = createProviders(cfg);
-
   return {
     cfg,
     redis,
