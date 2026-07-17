@@ -104,9 +104,12 @@ export interface CreateOrchestratorPayload {
   model: string;
 }
 
-export function createOrchestrator({ tools, model }: CreateOrchestratorPayload): LlmAgent {
+export function createOrchestrator({
+  tools,
+  model,
+}: CreateOrchestratorPayload): LlmAgent {
   const skill = loadReviewSkill('');
-  
+
   return new LlmAgent({
     name: 'core_review_agent',
     description: 'Parent agent orchestrating the full PR review.',
@@ -117,9 +120,18 @@ export function createOrchestrator({ tools, model }: CreateOrchestratorPayload):
       tools.getRepoContext,
       tools.getDiscussion,
       tools.storeDiscussion,
-      new AgentTool({ agent: createTicketAgent({ model }), skipSummarization: true }),
-      new AgentTool({ agent: createProblemsAgent({ skill, model }), skipSummarization: true }),
-      new AgentTool({ agent: createQualityAgent({ skill, model }), skipSummarization: true }),
+      new AgentTool({
+        agent: createTicketAgent({ model }),
+        skipSummarization: true,
+      }),
+      new AgentTool({
+        agent: createProblemsAgent({ skill, model }),
+        skipSummarization: true,
+      }),
+      new AgentTool({
+        agent: createQualityAgent({ skill, model }),
+        skipSummarization: true,
+      }),
     ],
   });
 }

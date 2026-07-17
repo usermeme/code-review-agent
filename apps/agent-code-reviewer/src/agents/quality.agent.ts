@@ -51,7 +51,10 @@ export interface CreateQualityAgentPayload {
   model: string;
 }
 
-export function createQualityAgent({ skill, model }: CreateQualityAgentPayload): LlmAgent {
+export function createQualityAgent({
+  skill,
+  model,
+}: CreateQualityAgentPayload): LlmAgent {
   return new LlmAgent({
     name: 'code_quality_agent',
     description:

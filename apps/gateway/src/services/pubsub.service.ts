@@ -15,7 +15,9 @@ export class PubSubService {
       console.log(`Message ${messageId} published to topic ${topicName}.`);
       return messageId;
     } catch (error) {
-      console.error(`Received error while publishing: ${(error as Error).message}`);
+      console.error(
+        `Received error while publishing: ${(error as Error).message}`,
+      );
       throw error;
     }
   }

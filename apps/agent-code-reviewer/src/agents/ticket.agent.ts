@@ -27,7 +27,9 @@ export interface CreateTicketAgentPayload {
   model: string;
 }
 
-export function createTicketAgent({ model }: CreateTicketAgentPayload): LlmAgent {
+export function createTicketAgent({
+  model,
+}: CreateTicketAgentPayload): LlmAgent {
   return new LlmAgent({
     name: 'ticket_comparison_agent',
     description:

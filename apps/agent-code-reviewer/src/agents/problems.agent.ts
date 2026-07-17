@@ -50,7 +50,10 @@ export interface CreateProblemsAgentPayload {
   model: string;
 }
 
-export function createProblemsAgent({ skill, model }: CreateProblemsAgentPayload): LlmAgent {
+export function createProblemsAgent({
+  skill,
+  model,
+}: CreateProblemsAgentPayload): LlmAgent {
   return new LlmAgent({
     name: 'code_problems_agent',
     description:

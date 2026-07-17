@@ -1,7 +1,7 @@
-import { createOrchestrator } from './agents/orchestrator.agent';
-import { createGetRepoContextTool } from './tools/get-repo-context.tool';
-import { createGetDiscussionTool } from './tools/get-discussion.tool';
-import { createStoreDiscussionTool } from './tools/store-discussion.tool';
+import { createOrchestrator } from './agents/orchestrator.agent.js';
+import { createGetRepoContextTool } from './tools/get-repo-context.tool.js';
+import { createGetDiscussionTool } from './tools/get-discussion.tool.js';
+import { createStoreDiscussionTool } from './tools/store-discussion.tool.js';
 
 // 1. Fetch the required environment variable config at initialization
 const gatewayUrl = process.env.GATEWAY_URL;
@@ -25,4 +25,7 @@ const tools = {
 // 3. Export the LlmAgent instance.
 // When running `adk deploy`, the deployment tool will inspect this module and wire the exported agent
 // to the Google Cloud Pub/Sub ingress infrastructure automatically.
-export const codeReviewAgent = createOrchestrator({ tools, model: reviewModel });
+export const codeReviewAgent = createOrchestrator({
+  tools,
+  model: reviewModel,
+});

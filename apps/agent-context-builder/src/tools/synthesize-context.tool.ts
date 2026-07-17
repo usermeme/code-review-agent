@@ -8,12 +8,15 @@ export interface CreateSynthesizeContextToolPayload {
   model: string;
 }
 
-export function createSynthesizeContextTool({ model }: CreateSynthesizeContextToolPayload) {
+export function createSynthesizeContextTool({
+  model,
+}: CreateSynthesizeContextToolPayload) {
   const llm = new Gemini({ model });
-  
+
   return new FunctionTool({
     name: 'synthesize_context',
-    description: 'Synthesizes all chunk summaries into the final repository context document. Call this after summarize_chunks.',
+    description:
+      'Synthesizes all chunk summaries into the final repository context document. Call this after summarize_chunks.',
     parameters: z.object({}),
     execute: async (_input, ctx) => {
       const summaries = ctx.state[STATE.chunkSummaries] as string[];
@@ -21,7 +24,9 @@ export function createSynthesizeContextTool({ model }: CreateSynthesizeContextTo
       const agentDocs = ctx.state[STATE.agentDocs] as string;
 
       if (!summaries) {
-        throw new Error('No chunk summaries found. Did you call summarize_chunks?');
+        throw new Error(
+          'No chunk summaries found. Did you call summarize_chunks?',
+        );
       }
 
       const prompt = `You merge per-chunk codebase summaries into one repository context document.

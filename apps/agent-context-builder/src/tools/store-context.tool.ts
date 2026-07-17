@@ -23,7 +23,9 @@ export function createStoreContextTool(gatewayUrl: string) {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to store context. Gateway returned: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `Failed to store context. Gateway returned: ${response.status} ${response.statusText}`,
+        );
       }
 
       return 'Context successfully stored.';

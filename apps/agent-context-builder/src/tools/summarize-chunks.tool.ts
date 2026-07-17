@@ -10,19 +10,24 @@ export interface CreateSummarizeRepoToolPayload {
   model: string;
 }
 
-export function createSummarizeRepoTool({ model }: CreateSummarizeRepoToolPayload) {
+export function createSummarizeRepoTool({
+  model,
+}: CreateSummarizeRepoToolPayload) {
   const llm = new Gemini({ model });
-  
+
   return new FunctionTool({
     name: 'summarize_chunks',
-    description: 'Summarizes all codebase chunks concurrently. Call this after prepare_repository.',
+    description:
+      'Summarizes all codebase chunks concurrently. Call this after prepare_repository.',
     parameters: z.object({
       concurrency: z.number().optional().default(10),
     }),
     execute: async (input, ctx) => {
       const chunks = ctx.state[STATE.chunks] as Chunk[];
       if (!chunks || chunks.length === 0) {
-        throw new Error('No chunks found in state. Did you call prepare_repository?');
+        throw new Error(
+          'No chunks found in state. Did you call prepare_repository?',
+        );
       }
 
       const queue = new PQueue({ concurrency: input.concurrency });
@@ -34,16 +39,23 @@ export function createSummarizeRepoTool({ model }: CreateSummarizeRepoToolPayloa
               const text = await generateText(llm, { prompt });
               return `## Chunk: ${chunk.label}\n${text}`;
             } catch (error) {
-              console.warn({ chunk: chunk.label, err: error }, 'chunk summary failed; skipping');
+              console.warn(
+                { chunk: chunk.label, err: error },
+                'chunk summary failed; skipping',
+              );
               return null;
             }
-          })
-        )
+          }),
+        ),
       );
 
-      const summaries = results.filter((r): r is string => typeof r === 'string');
+      const summaries = results.filter(
+        (r): r is string => typeof r === 'string',
+      );
       if (chunks.length > 0 && summaries.length === 0) {
-        throw new Error('Every chunk summary failed; cannot build repo context.');
+        throw new Error(
+          'Every chunk summary failed; cannot build repo context.',
+        );
       }
 
       ctx.state[STATE.chunkSummaries] = summaries;

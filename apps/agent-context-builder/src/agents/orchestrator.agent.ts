@@ -43,7 +43,10 @@ Do not invent any information. Only use the tools provided.`;
   };
 }
 
-export function createContextOrchestrator({ model, tools }: ContextOrchestratorPayload): LlmAgent {
+export function createContextOrchestrator({
+  model,
+  tools,
+}: ContextOrchestratorPayload): LlmAgent {
   return new LlmAgent({
     name: 'context_builder_orchestrator',
     description: 'Coordinates the repository context building process.',

@@ -17,7 +17,8 @@ export interface PrepareRepoPayload {
 export function createPrepareRepoTool() {
   return new FunctionTool({
     name: 'prepare_repository',
-    description: 'Clones the repository, chunks it, and extracts agent docs. Call this first.',
+    description:
+      'Clones the repository, chunks it, and extracts agent docs. Call this first.',
     parameters: z.object({
       repo: z.string().describe('owner/name'),
       ref: z.string(),
