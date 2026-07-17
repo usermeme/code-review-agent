@@ -1,89 +1,43 @@
-import { Webhooks } from '@octokit/webhooks';
-import { PubSub } from '@google-cloud/pubsub';
-import { getSecret } from '../../services/secrets.service.js';
-import { ProcessedWebhookResult } from './interfaces/webhooks.interface.js';
 import { FastifyBaseLogger } from 'fastify';
+import { ProcessedWebhookResult } from './interfaces/webhooks.interface.js';
+import { GitAdapter } from './interfaces/git-adapter.interface.js';
+import { GithubAdapter } from './adapters/github.adapter.js';
 
 export class WebhooksService {
-  private webhooks?: Webhooks;
-  private pubsub: PubSub;
+  private adapters: GitAdapter[] = [];
 
   constructor() {
-    this.pubsub = new PubSub();
+    this.adapters.push(new GithubAdapter());
+    // Future: add GitlabAdapter, BitbucketAdapter, etc.
   }
 
   /**
-   * Initializes the GitHub Webhooks SDK with the secret from GCP.
+   * Initializes all registered adapters.
    */
   async init(logger: FastifyBaseLogger): Promise<void> {
-    const secretName = process.env.GITHUB_WEBHOOK_SECRET_ID || 'dummy-secret-for-local-dev';
-    let githubSecret = 'dummy';
-    
-    if (secretName !== 'dummy-secret-for-local-dev') {
-      try {
-        githubSecret = await getSecret(secretName);
-      } catch (e) {
-        logger.error(`Failed to fetch github secret: ${e}`);
-      }
+    for (const adapter of this.adapters) {
+      await adapter.init(logger);
     }
-
-    this.webhooks = new Webhooks({ secret: githubSecret });
   }
 
   /**
-   * Verifies the cryptographic signature of the webhook payload.
+   * Finds the appropriate adapter for the incoming webhook.
    */
-  async verifySignature(rawBody: string, signature: string): Promise<boolean> {
-    if (!this.webhooks) {
-      throw new Error('WebhooksService not initialized');
-    }
-    return this.webhooks.verify(rawBody, signature);
+  getAdapterForRequest(headers: Record<string, string | string[] | undefined>): GitAdapter | undefined {
+    return this.adapters.find(adapter => adapter.canHandle(headers));
   }
 
   /**
-   * Processes the parsed payload and publishes to Pub/Sub if needed.
+   * Verifies the cryptographic signature of the webhook payload using the appropriate adapter.
    */
-  async processEvent(event: string, payload: any, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
-    if (event === 'pull_request') {
-      const action = payload.action;
-      if (action === 'opened' || action === 'synchronize') {
-        logger.info(`Received PR event: ${action} for ${payload.pull_request.html_url}`);
-        
-        await this.publishContextBuild({
-          owner: payload.repository.owner.login,
-          repo: payload.repository.name,
-          prNumber: payload.pull_request.number,
-          action,
-        });
-        
-        return { status: 'Context build triggered' };
-      }
-    } else if (event === 'issue_comment') {
-      const action = payload.action;
-      if (action === 'created' && payload.issue.pull_request) {
-        const commentBody = payload.comment.body;
-        if (commentBody.includes('/review')) {
-          logger.info(`Received manual /review trigger on ${payload.issue.html_url}`);
-          
-          await this.publishContextBuild({
-            owner: payload.repository.owner.login,
-            repo: payload.repository.name,
-            prNumber: payload.issue.number,
-            action: 'manual_trigger',
-          });
-          
-          return { status: 'Manual review triggered' };
-        }
-      }
-    }
-
-    return { status: 'Ignored event' };
+  async verifySignature(adapter: GitAdapter, headers: Record<string, string | string[] | undefined>, rawBody: string): Promise<boolean> {
+    return adapter.verifySignature(headers, rawBody);
   }
 
-  private async publishContextBuild(data: any): Promise<void> {
-    const topicName = process.env.BUILD_CONTEXT_TOPIC || 'build-context-topic';
-    await this.pubsub.topic(topicName).publishMessage({
-      json: data
-    });
+  /**
+   * Processes the parsed payload using the appropriate adapter.
+   */
+  async processEvent(adapter: GitAdapter, headers: Record<string, string | string[] | undefined>, payload: any, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
+    return adapter.processEvent(headers, payload, logger);
   }
 }

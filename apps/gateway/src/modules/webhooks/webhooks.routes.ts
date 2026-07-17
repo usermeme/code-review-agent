@@ -5,17 +5,18 @@ export const webhooksRoutes: FastifyPluginAsync<{ webhooksService: WebhooksServi
   const { webhooksService } = options;
 
   fastify.post('/webhook', { config: { rawBody: true } }, async (request, reply) => {
-    const signature = request.headers['x-hub-signature-256'] as string;
-    const event = request.headers['x-github-event'] as string;
-    const id = request.headers['x-github-delivery'] as string;
+    if (!request.rawBody) {
+      return reply.code(400).send({ error: 'Missing raw body' });
+    }
 
-    if (!signature || !event || !id || !request.rawBody) {
-      return reply.code(400).send({ error: 'Missing GitHub webhook headers or body' });
+    const adapter = webhooksService.getAdapterForRequest(request.headers);
+    if (!adapter) {
+      return reply.code(400).send({ error: 'Unsupported Git Provider or Missing Headers' });
     }
 
     try {
       // Verify Cryptographic Signature
-      const isValid = await webhooksService.verifySignature(request.rawBody, signature);
+      const isValid = await webhooksService.verifySignature(adapter, request.headers, request.rawBody);
       if (!isValid) {
         throw new Error('Verification failed');
       }
@@ -27,7 +28,7 @@ export const webhooksRoutes: FastifyPluginAsync<{ webhooksService: WebhooksServi
     // Parse the JSON body now that it is verified
     const payload = request.body as any;
 
-    const result = await webhooksService.processEvent(event, payload, fastify.log);
+    const result = await webhooksService.processEvent(adapter, request.headers, payload, fastify.log);
     
     return result;
   });
