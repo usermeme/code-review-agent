@@ -1,0 +1,15 @@
+{
+  "name": "Node.js + Antigravity + Neovim",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:24",
+
+  "features": {
+    "ghcr.io/devcontainers-extra/features/neovim-apt-get:1": {}
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.config/nvim,target=/home/node/.config/nvim,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.gemini,target=/home/node/.gemini,type=bind,consistency=cached"
+  ],
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y ripgrep fd-find build-essential && npm install && curl -fsSL https://antigravity.google/cli/install.sh | bash",
+
+  "remoteUser": "node"
+}

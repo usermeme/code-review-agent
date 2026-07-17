@@ -2,8 +2,8 @@ pre-commit:
   parallel: true
   commands:
     typecheck:
-      glob: "*.{ts,tsx,js,jsx}"
+      glob: '*.{ts,tsx,js,jsx}'
       run: npm run typecheck
     lint:
-      glob: "*.{ts,tsx,js,jsx}"
+      glob: '*.{ts,tsx,js,jsx}'
       run: npm run lint
