@@ -46,44 +46,55 @@ export class GithubAdapter implements GitAdapter {
   }
 
   async processEvent(headers: Record<string, string | string[] | undefined>, payload: any, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
-    const event = headers['x-github-event'];
+    const event = headers['x-github-event'] as string;
 
-    if (event === 'pull_request') {
-      const action = payload.action;
-      if (action === 'opened' || action === 'synchronize') {
-        logger.info(`Received GitHub PR event: ${action} for ${payload.pull_request?.html_url}`);
+    switch (event) {
+      case 'pull_request':
+        return this.processPullRequestEvent(payload, logger);
+      case 'issue_comment':
+        return this.processIssueCommentEvent(payload, logger);
+      default:
+        return { status: 'Ignored GitHub event' };
+    }
+  }
+
+  private async processPullRequestEvent(payload: any, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
+    const action = payload.action;
+    if (action === 'opened' || action === 'synchronize') {
+      logger.info(`Received GitHub PR event: ${action} for ${payload.pull_request?.html_url}`);
+      
+      await this.publishContextBuild({
+        provider: 'github',
+        owner: payload.repository?.owner?.login,
+        repo: payload.repository?.name,
+        prNumber: payload.pull_request?.number,
+        action,
+      });
+      
+      return { status: 'Context build triggered for GitHub' };
+    }
+    return { status: 'Ignored PR action' };
+  }
+
+  private async processIssueCommentEvent(payload: any, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
+    const action = payload.action;
+    if (action === 'created' && payload.issue?.pull_request) {
+      const commentBody = payload.comment?.body || '';
+      if (commentBody.includes('/review')) {
+        logger.info(`Received GitHub manual /review trigger on ${payload.issue?.html_url}`);
         
         await this.publishContextBuild({
           provider: 'github',
           owner: payload.repository?.owner?.login,
           repo: payload.repository?.name,
-          prNumber: payload.pull_request?.number,
-          action,
+          prNumber: payload.issue?.number,
+          action: 'manual_trigger',
         });
         
-        return { status: 'Context build triggered for GitHub' };
-      }
-    } else if (event === 'issue_comment') {
-      const action = payload.action;
-      if (action === 'created' && payload.issue?.pull_request) {
-        const commentBody = payload.comment?.body || '';
-        if (commentBody.includes('/review')) {
-          logger.info(`Received GitHub manual /review trigger on ${payload.issue?.html_url}`);
-          
-          await this.publishContextBuild({
-            provider: 'github',
-            owner: payload.repository?.owner?.login,
-            repo: payload.repository?.name,
-            prNumber: payload.issue?.number,
-            action: 'manual_trigger',
-          });
-          
-          return { status: 'Manual review triggered for GitHub' };
-        }
+        return { status: 'Manual review triggered for GitHub' };
       }
     }
-
-    return { status: 'Ignored GitHub event' };
+    return { status: 'Ignored issue comment action' };
   }
 
   private async publishContextBuild(data: any): Promise<void> {
