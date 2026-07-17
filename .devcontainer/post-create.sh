@@ -30,7 +30,7 @@ curl -fsSL https://antigravity.google/cli/install.sh | bash
 echo "Applying dotfiles via stow..."
 if [ -d "$HOME/dotfiles" ]; then
     cd "$HOME/dotfiles"
-    stow */
+    stow ./*
     cd -
 else
     echo "Dotfiles directory not found. Skipping stow."
