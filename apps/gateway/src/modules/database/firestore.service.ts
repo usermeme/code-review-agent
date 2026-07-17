@@ -1,5 +1,5 @@
 import { Firestore } from '@google-cloud/firestore';
-import { DatabaseService as IDatabaseService, PRState } from './interfaces/database.interface.js';
+import { DatabaseService as IDatabaseService } from './interfaces/database.interface.js';
 
 export class FirestoreDatabaseService implements IDatabaseService {
   private firestore: Firestore;
@@ -9,23 +9,19 @@ export class FirestoreDatabaseService implements IDatabaseService {
   }
 
   async connect(): Promise<void> {
-    // Firestore initializes lazily, but we can verify credentials or simply do nothing.
     console.log('Firestore initialized via Application Default Credentials');
   }
 
-  async updatePRStatus(prKey: string, state: Partial<PRState>): Promise<void> {
-    const docRef = this.firestore.collection('pull_requests').doc(prKey);
-    await docRef.set({
-      ...state,
-      updatedAt: new Date()
-    }, { merge: true });
+  async setDocument<T extends object>(collection: string, docId: string, data: Partial<T>, merge = true): Promise<void> {
+    const docRef = this.firestore.collection(collection).doc(docId);
+    await docRef.set(data, { merge });
   }
 
-  async getPRStatus(prKey: string): Promise<PRState | null> {
-    const doc = await this.firestore.collection('pull_requests').doc(prKey).get();
+  async getDocument<T>(collection: string, docId: string): Promise<T | null> {
+    const doc = await this.firestore.collection(collection).doc(docId).get();
     if (!doc.exists) {
       return null;
     }
-    return doc.data() as PRState;
+    return doc.data() as T;
   }
 }

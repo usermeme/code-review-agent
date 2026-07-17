@@ -1,12 +1,3 @@
-export interface PRState {
-  provider: string;
-  owner: string;
-  repo: string;
-  prNumber: number;
-  status: 'queued' | 'building_context' | 'reviewing' | 'completed' | 'failed';
-  updatedAt: Date;
-}
-
 export interface DatabaseService {
   /**
    * Initializes the database connection.
@@ -14,12 +5,12 @@ export interface DatabaseService {
   connect(): Promise<void>;
 
   /**
-   * Updates the status of a Pull Request in the database.
+   * Set or update a document in a collection.
    */
-  updatePRStatus(prKey: string, state: Partial<PRState>): Promise<void>;
-  
+  setDocument<T extends object>(collection: string, docId: string, data: Partial<T>, merge?: boolean): Promise<void>;
+
   /**
-   * Retrieves the current status of a Pull Request.
+   * Retrieve a document from a collection.
    */
-  getPRStatus(prKey: string): Promise<PRState | null>;
+  getDocument<T>(collection: string, docId: string): Promise<T | null>;
 }
