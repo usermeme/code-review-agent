@@ -3,7 +3,7 @@ set -e
 
 echo "Updating apt and installing dependencies..."
 sudo apt-get update
-sudo apt-get install -y ripgrep fd-find build-essential
+sudo apt-get install -y ripgrep fd-find build-essential stow
 
 echo "Detecting architecture for Neovim..."
 ARCH=$(dpkg --print-architecture)
@@ -26,5 +26,14 @@ npm install
 
 echo "Installing Antigravity CLI..."
 curl -fsSL https://antigravity.google/cli/install.sh | bash
+
+echo "Applying dotfiles via stow..."
+if [ -d "$HOME/dotfiles" ]; then
+    cd "$HOME/dotfiles"
+    stow */
+    cd -
+else
+    echo "Dotfiles directory not found. Skipping stow."
+fi
 
 echo "Done!"
