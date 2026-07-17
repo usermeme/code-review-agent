@@ -15,7 +15,6 @@ export const webhooksRoutes: FastifyPluginAsync<{ webhooksService: WebhooksServi
     }
 
     try {
-      // Verify Cryptographic Signature
       const isValid = await webhooksService.verifySignature(adapter, request.headers, request.rawBody);
       if (!isValid) {
         throw new Error('Verification failed');
@@ -25,7 +24,6 @@ export const webhooksRoutes: FastifyPluginAsync<{ webhooksService: WebhooksServi
       return reply.code(401).send({ error: 'Invalid signature' });
     }
 
-    // Parse the JSON body now that it is verified
     const payload = request.body;
 
     const result = await webhooksService.processEvent(adapter, request.headers, payload, fastify.log);
