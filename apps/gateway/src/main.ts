@@ -3,12 +3,21 @@ import { webhooksModule } from './modules/webhooks/webhooks.module.js';
 import { contextModule } from './modules/context/context.module.js';
 import { reviewModule } from './modules/review/review.module.js';
 
+import fastifyRawBody from 'fastify-raw-body';
+
 const host = process.env.HOST ?? 'localhost';
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 // Instantiate Fastify with some config
 const server = Fastify({
   logger: true,
+});
+
+server.register(fastifyRawBody, {
+  field: 'rawBody',
+  global: false,
+  encoding: 'utf8',
+  runFirst: true
 });
 
 // Register application modules
