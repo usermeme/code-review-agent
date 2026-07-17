@@ -26,7 +26,7 @@ export const webhooksRoutes: FastifyPluginAsync<{ webhooksService: WebhooksServi
     }
 
     // Parse the JSON body now that it is verified
-    const payload = request.body as any;
+    const payload = request.body;
 
     const result = await webhooksService.processEvent(adapter, request.headers, payload, fastify.log);
     

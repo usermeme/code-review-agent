@@ -20,5 +20,5 @@ export interface GitAdapter {
   /**
    * Process the webhook event and optionally publish to PubSub.
    */
-  processEvent(headers: Record<string, string | string[] | undefined>, payload: any, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult>;
+  processEvent(headers: Record<string, string | string[] | undefined>, payload: unknown, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult>;
 }

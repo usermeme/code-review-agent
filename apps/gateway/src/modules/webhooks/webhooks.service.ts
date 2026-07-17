@@ -37,7 +37,7 @@ export class WebhooksService {
   /**
    * Processes the parsed payload using the appropriate adapter.
    */
-  async processEvent(adapter: GitAdapter, headers: Record<string, string | string[] | undefined>, payload: any, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
+  async processEvent(adapter: GitAdapter, headers: Record<string, string | string[] | undefined>, payload: unknown, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
     return adapter.processEvent(headers, payload, logger);
   }
 }

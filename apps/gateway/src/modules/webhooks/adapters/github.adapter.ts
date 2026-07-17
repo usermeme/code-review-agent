@@ -3,7 +3,29 @@ import { PubSub } from '@google-cloud/pubsub';
 import { FastifyBaseLogger } from 'fastify';
 import { getSecret } from '../../../services/secrets.service.js';
 import { GitAdapter } from '../interfaces/git-adapter.interface.js';
-import { ProcessedWebhookResult } from '../interfaces/webhooks.interface.js';
+import { ProcessedWebhookResult, WebhookEventPayload } from '../interfaces/webhooks.interface.js';
+
+export interface GithubWebhookPayload {
+  action?: string;
+  pull_request?: {
+    number: number;
+    html_url: string;
+  };
+  issue?: {
+    number: number;
+    html_url: string;
+    pull_request?: unknown;
+  };
+  comment?: {
+    body: string;
+  };
+  repository?: {
+    name: string;
+    owner?: {
+      login: string;
+    };
+  };
+}
 
 export class GithubAdapter implements GitAdapter {
   private webhooks?: Webhooks;
@@ -45,29 +67,30 @@ export class GithubAdapter implements GitAdapter {
     return this.webhooks.verify(rawBody, signature);
   }
 
-  async processEvent(headers: Record<string, string | string[] | undefined>, payload: any, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
+  async processEvent(headers: Record<string, string | string[] | undefined>, payload: unknown, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
     const event = headers['x-github-event'] as string;
+    const ghPayload = payload as GithubWebhookPayload;
 
     switch (event) {
       case 'pull_request':
-        return this.processPullRequestEvent(payload, logger);
+        return this.processPullRequestEvent(ghPayload, logger);
       case 'issue_comment':
-        return this.processIssueCommentEvent(payload, logger);
+        return this.processIssueCommentEvent(ghPayload, logger);
       default:
         return { status: 'Ignored GitHub event' };
     }
   }
 
-  private async processPullRequestEvent(payload: any, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
+  private async processPullRequestEvent(payload: GithubWebhookPayload, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
     const action = payload.action;
     if (action === 'opened' || action === 'synchronize') {
       logger.info(`Received GitHub PR event: ${action} for ${payload.pull_request?.html_url}`);
       
       await this.publishContextBuild({
         provider: 'github',
-        owner: payload.repository?.owner?.login,
-        repo: payload.repository?.name,
-        prNumber: payload.pull_request?.number,
+        owner: payload.repository?.owner?.login || '',
+        repo: payload.repository?.name || '',
+        prNumber: payload.pull_request?.number || 0,
         action,
       });
       
@@ -76,7 +99,7 @@ export class GithubAdapter implements GitAdapter {
     return { status: 'Ignored PR action' };
   }
 
-  private async processIssueCommentEvent(payload: any, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
+  private async processIssueCommentEvent(payload: GithubWebhookPayload, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
     const action = payload.action;
     if (action === 'created' && payload.issue?.pull_request) {
       const commentBody = payload.comment?.body || '';
@@ -85,9 +108,9 @@ export class GithubAdapter implements GitAdapter {
         
         await this.publishContextBuild({
           provider: 'github',
-          owner: payload.repository?.owner?.login,
-          repo: payload.repository?.name,
-          prNumber: payload.issue?.number,
+          owner: payload.repository?.owner?.login || '',
+          repo: payload.repository?.name || '',
+          prNumber: payload.issue?.number || 0,
           action: 'manual_trigger',
         });
         
@@ -97,7 +120,7 @@ export class GithubAdapter implements GitAdapter {
     return { status: 'Ignored issue comment action' };
   }
 
-  private async publishContextBuild(data: any): Promise<void> {
+  private async publishContextBuild(data: WebhookEventPayload & { provider: string }): Promise<void> {
     const topicName = process.env.BUILD_CONTEXT_TOPIC || 'build-context-topic';
     await this.pubsub.topic(topicName).publishMessage({
       json: data
