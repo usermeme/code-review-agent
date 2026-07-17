@@ -5,6 +5,7 @@ import { reviewModule } from './modules/review/review.module.js';
 import { internalModule } from './modules/internal/internal.module.js';
 import { FirestoreDatabaseService } from './modules/database/firestore.service.js';
 import { PrRepository } from './modules/database/repositories/pr.repository.js';
+import { ContextRepository } from './modules/database/repositories/context.repository.js';
 
 import fastifyRawBody from 'fastify-raw-body';
 
@@ -27,11 +28,12 @@ const databaseService = new FirestoreDatabaseService();
 await databaseService.connect();
 
 const prRepository = new PrRepository(databaseService);
+const contextRepository = new ContextRepository(databaseService);
 
 server.register(webhooksModule, { prefix: '/api/v1', prRepository });
-server.register(internalModule, { prefix: '/api/v1/internal', prRepository });
-server.register(contextModule, { prefix: '/api/v1' });
-server.register(reviewModule, { prefix: '/api/v1' });
+server.register(internalModule, { prefix: '/api/v1/internal', prRepository, contextRepository });
+server.register(contextModule, { prefix: '/api/v1', contextRepository });
+server.register(reviewModule, { prefix: '/api/v1', prRepository });
 
 server.listen({ port, host }, (err) => {
   if (err) {

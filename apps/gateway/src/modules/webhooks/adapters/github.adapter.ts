@@ -137,4 +137,9 @@ export class GithubAdapter implements GitAdapter {
       json: data
     });
   }
+
+  async postInlineComments(owner: string, repo: string, prNumber: number, comments: { path: string; position: number; body: string }[]): Promise<void> {
+    // TODO: implement actual GitHub API call using octokit
+    console.log(`[GithubAdapter] Posting ${comments.length} inline comments to ${owner}/${repo}#${prNumber}`);
+  }
 }

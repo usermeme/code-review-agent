@@ -1,26 +1,35 @@
 import { FastifyBaseLogger } from 'fastify';
 import { PubSub } from '@google-cloud/pubsub';
 import { PrRepository } from '../database/repositories/pr.repository.js';
+import { ContextRepository, RepositoryContext } from '../database/repositories/context.repository.js';
 
 export interface ContextReadyPayload {
   provider: string;
   owner: string;
   repo: string;
   prNumber: number;
+  files: { path: string; content: string }[];
+  summary?: string;
 }
 
 export class InternalService {
   private pubsub: PubSub;
 
-  constructor(private prRepository: PrRepository) {
+  constructor(private prRepository: PrRepository, private contextRepository: ContextRepository) {
     this.pubsub = new PubSub();
   }
 
   async handleContextReady(payload: ContextReadyPayload, logger: FastifyBaseLogger): Promise<void> {
-    const { provider, owner, repo, prNumber } = payload;
+    const { provider, owner, repo, prNumber, files, summary } = payload;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
 
     logger.info(`Context is ready for PR: ${prKey}`);
+
+    // Save the context
+    await this.contextRepository.saveContext(prKey, {
+      files,
+      summary,
+    });
 
     // Update state to "reviewing"
     await this.prRepository.updatePRStatus(prKey, {
