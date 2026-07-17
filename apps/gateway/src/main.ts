@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { webhooksModule } from './modules/webhooks/webhooks.module.js';
 import { contextModule } from './modules/context/context.module.js';
 import { reviewModule } from './modules/review/review.module.js';
+import { FirestoreDatabaseService } from './modules/database/firestore.service.js';
 
 import fastifyRawBody from 'fastify-raw-body';
 
@@ -19,7 +20,11 @@ server.register(fastifyRawBody, {
   runFirst: true
 });
 
-server.register(webhooksModule, { prefix: '/api/v1' });
+// Initialize singletons (Composition Root)
+const databaseService = new FirestoreDatabaseService();
+await databaseService.connect();
+
+server.register(webhooksModule, { prefix: '/api/v1', databaseService });
 server.register(contextModule, { prefix: '/api/v1' });
 server.register(reviewModule, { prefix: '/api/v1' });
 

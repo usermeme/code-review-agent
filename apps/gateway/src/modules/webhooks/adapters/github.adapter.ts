@@ -4,6 +4,7 @@ import { FastifyBaseLogger } from 'fastify';
 import { getSecret } from '../../../services/secrets.service.js';
 import { GitAdapter } from '../interfaces/git-adapter.interface.js';
 import { ProcessedWebhookResult, WebhookEventPayload } from '../interfaces/webhooks.interface.js';
+import { DatabaseService } from '../../database/interfaces/database.interface.js';
 
 export interface GithubWebhookPayload {
   action?: string;
@@ -31,7 +32,7 @@ export class GithubAdapter implements GitAdapter {
   private webhooks?: Webhooks;
   private pubsub: PubSub;
 
-  constructor() {
+  constructor(private db: DatabaseService) {
     this.pubsub = new PubSub();
   }
 
@@ -121,6 +122,16 @@ export class GithubAdapter implements GitAdapter {
   }
 
   private async publishContextBuild(data: WebhookEventPayload & { provider: string }): Promise<void> {
+    const prKey = `${data.provider}:${data.owner}:${data.repo}:${data.prNumber}`;
+    
+    await this.db.updatePRStatus(prKey, {
+      provider: data.provider,
+      owner: data.owner,
+      repo: data.repo,
+      prNumber: data.prNumber,
+      status: 'queued',
+    });
+
     const topicName = process.env.BUILD_CONTEXT_TOPIC || 'build-context-topic';
     await this.pubsub.topic(topicName).publishMessage({
       json: data
