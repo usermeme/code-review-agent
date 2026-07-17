@@ -17,7 +17,7 @@ server.register(fastifyRawBody, {
   field: 'rawBody',
   global: false,
   encoding: 'utf8',
-  runFirst: true
+  runFirst: true,
 });
 
 // Initialize singletons (Composition Root)
