@@ -8,7 +8,6 @@
   "include": [
     "apps/**/*.ts",
     "libs/**/*.ts",
-    "legacy-src/**/*.ts",
     "eslint.config.js"
   ]
 }
