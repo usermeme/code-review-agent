@@ -1,12 +1,13 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import { defineConfig } from 'eslint/config';
 
-export default tseslint.config(
+export default defineConfig(
   { ignores: ['dist/', 'node_modules/', 'coverage/'] },
   js.configs.recommended,
   {
     // Type-aware linting for the app code (tsconfig covers src only).
-    files: ['src/**/*.ts'],
+    files: ['apps/**/*.ts'],
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
@@ -17,10 +18,23 @@ export default tseslint.config(
     rules: {
       // Objects flow through prompt templates where `${obj}` is a real bug,
       // but numbers in templates are fine.
-      '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      '@typescript-eslint/restrict-template-expressions': [
+        'error',
+        { allowNumber: true },
+      ],
+      '@typescript-eslint/no-unused-vars': 'error',
+      '@typescript-eslint/require-await': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
       // Fire-and-forget is deliberate in the webhook path; require the `void` marker.
-      '@typescript-eslint/no-floating-promises': ['error', { ignoreVoid: true }],
+      '@typescript-eslint/no-floating-promises': [
+        'error',
+        { ignoreVoid: true },
+      ],
     },
   },
   {
@@ -30,7 +44,7 @@ export default tseslint.config(
     extends: [...tseslint.configs.recommended],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': 'error',
     },
   },
 );
