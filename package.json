@@ -2,7 +2,11 @@
   "name": "code-review-agent-v2",
   "version": "0.0.0",
   "license": "MIT",
-  "scripts": {},
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "build": "nx run-many -t build"
+  },
   "private": true,
   "devDependencies": {
     "@eslint/js": "^10.0.1",
