@@ -1,15 +1,9 @@
 import { FastifyBaseLogger } from 'fastify';
 import { ProcessedWebhookResult } from './interfaces/webhooks.interface.js';
 import { GitAdapter } from './interfaces/git-adapter.interface.js';
-import { GithubAdapter } from './adapters/github.adapter.js';
 
 export class WebhooksService {
-  private adapters: GitAdapter[] = [];
-
-  constructor() {
-    this.adapters.push(new GithubAdapter());
-    // Future: add GitlabAdapter, BitbucketAdapter, etc.
-  }
+  constructor(private adapters: GitAdapter[] = []) {}
 
   /**
    * Initializes all registered adapters.
