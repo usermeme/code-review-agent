@@ -5,7 +5,8 @@
   "mounts": [
     "source=${localEnv:HOME}/.config/nvim,target=/home/node/.config/nvim,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.gemini,target=/home/node/.gemini,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.agents/skills,target=/home/node/.agents/skills,type=bind,consistency=cached"
+    "source=${localEnv:HOME}/.agents/skills,target=/home/node/.agents/skills,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/dotfiles,target=/home/node/dotfiles,type=bind,consistency=cached"
   ],
   "postCreateCommand": "bash .devcontainer/post-create.sh",
 
