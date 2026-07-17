@@ -83,7 +83,7 @@ export class GithubAdapter implements GitAdapter {
 
   private async processPullRequestEvent(payload: GithubWebhookPayload, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
     const action = payload.action;
-    if (action === 'opened' || action === 'synchronize') {
+    if (action === 'opened' || action === 'synchronize' || action === 'reopened' || action === 'review_requested') {
       logger.info(`Received GitHub PR event: ${action} for ${payload.pull_request?.html_url}`);
       
       await this.publishContextBuild({
