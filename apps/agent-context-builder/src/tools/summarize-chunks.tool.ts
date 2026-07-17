@@ -6,8 +6,12 @@ import { STATE } from '../constants/state-keys.constant.js';
 import { renderChunk, type Chunk } from '../services/chunker.service.js';
 import { generateText } from '../services/generate.service.js';
 
-export function createSummarizeRepoTool(modelName: string) {
-  const llm = new Gemini({ model: modelName });
+export interface CreateSummarizeRepoToolPayload {
+  model: string;
+}
+
+export function createSummarizeRepoTool({ model }: CreateSummarizeRepoToolPayload) {
+  const llm = new Gemini({ model });
   
   return new FunctionTool({
     name: 'summarize_chunks',

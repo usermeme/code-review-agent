@@ -4,8 +4,12 @@ import { z } from 'zod';
 import { STATE } from '../constants/state-keys.constant.js';
 import { generateText } from '../services/generate.service.js';
 
-export function createSynthesizeContextTool(modelName: string) {
-  const llm = new Gemini({ model: modelName });
+export interface CreateSynthesizeContextToolPayload {
+  model: string;
+}
+
+export function createSynthesizeContextTool({ model }: CreateSynthesizeContextToolPayload) {
+  const llm = new Gemini({ model });
   
   return new FunctionTool({
     name: 'synthesize_context',
