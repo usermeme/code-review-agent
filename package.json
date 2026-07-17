@@ -2,7 +2,11 @@
   "name": "code-review-agent-v2",
   "version": "0.0.0",
   "license": "MIT",
-  "scripts": {},
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "build": "nx run-many -t build"
+  },
   "private": true,
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -27,9 +31,12 @@
   "dependencies": {
     "@fastify/autoload": "~6.0.3",
     "@fastify/sensible": "~6.0.2",
+    "@google-cloud/firestore": "^8.6.0",
     "@google-cloud/pubsub": "^4.11.0",
+    "@google-cloud/secret-manager": "^6.2.0",
     "@google/adk": "~1.3.0",
     "@google/genai": "^1.9.0",
+    "@octokit/webhooks": "^14.2.0",
     "fastify": "^5.10.0",
     "fastify-plugin": "~5.0.1",
     "p-queue": "^8.0.0",

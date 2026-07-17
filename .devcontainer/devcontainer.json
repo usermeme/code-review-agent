@@ -4,8 +4,9 @@
 
   "mounts": [
     "source=${localEnv:HOME}/.gemini,target=/home/node/.gemini,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.agents/skills,target=/home/node/.agents/skills,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/dotfiles,target=/home/node/dotfiles,type=bind,consistency=cached"
+    "source=${localEnv:HOME}/.agents/skills,target=/home/node/.agents/skills,type=bind,consistency=cached,readonly",
+    "source=${localEnv:HOME}/dotfiles,target=/home/node/dotfiles,type=bind,consistency=cached,readonly",
+    "source=${localEnv:HOME}/.config/gcloud,target=/home/node/.config/gcloud,type=bind,readonly"
   ],
   "postCreateCommand": "bash .devcontainer/post-create.sh",
 
