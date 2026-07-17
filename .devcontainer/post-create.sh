@@ -36,4 +36,8 @@ else
     echo "Dotfiles directory not found. Skipping stow."
 fi
 
+echo "Symlinking global skills for Antigravity..."
+mkdir -p ~/.gemini
+ln -sfn ~/.agents/skills ~/.gemini/skills
+
 echo "Done!"
