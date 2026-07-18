@@ -72,12 +72,12 @@ Once the Gateway is deployed, you must set up push subscriptions. To ensure secu
 ### 3. Automated CI/CD via Google Cloud Build
 We have configured a fully native Google Cloud CI/CD pipeline using `cloudbuild.yaml`. You do not need to build Docker images manually.
 
-To enable automated deployments:
+To enable automated deployments using the modern (2nd Gen) integration:
 1. Go to the **Cloud Build** console in Google Cloud.
-2. Click **Triggers** -> **Create Trigger**.
-3. Connect your GitHub repository.
-4. Set the Event to **Push to a branch** (e.g., `main`).
-5. Select **Cloud Build configuration file (yaml or json)** as the configuration type and point it to `/cloudbuild.yaml`.
+2. Navigate to **Repositories (2nd gen)** and click **Create Host Connection**. Connect your GitHub account using the Cloud Build GitHub App.
+3. Link your specific repository to that connection.
+4. Go to **Triggers** -> **Create Trigger**.
+5. Select your 2nd gen repository, set the Event to **Push to a branch** (e.g., `main`), and set the configuration to point to `/cloudbuild.yaml`.
 
 When you push to the repository, Google Cloud Build will automatically install dependencies, build the Nx monorepo, deploy the Fastify Gateway directly to Cloud Run natively, and deploy the agents using the `@google/adk` deployment CLI.
 
