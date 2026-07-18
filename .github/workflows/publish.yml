@@ -8,6 +8,9 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [gateway, agent-context-builder, agent-code-reviewer]
     permissions:
       contents: read
       packages: write
@@ -26,6 +29,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            APP_NAME=${{ matrix.app }}
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}-${{ matrix.app }}:latest
+            ghcr.io/${{ github.repository }}-${{ matrix.app }}:${{ github.sha }}

@@ -2,9 +2,10 @@ FROM node:22-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY tsconfig.json ./
-COPY src ./src
-RUN npm run build && npm prune --omit=dev
+COPY tsconfig*.json nx.json ./
+COPY libs ./libs
+COPY apps ./apps
+RUN npx nx run-many -t build && npm prune --omit=dev
 
 FROM node:22-slim
 # git is required for shallow-cloning repos during context building
@@ -14,8 +15,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --chown=node:node --from=build /app/node_modules ./node_modules
 COPY --chown=node:node --from=build /app/dist ./dist
-COPY --chown=node:node config ./config
-COPY --chown=node:node migrations ./migrations
+
+# We pass APP_NAME as an argument during build (gateway, agent-context-builder, agent-code-reviewer)
+ARG APP_NAME
+ENV APP_NAME=${APP_NAME}
+
 USER node
 EXPOSE 8080
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "node dist/apps/${APP_NAME}/main.js"]
