@@ -14,15 +14,6 @@ export class WebhooksService {
   }
 
   /**
-   * Finds the appropriate adapter for the incoming webhook.
-   */
-  getAdapterForRequest(
-    headers: Record<string, string | string[] | undefined>,
-  ): GitAdapter | undefined {
-    return this.gitService.getAdapterForRequest(headers)?.adapter;
-  }
-
-  /**
    * Verifies the cryptographic signature of the webhook payload using the appropriate adapter.
    */
   async verifySignature(

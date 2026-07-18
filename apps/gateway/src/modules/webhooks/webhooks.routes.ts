@@ -1,10 +1,12 @@
 import { FastifyPluginAsync } from 'fastify';
 import { WebhooksService } from './webhooks.service.js';
+import { GitService } from '../git/git.service.js';
 
 export const webhooksRoutes: FastifyPluginAsync<{
   webhooksService: WebhooksService;
+  gitService: GitService;
 }> = async (fastify, options) => {
-  const { webhooksService } = options;
+  const { webhooksService, gitService } = options;
 
   fastify.post(
     '/',
@@ -14,12 +16,14 @@ export const webhooksRoutes: FastifyPluginAsync<{
         return reply.code(400).send({ error: 'Missing raw body' });
       }
 
-      const adapter = webhooksService.getAdapterForRequest(request.headers);
-      if (!adapter) {
+      const match = gitService.getAdapterForRequest(request.headers);
+      if (!match) {
         return reply
           .code(400)
           .send({ error: 'Unsupported Git Provider or Missing Headers' });
       }
+
+      const adapter = match.adapter;
 
       try {
         const isValid = await webhooksService.verifySignature(

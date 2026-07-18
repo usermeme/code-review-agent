@@ -36,14 +36,24 @@ const gitService = new GitService();
 gitService.registerAdapter('github', new GithubAdapter(prRepository));
 await gitService.initAdapters(server.log);
 
-server.register(webhooksModule, { prefix: '/api/v1/webhooks', gitService });
+server.register(webhooksModule, {
+  prefix: '/api/v1/webhooks',
+  gitService,
+});
 server.register(internalModule, {
   prefix: '/api/v1/internal',
   prRepository,
   contextRepository,
 });
-server.register(contextModule, { prefix: '/api/v1/context', contextRepository });
-server.register(reviewModule, { prefix: '/api/v1/review', prRepository, gitService });
+server.register(contextModule, {
+  prefix: '/api/v1/context',
+  contextRepository,
+});
+server.register(reviewModule, {
+  prefix: '/api/v1/review',
+  prRepository,
+  gitService,
+});
 
 server.listen({ port, host }, (err) => {
   if (err) {
