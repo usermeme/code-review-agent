@@ -70,16 +70,26 @@ Once the Gateway is deployed, you must set up push subscriptions. To ensure secu
 - `review-result-topic` pushes to `https://<YOUR_CLOUD_RUN_URL>/api/v1/review/results?token=<YOUR_PUBSUB_SECRET_TOKEN>`
 
 ### 3. Automated CI/CD via Google Cloud Build
-We have configured a fully native Google Cloud CI/CD pipeline using `cloudbuild.yaml`. You do not need to build Docker images manually.
 
+You have two options to deploy the agent: automated via GitHub, or manually via the GCP CLI.
+
+#### Option A: Automated GitHub Triggers (Recommended)
+We have configured a fully native Google Cloud CI/CD pipeline. 
 To enable automated deployments using the modern (2nd Gen) integration:
 1. Go to the **Cloud Build** console in Google Cloud.
-2. Navigate to **Repositories (2nd gen)** and click **Create Host Connection**. Connect your GitHub account using the Cloud Build GitHub App.
+2. Navigate to **Repositories (2nd gen)** and click **Create Host Connection**. Connect your GitHub account.
 3. Link your specific repository to that connection.
 4. Go to **Triggers** -> **Create Trigger**.
 5. Select your 2nd gen repository, set the Event to **Push to a branch** (e.g., `main`), and set the configuration to point to `/cloudbuild.yaml`.
 
-When you push to the repository, Google Cloud Build will automatically install dependencies, build the Nx monorepo, deploy the Fastify Gateway directly to Cloud Run natively, and deploy the agents using the `@google/adk` deployment CLI.
+#### Option B: Manual Deployment via CLI
+If you want to deploy directly from your local terminal without connecting GitHub to Google Cloud (perfect for deploying to a client's GCP account from your personal machine), you can submit the build manually:
+1. Ensure you are authenticated with the correct GCP project locally: `gcloud config set project your-gcp-project-id`
+2. Run the following command from the root of the repository:
+   ```sh
+   gcloud builds submit --config cloudbuild.yaml .
+   ```
+This will upload your local code to Cloud Build and execute the exact same deployment pipeline remotely!
 
 ### 4. Cloud Run Environment Configuration
 After your first deployment, go to the Google Cloud Run console and ensure your Gateway service has the following environment variables configured:
