@@ -8,7 +8,8 @@ export function createStoreContextTool() {
 
   return new FunctionTool({
     name: 'store_context',
-    description: 'Stores the synthesized context by sending it to the Gateway via Pub/Sub.',
+    description:
+      'Stores the synthesized context by sending it to the Gateway via Pub/Sub.',
     parameters: z.object({
       provider: z.string(),
       owner: z.string(),

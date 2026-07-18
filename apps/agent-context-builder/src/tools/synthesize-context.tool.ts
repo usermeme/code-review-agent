@@ -22,13 +22,17 @@ export function createSynthesizeContextTool({
       const summaries = ctx.state[STATE.chunkSummaries] as string[] | undefined;
       const overflow = ctx.state[STATE.overflowPaths] as string[] | undefined;
       const agentDocs = ctx.state[STATE.agentDocs] as string | undefined;
-      const existingContext = ctx.state[STATE.existingContext] as Record<string, string> | undefined;
+      const existingContext = ctx.state[STATE.existingContext] as
+        | Record<string, string>
+        | undefined;
 
       if (!summaries || summaries.length === 0) {
         if (existingContext) {
-           return JSON.stringify(existingContext);
+          return JSON.stringify(existingContext);
         }
-        throw new Error('No chunk summaries found. Did you call summarize_chunks?');
+        throw new Error(
+          'No chunk summaries found. Did you call summarize_chunks?',
+        );
       }
 
       let prompt: string;

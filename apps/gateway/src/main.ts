@@ -32,7 +32,7 @@ const prRepository = new PrRepository(databaseService);
 const contextRepository = new ContextRepository(databaseService);
 
 const gitService = new GitService();
-gitService.registerAdapter('github', new GithubAdapter(prRepository));
+gitService.registerAdapter('github', new GithubAdapter(prRepository, contextRepository));
 await gitService.initAdapters(server.log);
 
 server.register(webhooksModule, {
@@ -43,6 +43,7 @@ server.register(internalModule, {
   prefix: '/api/v1/internal',
   prRepository,
   contextRepository,
+  gitService,
 });
 server.register(contextModule, {
   prefix: '/api/v1/context',

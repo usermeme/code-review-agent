@@ -23,22 +23,31 @@ export const contextPubSubPayloadSchema = z.object({
   isIncrementalUpdate: z.boolean().optional(),
 });
 
-function getInstruction() {
-  return (ctx: any) => {
-    // Extract payload from ADK's Pub/Sub ingress structure
-    let input: any = {};
-    const text = ctx.userContent?.parts?.[0]?.text;
-    if (text) {
-      try {
-        input = JSON.parse(text);
-      } catch {
-        // Ignore parsing errors, fallback to empty
-      }
+type ContextMode = 'baseline_update' | 'full_baseline';
+
+function determineMode(input: any): ContextMode {
+  if (input.isIncrementalUpdate) {
+    return 'baseline_update';
+  }
+  return 'full_baseline';
+}
+
+function instruction(ctx: any): string {
+  // Extract payload from ADK's Pub/Sub ingress structure
+  let input: any = {};
+  const text = ctx.userContent?.parts?.[0]?.text;
+  if (text) {
+    try {
+      input = JSON.parse(text);
+    } catch {
+      // Ignore parsing errors, fallback to empty
     }
+  }
 
-    const mode = input.isIncrementalUpdate ? 'baseline_update' : (input.prNumber ? 'pr_build' : 'full_baseline');
+  const mode = determineMode(input);
 
-    if (mode === 'baseline_update') {
+  switch (mode) {
+    case 'baseline_update':
       return `You are the orchestrator for updating the baseline repository context document incrementally (e.g. after a PR is merged).
 You MUST execute the following tools in this EXACT sequence:
 1. fetch_context: Call this with provider "${input.provider}", owner "${input.owner}", and repo "${input.repo}". Wait for it to finish.
@@ -48,17 +57,8 @@ You MUST execute the following tools in this EXACT sequence:
 5. store_context: Sends the synthesized context back to Gateway with prNumber 0 (to overwrite the baseline). Wait for this to finish.
 
 Return a success message as your final response.`;
-    } else if (mode === 'pr_build') {
-      return `You are the orchestrator for building a PR-specific context document.
-You MUST execute the following tools in this EXACT sequence:
-1. fetch_context: Call this with provider "${input.provider}", owner "${input.owner}", and repo "${input.repo}". Wait for it to finish.
-2. prepare_repository: Call this with provider "${input.provider}", owner "${input.owner}", repo "${input.repo}", prNumber ${input.prNumber}, and isIncrementalUpdate true. Wait for it to finish.
-3. summarize_chunks: Summarizes the chunks concurrently. Wait for it to finish.
-4. synthesize_context: Merges the new diff summaries with the existing baseline context.
-5. store_context: Sends the synthesized context back to Gateway with prNumber ${input.prNumber}. Wait for this to finish.
 
-Return a success message as your final response.`;
-    } else {
+    case 'full_baseline':
       return `You are the orchestrator for building a baseline repository context document from scratch.
 You MUST execute the following tools in this EXACT sequence:
 1. prepare_repository: Call this with provider "${input.provider}", owner "${input.owner}", repo "${input.repo}", cloneUrl "${input.cloneUrl || ''}", ref "${input.ref || ''}", and token "${input.token || ''}". Wait for it to finish.
@@ -67,8 +67,7 @@ You MUST execute the following tools in this EXACT sequence:
 4. store_context: Sends the synthesized context back to Gateway with prNumber 0 (as the baseline). Wait for this to finish.
 
 Return a success message as your final response.`;
-    }
-  };
+  }
 }
 
 export function createContextOrchestrator({
@@ -80,7 +79,7 @@ export function createContextOrchestrator({
     description: 'Coordinates the repository context building process.',
     model,
     inputSchema: contextPubSubPayloadSchema,
-    instruction: getInstruction(),
+    instruction,
     tools: [
       tools.fetchContext,
       tools.prepareRepo,

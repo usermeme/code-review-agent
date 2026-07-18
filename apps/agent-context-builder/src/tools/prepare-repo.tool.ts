@@ -38,13 +38,19 @@ export function createPrepareRepoTool() {
         extraIgnores: [],
       };
 
-      if (input.isIncrementalUpdate && input.provider === 'github' && input.prNumber) {
+      if (
+        input.isIncrementalUpdate &&
+        input.provider === 'github' &&
+        input.prNumber
+      ) {
         // INCREMENTAL MODE: Fetch only changed files using GitHub API
         const filesResponse = await fetch(
           `https://api.github.com/repos/${input.owner}/${input.repo}/pulls/${input.prNumber}/files`,
           {
-            headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
-          }
+            headers: input.token
+              ? { Authorization: `Bearer ${input.token}` }
+              : {},
+          },
         );
 
         if (!filesResponse.ok) {
@@ -52,22 +58,25 @@ export function createPrepareRepoTool() {
         }
 
         const changedFilesData = await filesResponse.json();
-        const filesRecord: import('../services/chunker.service.js').RepoFile[] = [];
+        const filesRecord: import('../services/chunker.service.js').RepoFile[] =
+          [];
         const { estimateTokens } = await import('../services/tokens.util.js');
 
         for (const file of changedFilesData) {
           if (file.status === 'removed') continue;
-          
+
           const contentResponse = await fetch(file.raw_url, {
-            headers: input.token ? { Authorization: `Bearer ${input.token}` } : {},
+            headers: input.token
+              ? { Authorization: `Bearer ${input.token}` }
+              : {},
           });
-          
+
           if (contentResponse.ok) {
             const content = await contentResponse.text();
             filesRecord.push({
-               path: file.filename,
-               content,
-               tokens: estimateTokens(content),
+              path: file.filename,
+              content,
+              tokens: estimateTokens(content),
             });
           }
         }
@@ -83,9 +92,11 @@ export function createPrepareRepoTool() {
       } else {
         // BASELINE MODE: Clone entire repository
         if (!input.cloneUrl || !input.ref) {
-           throw new Error('cloneUrl and ref are required for baseline context generation');
+          throw new Error(
+            'cloneUrl and ref are required for baseline context generation',
+          );
         }
-        
+
         const cloned = await cloneShallow({
           cloneUrl: input.cloneUrl,
           ref: input.ref,

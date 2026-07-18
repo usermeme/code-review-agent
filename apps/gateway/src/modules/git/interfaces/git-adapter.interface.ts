@@ -38,4 +38,9 @@ export interface GitAdapter {
     prNumber: number,
     comments: { path: string; position: number; body: string }[],
   ): Promise<void>;
+
+  /**
+   * Triggers a review by fetching PR diff and publishing to review-code-topic.
+   */
+  triggerReview?(owner: string, repo: string, prNumber: number): Promise<void>;
 }

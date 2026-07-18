@@ -8,6 +8,15 @@ export interface ReviewModuleOptions {
   gitService: GitService;
 }
 
+interface PubSubMessage {
+  message: {
+    data: string;
+    messageId: string;
+    attributes?: Record<string, string>;
+  };
+  subscription: string;
+}
+
 export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (
   fastify,
   options,
@@ -15,19 +24,28 @@ export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (
   const { prRepository, gitService } = options;
 
   fastify.post('/results', async (request, reply) => {
-    const payload = request.body as ReviewResultPayload;
+    const body = request.body as PubSubMessage;
 
-    if (
-      !payload.provider ||
-      !payload.owner ||
-      !payload.repo ||
-      !payload.prNumber ||
-      !payload.comments
-    ) {
-      return reply.code(400).send({ error: 'Invalid payload' });
+    if (!body || !body.message || !body.message.data) {
+      return reply
+        .code(400)
+        .send({ error: 'Bad Request: Missing Pub/Sub message data' });
     }
 
     try {
+      const decodedData = Buffer.from(body.message.data, 'base64').toString('utf8');
+      const payload = JSON.parse(decodedData) as ReviewResultPayload;
+
+      if (
+        !payload.provider ||
+        !payload.owner ||
+        !payload.repo ||
+        !payload.prNumber ||
+        !payload.comments
+      ) {
+        return reply.code(400).send({ error: 'Invalid payload' });
+      }
+
       const adapter = gitService.getAdapter(payload.provider);
 
       if (adapter && adapter.postInlineComments) {
