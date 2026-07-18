@@ -3,10 +3,8 @@ import { PubSub } from '@google-cloud/pubsub';
 import { FastifyBaseLogger } from 'fastify';
 import { getSecret } from '../../../services/secrets.service.js';
 import { GitAdapter } from '../interfaces/git-adapter.interface.js';
-import {
-  ProcessedWebhookResult,
-  WebhookEventPayload,
-} from '../interfaces/webhooks.interface.js';
+import { ProcessedWebhookResult } from '../../webhooks/interfaces/webhooks.interface.js';
+import { WebhookEventPayload } from 'shared-types';
 import { PrRepository } from '../../database/repositories/pr.repository.js';
 
 export interface GithubWebhookPayload {

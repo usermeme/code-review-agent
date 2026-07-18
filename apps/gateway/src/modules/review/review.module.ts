@@ -1,19 +1,18 @@
 import { FastifyPluginAsync } from 'fastify';
-import { GithubAdapter } from '../webhooks/adapters/github.adapter.js';
+import { GitService } from '../git/git.service.js';
 import { PrRepository } from '../database/repositories/pr.repository.js';
 import { ReviewResultPayload } from 'shared-types';
 
 export interface ReviewModuleOptions {
   prRepository: PrRepository;
+  gitService: GitService;
 }
 
 export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (
   fastify,
   options,
 ) => {
-  const { prRepository } = options;
-  // TODO: We should probably share the adapter instance, but for now we instantiate it
-  const githubAdapter = new GithubAdapter(prRepository);
+  const { prRepository, gitService } = options;
 
   fastify.post('/review-results', async (request, reply) => {
     const payload = request.body as ReviewResultPayload;
@@ -29,12 +28,18 @@ export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (
     }
 
     try {
-      if (payload.provider === 'github') {
-        await githubAdapter.postInlineComments(
+      const adapter = gitService.getAdapter(payload.provider);
+
+      if (adapter && adapter.postInlineComments) {
+        await adapter.postInlineComments(
           payload.owner,
           payload.repo,
           payload.prNumber,
           payload.comments,
+        );
+      } else {
+        fastify.log.warn(
+          `No adapter or postInlineComments method found for provider: ${payload.provider}`,
         );
       }
 

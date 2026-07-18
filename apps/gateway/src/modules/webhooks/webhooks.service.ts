@@ -1,17 +1,16 @@
 import { FastifyBaseLogger } from 'fastify';
 import { ProcessedWebhookResult } from './interfaces/webhooks.interface.js';
-import { GitAdapter } from './interfaces/git-adapter.interface.js';
+import { GitAdapter } from '../git/interfaces/git-adapter.interface.js';
+import { GitService } from '../git/git.service.js';
 
 export class WebhooksService {
-  constructor(private adapters: GitAdapter[] = []) {}
+  constructor(private gitService: GitService) {}
 
   /**
    * Initializes all registered adapters.
    */
   async init(logger: FastifyBaseLogger): Promise<void> {
-    for (const adapter of this.adapters) {
-      await adapter.init(logger);
-    }
+    await this.gitService.initAdapters(logger);
   }
 
   /**
@@ -20,7 +19,7 @@ export class WebhooksService {
   getAdapterForRequest(
     headers: Record<string, string | string[] | undefined>,
   ): GitAdapter | undefined {
-    return this.adapters.find((adapter) => adapter.canHandle(headers));
+    return this.gitService.getAdapterForRequest(headers)?.adapter;
   }
 
   /**

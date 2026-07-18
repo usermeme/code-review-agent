@@ -1,5 +1,5 @@
 import { FastifyBaseLogger } from 'fastify';
-import { ProcessedWebhookResult } from './webhooks.interface.js';
+import { ProcessedWebhookResult } from '../../webhooks/interfaces/webhooks.interface.js';
 
 export interface GitAdapter {
   /**
@@ -28,4 +28,14 @@ export interface GitAdapter {
     payload: unknown,
     logger: FastifyBaseLogger,
   ): Promise<ProcessedWebhookResult>;
+
+  /**
+   * Post inline comments to the git provider's PR.
+   */
+  postInlineComments?(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    comments: { path: string; position: number; body: string }[],
+  ): Promise<void>;
 }
