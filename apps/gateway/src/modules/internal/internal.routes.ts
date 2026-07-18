@@ -17,10 +17,6 @@ export const internalRoutes: FastifyPluginAsync<{
   const { internalService } = options;
 
   fastify.post('/pubsub', async (request, reply) => {
-    // 1. Verify this is actually from Pub/Sub
-    // (Optional: check authorization headers, tokens, or VPC origin)
-
-    // 2. Extract the base64 payload
     const body = request.body as PubSubMessage;
 
     if (!body || !body.message || !body.message.data) {
@@ -30,15 +26,12 @@ export const internalRoutes: FastifyPluginAsync<{
     }
 
     try {
-      // Decode the base64 string
       const decodedData = Buffer.from(body.message.data, 'base64').toString(
         'utf8',
       );
 
-      // Parse the JSON payload
       const payload = JSON.parse(decodedData) as ContextReadyPayload;
 
-      // Ensure the payload has what we need
       if (
         !payload.provider ||
         !payload.owner ||
@@ -48,14 +41,11 @@ export const internalRoutes: FastifyPluginAsync<{
         throw new Error('Invalid payload structure');
       }
 
-      // Delegate to service
       await internalService.handleContextReady(payload, fastify.log);
 
-      // Acknowledge the message so Pub/Sub doesn't retry
       return reply.code(200).send();
     } catch (error) {
       fastify.log.error(`Failed to process Pub/Sub message: ${error}`);
-      // Returning 500 tells Pub/Sub to retry the message later
       return reply.code(500).send({ error: 'Internal Server Error' });
     }
   });

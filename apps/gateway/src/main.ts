@@ -25,7 +25,7 @@ server.register(fastifyRawBody, {
   runFirst: true,
 });
 
-// Initialize singletons (Composition Root)
+
 const databaseService = new FirestoreDatabaseService();
 await databaseService.connect(server.log);
 

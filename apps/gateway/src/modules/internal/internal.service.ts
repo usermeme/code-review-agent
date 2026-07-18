@@ -23,18 +23,15 @@ export class InternalService {
 
     logger.info(`Context is ready for PR: ${prKey}`);
 
-    // Save the context
     await this.contextRepository.saveContext(prKey, {
       files,
       summary,
     });
 
-    // Update state to "reviewing"
     await this.prRepository.updatePRStatus(prKey, {
       status: 'reviewing',
     });
 
-    // Publish to the Review Code topic to wake up the Review Agent
     const topicName = process.env.REVIEW_CODE_TOPIC || 'review-code-topic';
     await this.pubsub.topic(topicName).publishMessage({
       json: payload,

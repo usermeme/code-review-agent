@@ -20,6 +20,6 @@ export const webhooksModule: FastifyPluginAsync<WebhooksModuleOptions> = async (
   const { gitService } = options;
   const webhooksService = new WebhooksService(gitService);
 
-  // Note: GitService init is handled in main.ts so that all modules can use initialized adapters
+
   fastify.register(webhooksRoutes, { webhooksService, gitService });
 };
