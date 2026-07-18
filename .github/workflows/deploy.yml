@@ -1,0 +1,81 @@
+name: Deploy Gateway and ADK Agents
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy-gateway:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # Needed for Google Cloud Workload Identity Federation
+    steps:
+      - uses: actions/checkout@v4
+
+      # Log in to GHCR (optional, if you want to store your Docker image in GitHub)
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build and push the Gateway image
+      - name: Build and push Gateway Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          build-args: |
+            APP_NAME=gateway
+          tags: |
+            ghcr.io/${{ github.repository }}-gateway:latest
+            ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
+
+      # --- UNCOMMENT BELOW TO ACTUALLY DEPLOY GATEWAY TO GOOGLE CLOUD RUN ---
+      # - name: Authenticate to Google Cloud
+      #   uses: google-github-actions/auth@v2
+      #   with:
+      #     workload_identity_provider: '${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}'
+      #     service_account: '${{ secrets.GCP_SERVICE_ACCOUNT }}'
+      #
+      # - name: Deploy Gateway to Cloud Run
+      #   uses: google-github-actions/deploy-cloudrun@v2
+      #   with:
+      #     service: gateway-service
+      #     image: ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
+      #     region: us-central1
+
+  deploy-agents:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Needed for Google Cloud Workload Identity Federation
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          
+      - run: npm ci
+      
+      # Build the monorepo workspace to compile the TS to JS
+      - run: npm run build
+
+      # --- UNCOMMENT BELOW TO ACTUALLY DEPLOY AGENTS TO GOOGLE CLOUD VIA ADK ---
+      # - name: Authenticate to Google Cloud
+      #   uses: google-github-actions/auth@v2
+      #   with:
+      #     workload_identity_provider: '${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}'
+      #     service_account: '${{ secrets.GCP_SERVICE_ACCOUNT }}'
+      #
+      # - name: Deploy Context Builder Agent via ADK
+      #   run: npx adk deploy --project dist/apps/agent-context-builder
+      #
+      # - name: Deploy Code Reviewer Agent via ADK
+      #   run: npx adk deploy --project dist/apps/agent-code-reviewer
