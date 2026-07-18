@@ -65,9 +65,9 @@ Follow these steps to deploy and run the system:
 
 ### 2. Google Cloud Pub/Sub Setup
 Ensure you have created the three Pub/Sub topics (`build-context-topic`, `context-ready-topic`, `review-code-topic`) in your GCP project.
-Once the Gateway is deployed, you must set up push subscriptions:
-- `context-ready-topic` pushes to `https://<YOUR_CLOUD_RUN_URL>/api/v1/internal/pubsub`
-- `review-result-topic` pushes to `https://<YOUR_CLOUD_RUN_URL>/api/v1/review/results`
+Once the Gateway is deployed, you must set up push subscriptions. To ensure security, generate a random secret string (e.g., `PUBSUB_SECRET_TOKEN`) and append it as a query parameter:
+- `context-ready-topic` pushes to `https://<YOUR_CLOUD_RUN_URL>/api/v1/internal/pubsub?token=<YOUR_PUBSUB_SECRET_TOKEN>`
+- `review-result-topic` pushes to `https://<YOUR_CLOUD_RUN_URL>/api/v1/review/results?token=<YOUR_PUBSUB_SECRET_TOKEN>`
 
 ### 3. Automated CI/CD via Google Cloud Build
 We have configured a fully native Google Cloud CI/CD pipeline using `cloudbuild.yaml`. You do not need to build Docker images manually.
@@ -89,6 +89,7 @@ After your first deployment, go to the Google Cloud Run console and ensure your 
 - `REVIEW_CODE_TOPIC`: review-code-topic
 - `GITHUB_WEBHOOK_SECRET_ID`: your-webhook-secret (Reference to Secret Manager)
 - `GITHUB_TOKEN_SECRET_ID`: your-github-token (Reference to Secret Manager)
+- `PUBSUB_SECRET_TOKEN`: The random string you added to the push subscription URLs.
 
 ### 5. GitHub Webhook Setup
 Finally, go to your GitHub Repository Settings -> Webhooks.

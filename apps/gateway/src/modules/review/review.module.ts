@@ -24,6 +24,13 @@ export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (
   const { prRepository, gitService } = options;
 
   fastify.post('/results', async (request, reply) => {
+    const query = request.query as { token?: string };
+    const expectedToken = process.env.PUBSUB_SECRET_TOKEN;
+    
+    if (expectedToken && query.token !== expectedToken) {
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+
     const body = request.body as PubSubMessage;
 
     if (!body || !body.message || !body.message.data) {

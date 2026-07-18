@@ -17,6 +17,13 @@ export const internalRoutes: FastifyPluginAsync<{
   const { internalService } = options;
 
   fastify.post('/pubsub', async (request, reply) => {
+    const query = request.query as { token?: string };
+    const expectedToken = process.env.PUBSUB_SECRET_TOKEN;
+    
+    if (expectedToken && query.token !== expectedToken) {
+      return reply.code(401).send({ error: 'Unauthorized' });
+    }
+
     const body = request.body as PubSubMessage;
 
     if (!body || !body.message || !body.message.data) {
