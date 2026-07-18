@@ -1,0 +1,61 @@
+steps:
+  # 1. Install dependencies
+  - name: 'node:22'
+    entrypoint: 'npm'
+    args: ['ci']
+    id: 'Install Dependencies'
+
+  # 2. Lint
+  - name: 'node:22'
+    entrypoint: 'npm'
+    args: ['run', 'lint']
+    id: 'Lint'
+    waitFor: ['Install Dependencies']
+
+  # 3. Typecheck
+  - name: 'node:22'
+    entrypoint: 'npm'
+    args: ['run', 'typecheck']
+    id: 'Typecheck'
+    waitFor: ['Install Dependencies']
+
+  # 4. Build Workspace
+  - name: 'node:22'
+    entrypoint: 'npm'
+    args: ['run', 'build']
+    id: 'Build Workspace'
+    waitFor: ['Install Dependencies']
+
+  # 5. Deploy Gateway to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'gateway-service'
+      - '--source'
+      - '.'
+      - '--region'
+      - 'us-central1'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'APP_NAME=gateway'
+    id: 'Deploy Gateway'
+    waitFor: ['Build Workspace']
+
+  # 6. Deploy Context Builder Agent via ADK
+  - name: 'node:22'
+    entrypoint: 'npx'
+    args: ['adk', 'deploy', '--project', 'dist/apps/agent-context-builder']
+    id: 'Deploy Context Builder Agent'
+    waitFor: ['Build Workspace']
+
+  # 7. Deploy Code Reviewer Agent via ADK
+  - name: 'node:22'
+    entrypoint: 'npx'
+    args: ['adk', 'deploy', '--project', 'dist/apps/agent-code-reviewer']
+    id: 'Deploy Code Reviewer Agent'
+    waitFor: ['Build Workspace']
+
+options:
+  logging: CLOUD_LOGGING_ONLY
