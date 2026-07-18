@@ -5,7 +5,8 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "build": "nx run-many -t build"
+    "build": "nx run-many -t build",
+    "start": "node dist/apps/gateway/main.js"
   },
   "private": true,
   "devDependencies": {
