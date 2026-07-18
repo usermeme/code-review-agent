@@ -1,6 +1,6 @@
 {
-  "name": "code-review-agent-v2",
-  "version": "0.0.0",
+  "name": "code-review-agent",
+  "version": "0.0.1",
   "license": "MIT",
   "scripts": {
     "lint": "eslint .",
