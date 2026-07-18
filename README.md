@@ -63,35 +63,13 @@ Follow these steps to deploy and run the system:
 - **Google Cloud Platform** account (Firestore, Pub/Sub, Gemini API enabled)
 - **GitHub App** or Personal Access Token with repository read/write and webhook access.
 
-### 2. Environment Configuration
-Create a `.env` file at the root of the workspace (or set these in your deployment environment):
+### 2. Google Cloud Pub/Sub Setup
+Ensure you have created the three Pub/Sub topics (`build-context-topic`, `context-ready-topic`, `review-code-topic`) in your GCP project.
+Once the Gateway is deployed, you must set up push subscriptions:
+- `context-ready-topic` pushes to `https://<YOUR_CLOUD_RUN_URL>/api/v1/internal/pubsub`
+- `review-result-topic` pushes to `https://<YOUR_CLOUD_RUN_URL>/api/v1/review/results`
 
-```env
-# Google Cloud
-GOOGLE_CLOUD_PROJECT=your-gcp-project-id
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
-
-# Pub/Sub Topics
-BUILD_CONTEXT_TOPIC=build-context-topic
-CONTEXT_READY_TOPIC=context-ready-topic
-REVIEW_CODE_TOPIC=review-code-topic
-
-# Server Ports
-PORT=3000
-HOST=0.0.0.0
-
-# GitHub Integration
-GITHUB_WEBHOOK_SECRET_ID=your-webhook-secret # Kept in Secret Manager
-GITHUB_TOKEN_SECRET_ID=your-github-token     # Kept in Secret Manager
-```
-
-### 3. Google Cloud Pub/Sub Setup
-Ensure you have created the three Pub/Sub topics listed above in your GCP project.
-For local development, you can use the Google Cloud Pub/Sub Emulator. For production, you must set up push subscriptions:
-- `context-ready-topic` pushes to `https://your-gateway-url.com/api/v1/internal/pubsub`
-- `review-result-topic` pushes to `https://your-gateway-url.com/api/v1/review/results`
-
-### 4. Automated CI/CD via Google Cloud Build
+### 3. Automated CI/CD via Google Cloud Build
 We have configured a fully native Google Cloud CI/CD pipeline using `cloudbuild.yaml`. You do not need to build Docker images manually.
 
 To enable automated deployments:
@@ -101,15 +79,19 @@ To enable automated deployments:
 4. Set the Event to **Push to a branch** (e.g., `main`).
 5. Select **Cloud Build configuration file (yaml or json)** as the configuration type and point it to `/cloudbuild.yaml`.
 
-### 5. What Happens During Deployment?
-When you push to the repository, Google Cloud Build will automatically:
-1. Install dependencies and run quality checks (`npm ci`, `lint`, `typecheck`).
-2. Build the Nx monorepo (`npm run build`).
-3. **Deploy the Gateway**: It natively deploys the Fastify Gateway directly to Cloud Run using `gcloud run deploy --source .`. Google Cloud Buildpacks handles compiling the Node.js application seamlessly.
-4. **Deploy the Agents**: It deploys both the Context Builder and Code Reviewer agents natively using the `@google/adk` deployment CLI (`npx adk deploy`).
+When you push to the repository, Google Cloud Build will automatically install dependencies, build the Nx monorepo, deploy the Fastify Gateway directly to Cloud Run natively, and deploy the agents using the `@google/adk` deployment CLI.
 
-### 6. GitHub Webhook Setup
-Once Cloud Run provides you with the deployed URL for the Gateway, go to your GitHub Repository Settings -> Webhooks.
+### 4. Cloud Run Environment Configuration
+After your first deployment, go to the Google Cloud Run console and ensure your Gateway service has the following environment variables configured:
+- `GOOGLE_CLOUD_PROJECT`: your-gcp-project-id
+- `BUILD_CONTEXT_TOPIC`: build-context-topic
+- `CONTEXT_READY_TOPIC`: context-ready-topic
+- `REVIEW_CODE_TOPIC`: review-code-topic
+- `GITHUB_WEBHOOK_SECRET_ID`: your-webhook-secret (Reference to Secret Manager)
+- `GITHUB_TOKEN_SECRET_ID`: your-github-token (Reference to Secret Manager)
+
+### 5. GitHub Webhook Setup
+Finally, go to your GitHub Repository Settings -> Webhooks.
 - **Payload URL**: `https://<YOUR_CLOUD_RUN_URL>/api/v1/webhooks`
 - **Content type**: `application/json`
 - **Secret**: Match the webhook secret stored in your GCP Secret Manager.
