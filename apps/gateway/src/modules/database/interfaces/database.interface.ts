@@ -4,7 +4,7 @@ export interface DatabaseService {
   /**
    * Initializes the database connection.
    */
-  connect(logger?: FastifyBaseLogger): Promise<void>;
+  connect(logger: FastifyBaseLogger): Promise<void>;
 
   /**
    * Set or update a document in a collection.

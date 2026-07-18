@@ -9,12 +9,8 @@ export class FirestoreDatabaseService implements IDatabaseService {
     this.firestore = new Firestore();
   }
 
-  async connect(logger?: FastifyBaseLogger): Promise<void> {
-    if (logger) {
-      logger.info('Firestore initialized via Application Default Credentials');
-    } else {
-      console.log('Firestore initialized via Application Default Credentials');
-    }
+  async connect(logger: FastifyBaseLogger): Promise<void> {
+    logger.info('Firestore initialized via Application Default Credentials');
   }
 
   async setDocument<T extends object>(
