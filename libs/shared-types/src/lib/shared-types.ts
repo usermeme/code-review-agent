@@ -38,4 +38,5 @@ export interface WebhookEventPayload {
   repo: string;
   htmlUrl: string;
   installationId?: number;
+  isIncrementalUpdate?: boolean;
 }

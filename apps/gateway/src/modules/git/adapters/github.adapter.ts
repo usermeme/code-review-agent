@@ -96,6 +96,22 @@ export class GithubAdapter implements GitAdapter {
     logger: FastifyBaseLogger,
   ): Promise<ProcessedWebhookResult> {
     const action = payload.action;
+    if (action === 'closed' && (payload.pull_request as any)?.merged) {
+      logger.info(`Received GitHub PR merged event: ${payload.pull_request?.html_url}`);
+
+      await this.publishContextBuild({
+        provider: 'github',
+        owner: payload.repository?.owner?.login || '',
+        repo: payload.repository?.name || '',
+        prNumber: payload.pull_request?.number || 0,
+        action: 'merged',
+        htmlUrl: payload.pull_request?.html_url || '',
+        isIncrementalUpdate: true,
+      });
+
+      return { ignored: false, reason: 'Incremental context build triggered for merged PR' };
+    }
+
     if (
       action === 'opened' ||
       action === 'synchronize' ||
@@ -108,11 +124,11 @@ export class GithubAdapter implements GitAdapter {
 
       await this.publishContextBuild({
         provider: 'github',
-        owner: payload.repository.owner.login,
-        repo: payload.repository.name,
-        prNumber: payload.pull_request.number,
+        owner: payload.repository?.owner?.login || '',
+        repo: payload.repository?.name || '',
+        prNumber: payload.pull_request?.number || 0,
         action,
-        htmlUrl: payload.pull_request.html_url,
+        htmlUrl: payload.pull_request?.html_url || '',
       });
 
       return { ignored: false, reason: 'Context build triggered for GitHub' };

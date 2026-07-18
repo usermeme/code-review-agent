@@ -28,6 +28,11 @@ export class InternalService {
       summary,
     });
 
+    if (prNumber === 0) {
+      logger.info(`Baseline context updated for ${provider}:${owner}:${repo}`);
+      return;
+    }
+
     await this.prRepository.updatePRStatus(prKey, {
       status: 'reviewing',
     });

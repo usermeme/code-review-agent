@@ -6,4 +6,5 @@ export const STATE = {
   overflowPaths: 'overflowPaths',
   agentDocs: 'agentDocs',
   chunkSummaries: 'chunkSummaries',
+  existingContext: 'existingContext',
 } as const;

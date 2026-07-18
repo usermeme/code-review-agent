@@ -3,6 +3,7 @@ import { createPrepareRepoTool } from './tools/prepare-repo.tool.js';
 import { createStoreContextTool } from './tools/store-context.tool.js';
 import { createSummarizeRepoTool } from './tools/summarize-chunks.tool.js';
 import { createSynthesizeContextTool } from './tools/synthesize-context.tool.js';
+import { createFetchContextTool } from './tools/fetch-context.tool.js';
 
 // 1. Fetch the required environment variable config at initialization
 const gatewayUrl = process.env.GATEWAY_URL;
@@ -17,10 +18,11 @@ if (!reviewModel) {
 
 // 2. Setup the tools
 const tools = {
+  fetchContext: createFetchContextTool(gatewayUrl),
   prepareRepo: createPrepareRepoTool(),
   summarizeChunks: createSummarizeRepoTool({ model: reviewModel }),
   synthesizeContext: createSynthesizeContextTool({ model: reviewModel }),
-  storeContext: createStoreContextTool(gatewayUrl),
+  storeContext: createStoreContextTool(),
 };
 
 // 3. Export the Orchestrator LlmAgent instance.

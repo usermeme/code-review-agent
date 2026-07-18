@@ -1,34 +1,38 @@
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
-import { STATE } from '../constants/state-keys.constant.js';
+import { PubSub } from '@google-cloud/pubsub';
 
-export function createStoreContextTool(gatewayUrl: string) {
+export function createStoreContextTool() {
+  const pubsub = new PubSub();
+  const topicName = process.env.CONTEXT_READY_TOPIC || 'context-ready-topic';
+
   return new FunctionTool({
     name: 'store_context',
-    description: 'Stores the synthesized context by sending it to the Gateway.',
+    description: 'Stores the synthesized context by sending it to the Gateway via Pub/Sub.',
     parameters: z.object({
+      provider: z.string(),
+      owner: z.string(),
       repo: z.string(),
-      headSha: z.string().optional(),
+      prNumber: z.number().nullable().optional(),
       sections: z.record(z.string(), z.string()),
     }),
-    execute: async (input, ctx) => {
-      const response = await fetch(`${gatewayUrl}/v1/context`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          repo: input.repo,
-          headSha: input.headSha || ctx.state[STATE.headSha],
-          sections: input.sections,
-        }),
+    execute: async (input) => {
+      // The Gateway expects `files` and `summary`. We serialize sections into summary.
+      // And we send an empty `files` object because the actual context is in `summary`.
+      const payload = {
+        provider: input.provider,
+        owner: input.owner,
+        repo: input.repo,
+        prNumber: input.prNumber || 0, // 0 for repository baseline
+        files: {},
+        summary: JSON.stringify(input.sections),
+      };
+
+      await pubsub.topic(topicName).publishMessage({
+        json: payload,
       });
 
-      if (!response.ok) {
-        throw new Error(
-          `Failed to store context. Gateway returned: ${response.status} ${response.statusText}`,
-        );
-      }
-
-      return 'Context successfully stored.';
+      return 'Context successfully published to Pub/Sub.';
     },
   });
 }

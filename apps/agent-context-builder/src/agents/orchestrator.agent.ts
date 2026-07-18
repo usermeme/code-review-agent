@@ -4,6 +4,7 @@ import { z } from 'zod';
 export interface ContextOrchestratorPayload {
   model: string;
   tools: {
+    fetchContext: BaseTool;
     prepareRepo: BaseTool;
     summarizeChunks: BaseTool;
     synthesizeContext: BaseTool;
@@ -12,10 +13,14 @@ export interface ContextOrchestratorPayload {
 }
 
 export const contextPubSubPayloadSchema = z.object({
+  provider: z.string(),
+  owner: z.string(),
   repo: z.string(),
-  ref: z.string(),
-  cloneUrl: z.string(),
+  prNumber: z.number().optional(),
+  cloneUrl: z.string().optional(),
+  ref: z.string().optional(),
   token: z.string().optional(),
+  isIncrementalUpdate: z.boolean().optional(),
 });
 
 function getInstruction() {
@@ -31,15 +36,38 @@ function getInstruction() {
       }
     }
 
-    return `You are the orchestrator for building a repository context document.
-When you receive a repository build request, you MUST execute the following tools in this EXACT sequence:
-1. prepare_repository: Call this with repo "${input.repo}", ref "${input.ref}", cloneUrl "${input.cloneUrl}", and token "${input.token || ''}". Wait for it to finish.
-2. summarize_chunks: Summarizes the chunks concurrently. Wait for it to finish.
-3. synthesize_context: Merges the summaries into a final structured JSON context.
-4. store_context: Sends the synthesized sections back to the Gateway to be saved. Wait for this to finish.
+    const mode = input.isIncrementalUpdate ? 'baseline_update' : (input.prNumber ? 'pr_build' : 'full_baseline');
 
-Return a success message as your final response.
-Do not invent any information. Only use the tools provided.`;
+    if (mode === 'baseline_update') {
+      return `You are the orchestrator for updating the baseline repository context document incrementally (e.g. after a PR is merged).
+You MUST execute the following tools in this EXACT sequence:
+1. fetch_context: Call this with provider "${input.provider}", owner "${input.owner}", and repo "${input.repo}". Wait for it to finish.
+2. prepare_repository: Call this with provider "${input.provider}", owner "${input.owner}", repo "${input.repo}", prNumber ${input.prNumber}, and isIncrementalUpdate true. Wait for it to finish.
+3. summarize_chunks: Summarizes the chunks concurrently. Wait for it to finish.
+4. synthesize_context: Merges the new diff summaries with the existing context.
+5. store_context: Sends the synthesized context back to Gateway with prNumber 0 (to overwrite the baseline). Wait for this to finish.
+
+Return a success message as your final response.`;
+    } else if (mode === 'pr_build') {
+      return `You are the orchestrator for building a PR-specific context document.
+You MUST execute the following tools in this EXACT sequence:
+1. fetch_context: Call this with provider "${input.provider}", owner "${input.owner}", and repo "${input.repo}". Wait for it to finish.
+2. prepare_repository: Call this with provider "${input.provider}", owner "${input.owner}", repo "${input.repo}", prNumber ${input.prNumber}, and isIncrementalUpdate true. Wait for it to finish.
+3. summarize_chunks: Summarizes the chunks concurrently. Wait for it to finish.
+4. synthesize_context: Merges the new diff summaries with the existing baseline context.
+5. store_context: Sends the synthesized context back to Gateway with prNumber ${input.prNumber}. Wait for this to finish.
+
+Return a success message as your final response.`;
+    } else {
+      return `You are the orchestrator for building a baseline repository context document from scratch.
+You MUST execute the following tools in this EXACT sequence:
+1. prepare_repository: Call this with provider "${input.provider}", owner "${input.owner}", repo "${input.repo}", cloneUrl "${input.cloneUrl || ''}", ref "${input.ref || ''}", and token "${input.token || ''}". Wait for it to finish.
+2. summarize_chunks: Summarizes the chunks concurrently. Wait for it to finish.
+3. synthesize_context: Merges all chunk summaries into a brand new structured JSON context.
+4. store_context: Sends the synthesized context back to Gateway with prNumber 0 (as the baseline). Wait for this to finish.
+
+Return a success message as your final response.`;
+    }
   };
 }
 
@@ -54,6 +82,7 @@ export function createContextOrchestrator({
     inputSchema: contextPubSubPayloadSchema,
     instruction: getInstruction(),
     tools: [
+      tools.fetchContext,
       tools.prepareRepo,
       tools.summarizeChunks,
       tools.synthesizeContext,

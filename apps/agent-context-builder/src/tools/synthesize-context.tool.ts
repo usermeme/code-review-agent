@@ -16,20 +16,48 @@ export function createSynthesizeContextTool({
   return new FunctionTool({
     name: 'synthesize_context',
     description:
-      'Synthesizes all chunk summaries into the final repository context document. Call this after summarize_chunks.',
+      'Synthesizes chunk summaries into the final repository context document, patching the existing baseline if provided.',
     parameters: z.object({}),
     execute: async (_input, ctx) => {
-      const summaries = ctx.state[STATE.chunkSummaries] as string[];
-      const overflow = ctx.state[STATE.overflowPaths] as string[];
-      const agentDocs = ctx.state[STATE.agentDocs] as string;
+      const summaries = ctx.state[STATE.chunkSummaries] as string[] | undefined;
+      const overflow = ctx.state[STATE.overflowPaths] as string[] | undefined;
+      const agentDocs = ctx.state[STATE.agentDocs] as string | undefined;
+      const existingContext = ctx.state[STATE.existingContext] as Record<string, string> | undefined;
 
-      if (!summaries) {
-        throw new Error(
-          'No chunk summaries found. Did you call summarize_chunks?',
-        );
+      if (!summaries || summaries.length === 0) {
+        if (existingContext) {
+           return JSON.stringify(existingContext);
+        }
+        throw new Error('No chunk summaries found. Did you call summarize_chunks?');
       }
 
-      const prompt = `You merge per-chunk codebase summaries into one repository context document.
+      let prompt: string;
+
+      if (existingContext && Object.keys(existingContext).length > 0) {
+        prompt = `You are updating a repository context document incrementally based on recent file changes.
+Output markdown with EXACTLY these top-level sections, in this order, using these exact headings:
+## Architecture
+## Modules
+## Internal Patterns & Conventions
+## Error Handling & Testing
+## Agent Docs (verbatim)
+
+Update the existing context where necessary using the new per-chunk summaries. If a module was removed or changed, reflect that. Keep the rest of the context intact.
+Copy the provided agent docs into the last section unchanged.
+
+Existing Context:
+${JSON.stringify(existingContext, null, 2)}
+
+New Per-chunk summaries (from changed files):
+${summaries.join('\n\n')}
+
+Overflow paths:
+${(overflow || []).join('\n')}
+
+Agent docs:
+${agentDocs || ''}`;
+      } else {
+        prompt = `You merge per-chunk codebase summaries into one repository context document.
 Output markdown with EXACTLY these top-level sections, in this order, using these exact headings:
 ## Architecture
 ## Modules
@@ -47,7 +75,8 @@ Overflow paths:
 ${(overflow || []).join('\n')}
 
 Agent docs:
-${agentDocs}`;
+${agentDocs || ''}`;
+      }
 
       const text = await generateText(llm, { prompt });
 
