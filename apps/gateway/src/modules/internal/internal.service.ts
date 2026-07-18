@@ -7,11 +7,17 @@ import { ContextReadyPayload } from 'shared-types';
 export class InternalService {
   private pubsub: PubSub;
 
-  constructor(private prRepository: PrRepository, private contextRepository: ContextRepository) {
+  constructor(
+    private prRepository: PrRepository,
+    private contextRepository: ContextRepository,
+  ) {
     this.pubsub = new PubSub();
   }
 
-  async handleContextReady(payload: ContextReadyPayload, logger: FastifyBaseLogger): Promise<void> {
+  async handleContextReady(
+    payload: ContextReadyPayload,
+    logger: FastifyBaseLogger,
+  ): Promise<void> {
     const { provider, owner, repo, prNumber, files, summary } = payload;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
 
@@ -31,7 +37,7 @@ export class InternalService {
     // Publish to the Review Code topic to wake up the Review Agent
     const topicName = process.env.REVIEW_CODE_TOPIC || 'review-code-topic';
     await this.pubsub.topic(topicName).publishMessage({
-      json: payload
+      json: payload,
     });
 
     logger.info(`Published to ${topicName} for PR: ${prKey}`);

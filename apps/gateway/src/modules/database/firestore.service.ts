@@ -12,7 +12,12 @@ export class FirestoreDatabaseService implements IDatabaseService {
     console.log('Firestore initialized via Application Default Credentials');
   }
 
-  async setDocument<T extends object>(collection: string, docId: string, data: Partial<T>, merge = true): Promise<void> {
+  async setDocument<T extends object>(
+    collection: string,
+    docId: string,
+    data: Partial<T>,
+    merge = true,
+  ): Promise<void> {
     const docRef = this.firestore.collection(collection).doc(docId);
     await docRef.set(data, { merge });
   }

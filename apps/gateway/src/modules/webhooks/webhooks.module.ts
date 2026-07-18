@@ -14,7 +14,10 @@ export interface WebhooksModuleOptions {
   prRepository: PrRepository;
 }
 
-export const webhooksModule: FastifyPluginAsync<WebhooksModuleOptions> = async (fastify, options) => {
+export const webhooksModule: FastifyPluginAsync<WebhooksModuleOptions> = async (
+  fastify,
+  options,
+) => {
   const { prRepository } = options;
   const githubAdapter = new GithubAdapter(prRepository);
   const webhooksService = new WebhooksService([githubAdapter]);

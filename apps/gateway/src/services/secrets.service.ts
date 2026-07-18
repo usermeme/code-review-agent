@@ -11,7 +11,7 @@ export async function getSecret(secretName: string): Promise<string> {
     const [version] = await client.accessSecretVersion({
       name: secretName,
     });
-    
+
     if (!version.payload || !version.payload.data) {
       throw new Error(`Secret payload is empty for ${secretName}`);
     }

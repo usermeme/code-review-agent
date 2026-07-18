@@ -5,9 +5,5 @@
     "target": "ES2022",
     "module": "NodeNext"
   },
-  "include": [
-    "apps/**/*.ts",
-    "libs/**/*.ts",
-    "eslint.config.js"
-  ]
+  "include": ["apps/**/*.ts", "libs/**/*.ts", "eslint.config.js"]
 }

@@ -7,7 +7,12 @@ export interface DatabaseService {
   /**
    * Set or update a document in a collection.
    */
-  setDocument<T extends object>(collection: string, docId: string, data: Partial<T>, merge?: boolean): Promise<void>;
+  setDocument<T extends object>(
+    collection: string,
+    docId: string,
+    data: Partial<T>,
+    merge?: boolean,
+  ): Promise<void>;
 
   /**
    * Retrieve a document from a collection.

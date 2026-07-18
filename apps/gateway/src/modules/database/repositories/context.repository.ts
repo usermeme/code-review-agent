@@ -6,7 +6,10 @@ export class ContextRepository {
 
   constructor(private db: DatabaseService) {}
 
-  async saveContext(prKey: string, contextData: Omit<RepositoryContext, 'prKey' | 'updatedAt'>): Promise<void> {
+  async saveContext(
+    prKey: string,
+    contextData: Omit<RepositoryContext, 'prKey' | 'updatedAt'>,
+  ): Promise<void> {
     await this.db.setDocument<RepositoryContext>(this.collection, prKey, {
       prKey,
       ...contextData,

@@ -31,7 +31,11 @@ const prRepository = new PrRepository(databaseService);
 const contextRepository = new ContextRepository(databaseService);
 
 server.register(webhooksModule, { prefix: '/api/v1', prRepository });
-server.register(internalModule, { prefix: '/api/v1/internal', prRepository, contextRepository });
+server.register(internalModule, {
+  prefix: '/api/v1/internal',
+  prRepository,
+  contextRepository,
+});
 server.register(contextModule, { prefix: '/api/v1', contextRepository });
 server.register(reviewModule, { prefix: '/api/v1', prRepository });
 

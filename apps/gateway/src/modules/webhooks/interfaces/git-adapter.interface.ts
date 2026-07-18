@@ -15,10 +15,17 @@ export interface GitAdapter {
   /**
    * Verify the cryptographic signature of the incoming webhook.
    */
-  verifySignature(headers: Record<string, string | string[] | undefined>, rawBody: string): Promise<boolean>;
+  verifySignature(
+    headers: Record<string, string | string[] | undefined>,
+    rawBody: string,
+  ): Promise<boolean>;
 
   /**
    * Process the webhook event and optionally publish to PubSub.
    */
-  processEvent(headers: Record<string, string | string[] | undefined>, payload: unknown, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult>;
+  processEvent(
+    headers: Record<string, string | string[] | undefined>,
+    payload: unknown,
+    logger: FastifyBaseLogger,
+  ): Promise<ProcessedWebhookResult>;
 }

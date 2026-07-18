@@ -7,7 +7,10 @@ export interface ReviewModuleOptions {
   prRepository: PrRepository;
 }
 
-export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (fastify, options) => {
+export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (
+  fastify,
+  options,
+) => {
   const { prRepository } = options;
   // TODO: We should probably share the adapter instance, but for now we instantiate it
   const githubAdapter = new GithubAdapter(prRepository);
@@ -15,13 +18,24 @@ export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (fast
   fastify.post('/review-results', async (request, reply) => {
     const payload = request.body as ReviewResultPayload;
 
-    if (!payload.provider || !payload.owner || !payload.repo || !payload.prNumber || !payload.comments) {
+    if (
+      !payload.provider ||
+      !payload.owner ||
+      !payload.repo ||
+      !payload.prNumber ||
+      !payload.comments
+    ) {
       return reply.code(400).send({ error: 'Invalid payload' });
     }
 
     try {
       if (payload.provider === 'github') {
-        await githubAdapter.postInlineComments(payload.owner, payload.repo, payload.prNumber, payload.comments);
+        await githubAdapter.postInlineComments(
+          payload.owner,
+          payload.repo,
+          payload.prNumber,
+          payload.comments,
+        );
       }
 
       const prKey = `${payload.provider}:${payload.owner}:${payload.repo}:${payload.prNumber}`;

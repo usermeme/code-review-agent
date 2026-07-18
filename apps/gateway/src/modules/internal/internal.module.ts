@@ -9,9 +9,12 @@ export interface InternalModuleOptions {
   contextRepository: ContextRepository;
 }
 
-export const internalModule: FastifyPluginAsync<InternalModuleOptions> = async (fastify, options) => {
+export const internalModule: FastifyPluginAsync<InternalModuleOptions> = async (
+  fastify,
+  options,
+) => {
   const { prRepository, contextRepository } = options;
-  
+
   const internalService = new InternalService(prRepository, contextRepository);
 
   fastify.register(internalRoutes, { internalService });
