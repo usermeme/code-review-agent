@@ -1,4 +1,5 @@
 import { Firestore } from '@google-cloud/firestore';
+import { FastifyBaseLogger } from 'fastify';
 import { DatabaseService as IDatabaseService } from './interfaces/database.interface.js';
 
 export class FirestoreDatabaseService implements IDatabaseService {
@@ -8,7 +9,7 @@ export class FirestoreDatabaseService implements IDatabaseService {
     this.firestore = new Firestore();
   }
 
-  async connect(logger?: { info: (msg: string) => void }): Promise<void> {
+  async connect(logger?: FastifyBaseLogger): Promise<void> {
     if (logger) {
       logger.info('Firestore initialized via Application Default Credentials');
     } else {

@@ -1,8 +1,10 @@
+import { FastifyBaseLogger } from 'fastify';
+
 export interface DatabaseService {
   /**
    * Initializes the database connection.
    */
-  connect(logger?: { info: (msg: string) => void }): Promise<void>;
+  connect(logger?: FastifyBaseLogger): Promise<void>;
 
   /**
    * Set or update a document in a collection.
