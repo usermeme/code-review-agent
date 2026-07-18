@@ -10,32 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
       id-token: write # Needed for Google Cloud Workload Identity Federation
     steps:
       - uses: actions/checkout@v4
 
-      # Log in to GHCR (optional, if you want to store your Docker image in GitHub)
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Build and push the Gateway image
-      - name: Build and push Gateway Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          build-args: |
-            APP_NAME=gateway
-          tags: |
-            ghcr.io/${{ github.repository }}-gateway:latest
-            ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
-
-      # --- UNCOMMENT BELOW TO ACTUALLY DEPLOY GATEWAY TO GOOGLE CLOUD RUN ---
+      # --- UNCOMMENT BELOW TO DEPLOY GATEWAY TO GOOGLE CLOUD RUN VIA SOURCE ---
       # - name: Authenticate to Google Cloud
       #   uses: google-github-actions/auth@v2
       #   with:
@@ -46,8 +25,10 @@ jobs:
       #   uses: google-github-actions/deploy-cloudrun@v2
       #   with:
       #     service: gateway-service
-      #     image: ghcr.io/${{ github.repository }}-gateway:${{ github.sha }}
+      #     source: .
       #     region: us-central1
+      #     env_vars: |
+      #       APP_NAME=gateway
 
   deploy-agents:
     runs-on: ubuntu-latest
