@@ -20,6 +20,5 @@ export const webhooksModule: FastifyPluginAsync<WebhooksModuleOptions> = async (
   const { gitService } = options;
   const webhooksService = new WebhooksService(gitService);
 
-
   fastify.register(webhooksRoutes, { webhooksService, gitService });
 };

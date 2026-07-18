@@ -25,7 +25,6 @@ server.register(fastifyRawBody, {
   runFirst: true,
 });
 
-
 const databaseService = new FirestoreDatabaseService();
 await databaseService.connect(server.log);
 
