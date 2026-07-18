@@ -27,7 +27,7 @@ server.register(fastifyRawBody, {
 
 // Initialize singletons (Composition Root)
 const databaseService = new FirestoreDatabaseService();
-await databaseService.connect();
+await databaseService.connect(server.log);
 
 const prRepository = new PrRepository(databaseService);
 const contextRepository = new ContextRepository(databaseService);
@@ -60,6 +60,6 @@ server.listen({ port, host }, (err) => {
     server.log.error(err);
     process.exit(1);
   } else {
-    console.log(`[ ready ] http://${host}:${port}`);
+    server.log.info(`[ ready ] http://${host}:${port}`);
   }
 });

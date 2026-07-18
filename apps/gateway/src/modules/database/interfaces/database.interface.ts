@@ -2,7 +2,7 @@ export interface DatabaseService {
   /**
    * Initializes the database connection.
    */
-  connect(): Promise<void>;
+  connect(logger?: { info: (msg: string) => void }): Promise<void>;
 
   /**
    * Set or update a document in a collection.
