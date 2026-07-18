@@ -11,7 +11,7 @@ export const contextModule: FastifyPluginAsync<ContextModuleOptions> = async (
 ) => {
   const { contextRepository } = options;
 
-  fastify.get('/context/:prKey', async (request, reply) => {
+  fastify.get('/:prKey', async (request, reply) => {
     const { prKey } = request.params as { prKey: string };
 
     const context = await contextRepository.getContext(prKey);

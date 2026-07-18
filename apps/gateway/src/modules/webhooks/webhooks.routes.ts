@@ -7,7 +7,7 @@ export const webhooksRoutes: FastifyPluginAsync<{
   const { webhooksService } = options;
 
   fastify.post(
-    '/webhook',
+    '/',
     { config: { rawBody: true } },
     async (request, reply) => {
       if (!request.rawBody) {

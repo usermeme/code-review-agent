@@ -14,7 +14,7 @@ export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (
 ) => {
   const { prRepository, gitService } = options;
 
-  fastify.post('/review-results', async (request, reply) => {
+  fastify.post('/results', async (request, reply) => {
     const payload = request.body as ReviewResultPayload;
 
     if (
