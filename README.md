@@ -91,36 +91,28 @@ For local development, you can use the Google Cloud Pub/Sub Emulator. For produc
 - `context-ready-topic` pushes to `https://your-gateway-url.com/api/v1/internal/pubsub`
 - `review-result-topic` pushes to `https://your-gateway-url.com/api/v1/review/results`
 
-### 4. Build the Workspace
-Compile all three applications in the Nx Monorepo:
-```sh
-npm install
-npx nx run-many -t build
-```
+### 4. Automated CI/CD via Google Cloud Build
+We have configured a fully native Google Cloud CI/CD pipeline using `cloudbuild.yaml`. You do not need to build Docker images manually.
 
-### 5. Running the Services
-You need to run the three services concurrently (Gateway, Context Builder, and Code Reviewer).
+To enable automated deployments:
+1. Go to the **Cloud Build** console in Google Cloud.
+2. Click **Triggers** -> **Create Trigger**.
+3. Connect your GitHub repository.
+4. Set the Event to **Push to a branch** (e.g., `main`).
+5. Select **Cloud Build configuration file (yaml or json)** as the configuration type and point it to `/cloudbuild.yaml`.
 
-**Start the Gateway:**
-```sh
-npx nx run gateway:serve
-```
-
-**Start the Context Builder Agent:**
-```sh
-npx nx run agent-context-builder:serve
-```
-
-**Start the Code Reviewer Agent:**
-```sh
-npx nx run agent-code-reviewer:serve
-```
+### 5. What Happens During Deployment?
+When you push to the repository, Google Cloud Build will automatically:
+1. Install dependencies and run quality checks (`npm ci`, `lint`, `typecheck`).
+2. Build the Nx monorepo (`npm run build`).
+3. **Deploy the Gateway**: It natively deploys the Fastify Gateway directly to Cloud Run using `gcloud run deploy --source .`. Google Cloud Buildpacks handles compiling the Node.js application seamlessly.
+4. **Deploy the Agents**: It deploys both the Context Builder and Code Reviewer agents natively using the `@google/adk` deployment CLI (`npx adk deploy`).
 
 ### 6. GitHub Webhook Setup
-Go to your GitHub Repository (or Organization) Settings -> Webhooks.
-- **Payload URL**: `https://your-gateway-url.com/api/v1/webhooks`
+Once Cloud Run provides you with the deployed URL for the Gateway, go to your GitHub Repository Settings -> Webhooks.
+- **Payload URL**: `https://<YOUR_CLOUD_RUN_URL>/api/v1/webhooks`
 - **Content type**: `application/json`
-- **Secret**: Match the webhook secret from your configuration.
+- **Secret**: Match the webhook secret stored in your GCP Secret Manager.
 - **Events**: Select `Pull requests` and `Issue comments`.
 
-You are now fully deployed! Opening a Pull Request will automatically trigger the pipeline.
+You are now fully deployed on serverless Google Cloud infrastructure! Opening a Pull Request will automatically trigger the pipeline.
