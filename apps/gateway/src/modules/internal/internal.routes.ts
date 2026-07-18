@@ -1,5 +1,6 @@
 import { FastifyPluginAsync } from 'fastify';
-import { InternalService, ContextReadyPayload } from './internal.service.js';
+import { InternalService } from './internal.service.js';
+import { ContextReadyPayload } from 'shared-types';
 
 interface PubSubMessage {
   message: {

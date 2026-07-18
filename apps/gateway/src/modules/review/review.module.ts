@@ -1,14 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { GithubAdapter } from '../webhooks/adapters/github.adapter.js';
 import { PrRepository } from '../database/repositories/pr.repository.js';
-
-export interface ReviewResultPayload {
-  provider: string;
-  owner: string;
-  repo: string;
-  prNumber: number;
-  comments: { path: string; position: number; body: string }[];
-}
+import { ReviewResultPayload } from 'shared-types';
 
 export interface ReviewModuleOptions {
   prRepository: PrRepository;

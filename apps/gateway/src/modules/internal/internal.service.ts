@@ -1,16 +1,8 @@
 import { FastifyBaseLogger } from 'fastify';
 import { PubSub } from '@google-cloud/pubsub';
 import { PrRepository } from '../database/repositories/pr.repository.js';
-import { ContextRepository, RepositoryContext } from '../database/repositories/context.repository.js';
-
-export interface ContextReadyPayload {
-  provider: string;
-  owner: string;
-  repo: string;
-  prNumber: number;
-  files: { path: string; content: string }[];
-  summary?: string;
-}
+import { ContextRepository } from '../database/repositories/context.repository.js';
+import { ContextReadyPayload } from 'shared-types';
 
 export class InternalService {
   private pubsub: PubSub;

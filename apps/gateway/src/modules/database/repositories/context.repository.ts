@@ -1,11 +1,5 @@
 import { DatabaseService } from '../interfaces/database.interface.js';
-
-export interface RepositoryContext {
-  prKey: string;
-  files: { path: string; content: string }[];
-  summary?: string;
-  updatedAt: Date;
-}
+import { RepositoryContext } from 'shared-types';
 
 export class ContextRepository {
   private collection = 'repository_contexts';

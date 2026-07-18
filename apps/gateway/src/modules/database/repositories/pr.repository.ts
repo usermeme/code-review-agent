@@ -1,13 +1,5 @@
 import { DatabaseService } from '../interfaces/database.interface.js';
-
-export interface PRState {
-  provider: string;
-  owner: string;
-  repo: string;
-  prNumber: number;
-  status: 'queued' | 'building_context' | 'reviewing' | 'completed' | 'failed';
-  updatedAt: Date;
-}
+import { PRState } from 'shared-types';
 
 export class PrRepository {
   private collection = 'pull_requests';

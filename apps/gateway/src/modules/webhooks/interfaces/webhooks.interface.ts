@@ -1,10 +1,9 @@
-export interface WebhookEventPayload {
-  owner: string;
-  repo: string;
-  prNumber: number;
-  action: string;
-}
+import { WebhookEventPayload } from 'shared-types';
 
 export interface ProcessedWebhookResult {
-  status: string;
+  ignored: boolean;
+  reason?: string;
+  payload?: WebhookEventPayload;
 }
+
+export { WebhookEventPayload };

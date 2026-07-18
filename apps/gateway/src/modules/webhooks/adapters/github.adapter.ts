@@ -78,7 +78,7 @@ export class GithubAdapter implements GitAdapter {
       case 'issue_comment':
         return this.processIssueCommentEvent(ghPayload, logger);
       default:
-        return { status: 'Ignored GitHub event' };
+        return { ignored: true, reason: 'Ignored GitHub event' };
     }
   }
 
@@ -89,15 +89,16 @@ export class GithubAdapter implements GitAdapter {
       
       await this.publishContextBuild({
         provider: 'github',
-        owner: payload.repository?.owner?.login || '',
-        repo: payload.repository?.name || '',
-        prNumber: payload.pull_request?.number || 0,
+        owner: payload.repository!.owner!.login!,
+        repo: payload.repository!.name!,
+        prNumber: payload.pull_request!.number!,
         action,
+        htmlUrl: payload.pull_request!.html_url!,
       });
       
-      return { status: 'Context build triggered for GitHub' };
+      return { ignored: false, reason: 'Context build triggered for GitHub' };
     }
-    return { status: 'Ignored PR action' };
+    return { ignored: true, reason: 'Ignored PR action' };
   }
 
   private async processIssueCommentEvent(payload: GithubWebhookPayload, logger: FastifyBaseLogger): Promise<ProcessedWebhookResult> {
@@ -109,16 +110,17 @@ export class GithubAdapter implements GitAdapter {
         
         await this.publishContextBuild({
           provider: 'github',
-          owner: payload.repository?.owner?.login || '',
-          repo: payload.repository?.name || '',
-          prNumber: payload.issue?.number || 0,
+          owner: payload.repository!.owner!.login!,
+          repo: payload.repository!.name!,
+          prNumber: payload.issue!.number!,
           action: 'manual_trigger',
+          htmlUrl: payload.issue.pull_request ? (payload.issue as any).pull_request.html_url || payload.issue.html_url : payload.issue.html_url,
         });
         
-        return { status: 'Manual review triggered for GitHub' };
+        return { ignored: false, reason: 'Manual review triggered for GitHub' };
       }
     }
-    return { status: 'Ignored issue comment action' };
+    return { ignored: true, reason: 'Ignored issue comment action' };
   }
 
   private async publishContextBuild(data: WebhookEventPayload & { provider: string }): Promise<void> {
