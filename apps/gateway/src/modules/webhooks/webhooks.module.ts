@@ -1,8 +1,24 @@
 import { FastifyPluginAsync } from 'fastify';
+import { WebhooksService } from './webhooks.service.js';
+import { webhooksRoutes } from './webhooks.routes.js';
+import { GitService } from '../git/git.service.js';
 
-export const webhooksModule: FastifyPluginAsync = async (fastify) => {
-  fastify.post('/webhook', async (request, reply) => {
-    // TODO: Implement webhook ingestion and DB check
-    return { status: 'received' };
-  });
+declare module 'fastify' {
+  interface FastifyRequest {
+    rawBody?: string;
+  }
+}
+
+export interface WebhooksModuleOptions {
+  gitService: GitService;
+}
+
+export const webhooksModule: FastifyPluginAsync<WebhooksModuleOptions> = async (
+  fastify,
+  options,
+) => {
+  const { gitService } = options;
+  const webhooksService = new WebhooksService(gitService);
+
+  fastify.register(webhooksRoutes, { webhooksService, gitService });
 };

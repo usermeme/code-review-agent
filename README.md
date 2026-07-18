@@ -1,98 +1,126 @@
-# TempNx
+# Code Review Agent Architecture
 
-<a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
+This monorepo contains a fully autonomous, event-driven Code Review system powered by `@google/adk`. It consists of a central **Fastify Gateway** and two AI agent microservices (**Context Builder** and **Code Reviewer**).
 
-✨ Your new, shiny [Nx workspace](https://nx.dev) is ready ✨.
+## The Idea & Logic
 
-[Learn more about this workspace setup and its capabilities](https://nx.dev/getting-started/intro#learn-nx?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or run `npx nx graph` to visually explore what was created. Now, let's get you up to speed!
+The core idea is to perform highly accurate AI code reviews by maintaining a deep **baseline repository context**. A common problem with AI code reviewers is they only see the specific PR diff and hallucinate comments because they don't understand the broader repository architecture, utilities, and testing patterns.
 
-## Run tasks
+Our system solves this by introducing a **Context Builder Agent**. 
+When a Pull Request is opened:
+1. **Smart Routing**: The Gateway intercepts the GitHub Webhook and checks Firestore to see if the repository's "baseline context" has already been built.
+2. **Context Building**: If the baseline does not exist, the Gateway pauses the review and triggers the **Context Builder Agent** via Pub/Sub. This agent clones the entire repository, chunks the files, generates intelligent summaries of the architecture/patterns using Google Gemini, and synthesizes a permanent baseline context document.
+3. **Review Swarm**: Once the baseline is ready (or if it already existed), the Gateway fetches the PR diff and triggers the **Code Review Agent**. This agent acts as an orchestrator, spawning parallel sub-agents (Quality, Problems, Tickets) to review the diff against the deep baseline context.
+4. **Actionable Output**: The orchestrator merges the findings into a precise JSON payload and sends it back to the Gateway, which uses Octokit to natively post the findings as inline review comments on GitHub.
+5. **Continuous Learning**: When a PR is merged, the Gateway triggers an incremental baseline update, ensuring the Context Builder patches the baseline with the new code, keeping the AI's understanding up to date!
 
-To run tasks with Nx use:
+## Architecture Diagram
 
-```sh
-npx nx <target> <project-name>
+```mermaid
+sequenceDiagram
+    participant GitHub
+    participant Gateway as Fastify Gateway
+    participant PubSub as Google Cloud Pub/Sub
+    participant DB as Firestore
+    participant ContextAgent as Context Builder Agent (ADK)
+    participant ReviewAgent as Code Review Agent (ADK)
+    
+    %% Webhook ingestion and DB check
+    GitHub->>Gateway: Trigger Webhook (Push / PR opened)
+    Gateway->>DB: Check if repository baseline context exists
+    
+    alt Context is Missing
+        Gateway->>PubSub: Publish Event (build-context-topic)
+        PubSub->>ContextAgent: Trigger Context Builder
+        
+        Note over ContextAgent: Agent clones repo and builds context
+        
+        ContextAgent->>Gateway: POST /api/v1/internal/pubsub (context ready)
+        Gateway->>DB: Save generated baseline context
+    end
+    
+    %% Code Review Workflow
+    Gateway->>GitHub: Fetch PR Diff via Octokit
+    Gateway->>PubSub: Publish Event (review-code-topic)
+    PubSub->>ReviewAgent: Trigger Code Reviewer Orchestrator
+    
+    ReviewAgent->>Gateway: HTTP GET /api/v1/context/:prKey
+    Gateway-->>ReviewAgent: Return Repository Baseline Context
+    
+    Note over ReviewAgent: Swarm of sub-agents review diff safely
+    
+    ReviewAgent->>Gateway: HTTP POST /api/v1/review/results
+    Gateway->>DB: Store results
+    Gateway->>GitHub: Post Inline Review Comments via Octokit
 ```
 
-For example:
+## Step-by-Step Deployment Guide
 
-```sh
-npx nx build myproject
+Follow these steps to deploy and run the system:
+
+### 1. Prerequisites
+- **Node.js** v20+
+- **Google Cloud Platform** account (Firestore, Pub/Sub, Gemini API enabled)
+- **GitHub App** or Personal Access Token with repository read/write and webhook access.
+
+### 2. Environment Configuration
+Create a `.env` file at the root of the workspace (or set these in your deployment environment):
+
+```env
+# Google Cloud
+GOOGLE_CLOUD_PROJECT=your-gcp-project-id
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+
+# Pub/Sub Topics
+BUILD_CONTEXT_TOPIC=build-context-topic
+CONTEXT_READY_TOPIC=context-ready-topic
+REVIEW_CODE_TOPIC=review-code-topic
+
+# Server Ports
+PORT=3000
+HOST=0.0.0.0
+
+# GitHub Integration
+GITHUB_WEBHOOK_SECRET_ID=your-webhook-secret # Kept in Secret Manager
+GITHUB_TOKEN_SECRET_ID=your-github-token     # Kept in Secret Manager
 ```
 
-These targets are either [inferred automatically](https://nx.dev/concepts/inferred-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or defined in the `project.json` or `package.json` files.
+### 3. Google Cloud Pub/Sub Setup
+Ensure you have created the three Pub/Sub topics listed above in your GCP project.
+For local development, you can use the Google Cloud Pub/Sub Emulator. For production, you must set up push subscriptions:
+- `context-ready-topic` pushes to `https://your-gateway-url.com/api/v1/internal/pubsub`
+- `review-result-topic` pushes to `https://your-gateway-url.com/api/v1/review/results`
 
-[More about running tasks in the docs &raquo;](https://nx.dev/features/run-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Add new projects
-
-While you could add new projects to your workspace manually, you might want to leverage [Nx plugins](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) and their [code generation](https://nx.dev/features/generate-code?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) feature.
-
-To install a new plugin you can use the `nx add` command. Here's an example of adding the React plugin:
-
+### 4. Build the Workspace
+Compile all three applications in the Nx Monorepo:
 ```sh
-npx nx add @nx/react
+npm install
+npx nx run-many -t build
 ```
 
-Use the plugin's generator to create new projects. For example, to create a new React app or library:
+### 5. Running the Services
+You need to run the three services concurrently (Gateway, Context Builder, and Code Reviewer).
 
+**Start the Gateway:**
 ```sh
-# Generate an app
-npx nx g @nx/react:app demo
-
-# Generate a library
-npx nx g @nx/react:lib some-lib
+npx nx run gateway:serve
 ```
 
-You can use `npx nx list` to get a list of installed plugins. Then, run `npx nx list <plugin-name>` to learn about more specific capabilities of a particular plugin. Alternatively, [install Nx Console](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) to browse plugins and generators in your IDE.
-
-[Learn more about Nx plugins &raquo;](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) | [Browse the plugin registry &raquo;](https://nx.dev/plugin-registry?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Set up CI!
-
-### Step 1
-
-To connect to Nx Cloud, run the following command:
-
+**Start the Context Builder Agent:**
 ```sh
-npx nx connect
+npx nx run agent-context-builder:serve
 ```
 
-Connecting to Nx Cloud ensures a [fast and scalable CI](https://nx.dev/ci/intro/why-nx-cloud?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) pipeline. It includes features such as:
-
-- [Remote caching](https://nx.dev/ci/features/remote-cache?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task distribution across multiple machines](https://nx.dev/ci/features/distribute-task-execution?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Automated e2e test splitting](https://nx.dev/ci/features/split-e2e-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task flakiness detection and rerunning](https://nx.dev/ci/features/flaky-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-### Step 2
-
-Use the following command to configure a CI workflow for your workspace:
-
+**Start the Code Reviewer Agent:**
 ```sh
-npx nx g ci-workflow
+npx nx run agent-code-reviewer:serve
 ```
 
-[Learn more about Nx on CI](https://nx.dev/ci/intro/ci-with-nx#ready-get-started-with-your-provider?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+### 6. GitHub Webhook Setup
+Go to your GitHub Repository (or Organization) Settings -> Webhooks.
+- **Payload URL**: `https://your-gateway-url.com/api/v1/webhooks`
+- **Content type**: `application/json`
+- **Secret**: Match the webhook secret from your configuration.
+- **Events**: Select `Pull requests` and `Issue comments`.
 
-## Install Nx Console
-
-Nx Console is an editor extension that enriches your developer experience. It lets you run tasks, generate code, and improves code autocompletion in your IDE. It is available for VSCode and IntelliJ.
-
-[Install Nx Console &raquo;](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Useful links
-
-Learn more:
-
-- [Learn more about this workspace setup](https://nx.dev/getting-started/intro#learn-nx?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Learn about Nx on CI](https://nx.dev/ci/intro/ci-with-nx?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Releasing Packages with Nx release](https://nx.dev/features/manage-releases?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [What are Nx plugins?](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-And join the Nx community:
-
-- [Discord](https://go.nx.dev/community)
-- [Follow us on X](https://twitter.com/nxdevtools) or [LinkedIn](https://www.linkedin.com/company/nrwl)
-- [Our Youtube channel](https://www.youtube.com/@nxdevtools)
-- [Our blog](https://nx.dev/blog?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+You are now fully deployed! Opening a Pull Request will automatically trigger the pipeline.

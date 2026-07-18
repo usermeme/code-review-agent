@@ -2,8 +2,10 @@ import { FunctionTool } from '@google/adk';
 import { STATE } from '../constants/state-keys.constant.js';
 
 export interface RepoContextTarget {
-  repo: string; // "owner/name"
-  ref: string;
+  provider: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
 }
 
 export function createGetRepoContextTool(gatewayUrl: string) {
@@ -15,9 +17,11 @@ export function createGetRepoContextTool(gatewayUrl: string) {
       'available to the reviewer sub-agents automatically; returns a short digest.',
     execute: async (args, toolContext) => {
       const target = args as RepoContextTarget;
+      // We always fetch the baseline repository context (prNumber = 0)
+      const prKey = `${target.provider}:${target.owner}:${target.repo}:0`;
 
       const response = await fetch(
-        `${gatewayUrl}/api/context?repo=${encodeURIComponent(target.repo)}&ref=${encodeURIComponent(target.ref)}`,
+        `${gatewayUrl}/api/v1/context/${prKey}`,
         {
           method: 'GET',
           headers: {
@@ -34,17 +38,24 @@ export function createGetRepoContextTool(gatewayUrl: string) {
 
       const doc = await response.json();
       const state = toolContext.state;
-      state.set(STATE.ctxArchitecture, doc.sections['architecture'] ?? '');
-      state.set(STATE.ctxModules, doc.sections['modules'] ?? '');
-      state.set(STATE.ctxPatterns, doc.sections['patterns'] ?? '');
-      state.set(STATE.ctxErrorHandling, doc.sections['errorHandling'] ?? '');
-      state.set(STATE.ctxAgentDocs, doc.sections['agentDocs'] ?? '');
+      let sections: Record<string, string> = {};
+      if (doc.summary) {
+         try {
+            sections = JSON.parse(doc.summary);
+         } catch {
+            sections = { legacy: doc.summary };
+         }
+      }
+
+      state.set(STATE.ctxArchitecture, sections['architecture'] ?? '');
+      state.set(STATE.ctxModules, sections['modules'] ?? '');
+      state.set(STATE.ctxPatterns, sections['patterns'] ?? '');
+      state.set(STATE.ctxErrorHandling, sections['errorHandling'] ?? '');
+      state.set(STATE.ctxAgentDocs, sections['agentDocs'] ?? '');
 
       return {
-        digest: (doc.sections['architecture'] ?? '').slice(0, 2000),
-        sections: Object.keys(doc.sections),
-        builtAt: doc.builtAt,
-        headSha: doc.headSha,
+        digest: (sections['architecture'] ?? '').slice(0, 2000),
+        sections: Object.keys(sections),
       };
     },
   });
