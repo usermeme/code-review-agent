@@ -174,20 +174,11 @@ In your target GitHub repository (or organization):
 
 ## 🏢 Enterprise & Organization Deployments
 
-To deploy to your company's private cloud organization without maintaining custom forks or storing proprietary configurations in this repository:
+This repository is designed as a decoupled upstream artifact publisher. To deploy within your organization:
 
-### Pattern A: GitOps / Custom Orchestration
-Keep this repository 100% public and agnostic. In your organization's private repository or internal deployment tool (e.g. Kubernetes Helm charts, Cloud Run configurations, ArgoCD, or internal CI/CD), simply pull the public `ghcr.io/<owner>/code-review-agent-*` container images and pass your organization's environment variables and secrets.
-
-### Pattern B: Automated CD via Workload Identity Federation (WIF)
-This repository includes an optional workflow [`.github/workflows/deploy-org.yml`](file:///.github/workflows/deploy-org.yml). When configured with repository secrets, it authenticates directly to your organization GCP using keyless OIDC (no long-lived service account keys):
-
-1. Configure WIF in your Google Cloud Organization.
-2. In this GitHub repository's **Settings > Secrets and variables > Actions**, set:
-   - `GCP_WORKLOAD_IDENTITY_PROVIDER`: `projects/123456/locations/global/workloadIdentityPools/...`
-   - `GCP_SERVICE_ACCOUNT`: `deployer@your-project.iam.gserviceaccount.com`
-   - `PUBSUB_SECRET_TOKEN`: Your internal shared secret.
-3. Every container release will automatically trigger rolling updates in your organization's Cloud Run environment.
+1. **Pull Pre-built Containers**: Use `ghcr.io/<owner>/code-review-agent-gateway:latest`, `ghcr.io/<owner>/code-review-agent-context-builder:latest`, and `ghcr.io/<owner>/code-review-agent-code-reviewer:latest` directly in your organization's deployment pipeline (Kubernetes / Helm, Cloud Run, ECS, Nomad, or Docker Compose).
+2. **Inject Secrets Securely**: Supply runtime secrets (`GEMINI_API_KEY`, `GIT_ADAPTER_TOKEN`, `GIT_ADAPTER_WEBHOOK_SECRET`, `PUBSUB_SECRET_TOKEN`) via your platform's native secret manager (e.g. Google Secret Manager, HashiCorp Vault, AWS Secrets Manager).
+3. **Automate Updates via GitOps**: Use standard GitOps tooling (such as ArgoCD, Flux, Renovate, or an internal CI/CD pipeline) in your private infrastructure repository to track semantic version tags published by this project's release workflow.
 
 ---
 
