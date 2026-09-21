@@ -1,0 +1,30 @@
+{
+  "name": "gateway-e2e",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/gateway-e2e/src",
+  "targets": {
+    "e2e": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cucumber-js --config apps/gateway-e2e/cucumber.json",
+        "env": {
+          "NODE_OPTIONS": "--import tsx"
+        }
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint apps/gateway-e2e"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p apps/gateway-e2e/tsconfig.json --noEmit"
+      }
+    }
+  },
+  "tags": []
+}

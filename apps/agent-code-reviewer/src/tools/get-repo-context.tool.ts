@@ -1,4 +1,5 @@
 import { FunctionTool } from '@google/adk';
+import { z } from 'zod';
 import { STATE } from '../constants/state-keys.constant.js';
 
 export interface RepoContextTarget {
@@ -15,10 +16,25 @@ export function createGetRepoContextTool(gatewayUrl: string) {
       'Loads the cached whole-repository context (architecture, modules, internal patterns, ' +
       'error-handling/testing conventions, agent docs). Sections are made ' +
       'available to the reviewer sub-agents automatically; returns a short digest.',
+    parameters: z.object({
+      provider: z.string().optional().describe('Git provider (e.g. github)'),
+      owner: z.string().optional().describe('Repository owner'),
+      repo: z.string().optional().describe('Repository name'),
+    }),
     execute: async (args, toolContext) => {
-      const target = args as RepoContextTarget;
+      const target = (args || {}) as Partial<RepoContextTarget>;
+      const meta = toolContext.state.get<Partial<RepoContextTarget>>(STATE.prMeta);
+
+      const provider = target.provider || meta?.provider || 'github';
+      const owner = target.owner || meta?.owner || '';
+      const repo = target.repo || meta?.repo || '';
+
+      if (!owner || !repo) {
+        throw new Error('Owner and repository name are required to fetch repository context.');
+      }
+
       // We always fetch the baseline repository context (prNumber = 0)
-      const prKey = `${target.provider}:${target.owner}:${target.repo}:0`;
+      const prKey = `${provider}:${owner}:${repo}:0`;
 
       const response = await fetch(
         `${gatewayUrl}/api/v1/context/${prKey}`,
@@ -43,7 +59,7 @@ export function createGetRepoContextTool(gatewayUrl: string) {
          try {
             sections = JSON.parse(doc.summary);
          } catch {
-            sections = { legacy: doc.summary };
+            sections = { architecture: doc.summary };
          }
       }
 

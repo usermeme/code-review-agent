@@ -3,11 +3,6 @@ import { WebhooksService } from './webhooks.service.js';
 import { webhooksRoutes } from './webhooks.routes.js';
 import { GitService } from '../git/git.service.js';
 
-declare module 'fastify' {
-  interface FastifyRequest {
-    rawBody?: string;
-  }
-}
 
 export interface WebhooksModuleOptions {
   gitService: GitService;

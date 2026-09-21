@@ -27,7 +27,7 @@ export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (
     const query = request.query as { token?: string };
     const expectedToken = process.env.PUBSUB_SECRET_TOKEN;
     
-    if (expectedToken && query.token !== expectedToken) {
+    if (!expectedToken || query.token !== expectedToken) {
       return reply.code(401).send({ error: 'Unauthorized' });
     }
 

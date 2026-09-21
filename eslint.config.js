@@ -16,8 +16,8 @@ export default defineConfig(
   },
   js.configs.recommended,
   {
-    // Type-aware linting for the app code (tsconfig covers src only).
-    files: ['apps/**/*.ts'],
+    // Type-aware linting for the app and lib code.
+    files: ['apps/**/*.ts', 'libs/**/*.ts'],
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {

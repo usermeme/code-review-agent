@@ -5,23 +5,27 @@ node_modules
 dist
 npm-debug.log*
 *.log
+.nx
+tmp
+coverage
 
 # Secrets and local config must never enter the build context or an image layer.
 .env
 .env.*
 !.env.example
 
-# Dev-only files not needed to build or run the image.
-test
-docs
-.github
+# Dev-only files and caches
 .vscode
 .idea
+.agents
+.claude
+.codex
+.gemini
+.opencode
 *.md
 !README.md
-docker-compose.yml
-Dockerfile
+docker-compose*.yml
+Dockerfile*
 .dockerignore
 .prettierrc*
 .prettierignore
-eslint.config.js

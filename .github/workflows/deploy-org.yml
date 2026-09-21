@@ -1,0 +1,76 @@
+name: Deploy to Org GCP
+
+on:
+  workflow_run:
+    workflows: ["Release Containers"]
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # Required for Workload Identity Federation
+
+jobs:
+  deploy-to-gcp:
+    name: Deploy to Organization Cloud Run
+    runs-on: ubuntu-latest
+    # Only run if organization GCP secrets are configured in repository settings
+    if: "${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}"
+    steps:
+      - name: Check GCP Secrets Configuration
+        id: check-secrets
+        run: |
+          if [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ] || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
+            echo "::notice ::Organization GCP Workload Identity secrets are not configured. Skipping automated deployment."
+            echo "configured=false" >> $GITHUB_OUTPUT
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Authenticate to Google Cloud via Workload Identity Federation
+        if: steps.check-secrets.outputs.configured == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        if: steps.check-secrets.outputs.configured == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Gateway to Cloud Run
+        if: steps.check-secrets.outputs.configured == 'true'
+        run: |
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          gcloud run deploy gateway-service \
+            --image ghcr.io/${{ github.repository_owner }}/code-review-agent-gateway:latest \
+            --region "$REGION" \
+            --allow-unauthenticated \
+            --set-env-vars "APP_NAME=gateway,BUILD_CONTEXT_TOPIC=build-context-topic,CONTEXT_READY_TOPIC=context-ready-topic,REVIEW_CODE_TOPIC=review-code-topic,PUBSUB_SECRET_TOKEN=${{ secrets.PUBSUB_SECRET_TOKEN }},GIT_ADAPTER=github" \
+            --set-secrets="GIT_ADAPTER_WEBHOOK_SECRET=git-adapter-webhook-secret:latest,GIT_ADAPTER_TOKEN=git-adapter-token-secret:latest" \
+            --quiet
+
+      - name: Deploy Context Builder Agent to Cloud Run
+        if: steps.check-secrets.outputs.configured == 'true'
+        run: |
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          GATEWAY_URL=$(gcloud run services describe gateway-service --region "$REGION" --format 'value(status.url)')
+          gcloud run deploy agent-context-builder \
+            --image ghcr.io/${{ github.repository_owner }}/code-review-agent-context-builder:latest \
+            --region "$REGION" \
+            --set-env-vars "GATEWAY_URL=$GATEWAY_URL,REVIEW_MODEL=gemini-2.5-flash,GOOGLE_GENAI_USE_VERTEXAI=0" \
+            --set-secrets="GEMINI_API_KEY=google-api-key:latest,GIT_ADAPTER_TOKEN=git-adapter-token-secret:latest" \
+            --quiet
+
+      - name: Deploy Code Reviewer Agent to Cloud Run
+        if: steps.check-secrets.outputs.configured == 'true'
+        run: |
+          REGION="${{ secrets.GCP_REGION || 'us-central1' }}"
+          GATEWAY_URL=$(gcloud run services describe gateway-service --region "$REGION" --format 'value(status.url)')
+          gcloud run deploy agent-code-reviewer \
+            --image ghcr.io/${{ github.repository_owner }}/code-review-agent-code-reviewer:latest \
+            --region "$REGION" \
+            --set-env-vars "GATEWAY_URL=$GATEWAY_URL,REVIEW_MODEL=gemini-2.5-flash,GOOGLE_GENAI_USE_VERTEXAI=0" \
+            --set-secrets="GEMINI_API_KEY=google-api-key:latest,GIT_ADAPTER_TOKEN=git-adapter-token-secret:latest" \
+            --quiet
