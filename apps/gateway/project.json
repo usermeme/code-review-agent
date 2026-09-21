@@ -11,8 +11,9 @@
       "options": {
         "platform": "node",
         "outputPath": "dist/apps/gateway",
+        "outputFileName": "server.js",
         "format": ["esm"],
-        "bundle": false,
+        "bundle": true,
         "main": "apps/gateway/src/main.ts",
         "tsConfig": "apps/gateway/tsconfig.app.json",
         "assets": ["apps/gateway/src/assets"],

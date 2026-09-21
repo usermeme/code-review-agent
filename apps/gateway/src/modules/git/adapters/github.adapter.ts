@@ -48,20 +48,22 @@ export class GithubAdapter implements GitAdapter {
   }
 
   async init(logger: FastifyBaseLogger): Promise<void> {
-    const secretName =
-      process.env.GITHUB_WEBHOOK_SECRET_ID || 'dummy-secret-for-local-dev';
-    const tokenName =
-      process.env.GITHUB_TOKEN_SECRET_ID || 'dummy-token-for-local-dev';
-    
-    let githubSecret = 'dummy';
-    let githubToken = 'dummy';
+    let githubSecret = process.env.GIT_ADAPTER_WEBHOOK_SECRET || 'dummy-secret-for-local-dev';
+    let githubToken = process.env.GIT_ADAPTER_TOKEN || 'dummy-token-for-local-dev';
 
-    if (secretName !== 'dummy-secret-for-local-dev') {
+    if (githubSecret.startsWith('projects/')) {
       try {
-        githubSecret = await getSecret(secretName);
-        githubToken = await getSecret(tokenName);
+        githubSecret = await getSecret(githubSecret);
       } catch (e) {
-        logger.error(`Failed to fetch github secrets: ${e}`);
+        logger.error(`Failed to fetch github secret: ${e}`);
+      }
+    }
+
+    if (githubToken.startsWith('projects/')) {
+      try {
+        githubToken = await getSecret(githubToken);
+      } catch (e) {
+        logger.error(`Failed to fetch github token: ${e}`);
       }
     }
 

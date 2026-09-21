@@ -12,7 +12,7 @@
         "platform": "node",
         "outputPath": "dist/apps/agent-code-reviewer",
         "format": ["cjs"],
-        "bundle": false,
+        "bundle": true,
         "main": "apps/agent-code-reviewer/src/main.ts",
         "tsConfig": "apps/agent-code-reviewer/tsconfig.app.json",
         "assets": ["apps/agent-code-reviewer/src/assets"],

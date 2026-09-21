@@ -12,7 +12,7 @@
         "platform": "node",
         "outputPath": "dist/apps/agent-context-builder",
         "format": ["cjs"],
-        "bundle": false,
+        "bundle": true,
         "main": "apps/agent-context-builder/src/main.ts",
         "tsConfig": "apps/agent-context-builder/tsconfig.app.json",
         "assets": ["apps/agent-context-builder/src/assets"],

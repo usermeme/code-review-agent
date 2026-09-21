@@ -1,28 +1,28 @@
 steps:
   # 1. Install dependencies
   - name: 'node:22'
-    entrypoint: 'npm'
-    args: ['ci']
+    entrypoint: 'npx'
+    args: ['pnpm', 'install']
     id: 'Install Dependencies'
 
   # 2. Lint
   - name: 'node:22'
-    entrypoint: 'npm'
-    args: ['run', 'lint']
+    entrypoint: 'npx'
+    args: ['pnpm', 'run', 'lint']
     id: 'Lint'
     waitFor: ['Install Dependencies']
 
   # 3. Typecheck
   - name: 'node:22'
-    entrypoint: 'npm'
-    args: ['run', 'typecheck']
+    entrypoint: 'npx'
+    args: ['pnpm', 'run', 'typecheck']
     id: 'Typecheck'
     waitFor: ['Install Dependencies']
 
   # 4. Build Workspace
   - name: 'node:22'
-    entrypoint: 'npm'
-    args: ['run', 'build']
+    entrypoint: 'npx'
+    args: ['pnpm', 'run', 'build']
     id: 'Build Workspace'
     waitFor: ['Install Dependencies']
 
