@@ -26,11 +26,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
 
+# Enable Corepack and activate pnpm matching workspace version
+RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
+
 # Copy built application and pruned package.json
 COPY --chown=node:node --from=builder /app/dist/apps/gateway ./
 
-# Install production dependencies
-RUN npm install --omit=dev --ignore-scripts && chown -R node:node /app
+# Install production dependencies using frozen lockfile
+RUN pnpm install --prod --frozen-lockfile && chown -R node:node /app
 
 # Run as non-root user
 USER node
