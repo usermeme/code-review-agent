@@ -11,8 +11,9 @@
       "options": {
         "platform": "node",
         "outputPath": "dist/apps/gateway",
+        "outputFileName": "server.js",
         "format": ["esm"],
-        "bundle": false,
+        "bundle": true,
         "main": "apps/gateway/src/main.ts",
         "tsConfig": "apps/gateway/tsconfig.app.json",
         "assets": ["apps/gateway/src/assets"],
@@ -77,6 +78,18 @@
         "production": {
           "buildTarget": "gateway:build:production"
         }
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p apps/gateway/tsconfig.app.json --noEmit"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint apps/gateway"
       }
     }
   },

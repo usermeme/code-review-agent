@@ -56,6 +56,9 @@ export function createStoreDiscussionTool(
       });
 
       if (!response.ok) {
+        if (response.status === 404) {
+          return { stored: false };
+        }
         throw new Error(
           `Failed to store discussion via gateway: ${response.statusText}`,
         );

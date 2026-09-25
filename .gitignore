@@ -46,3 +46,9 @@ Thumbs.db
 .claude/settings.local.json
 
 .nx/polygraph
+
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup

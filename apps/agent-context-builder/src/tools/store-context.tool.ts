@@ -18,14 +18,11 @@ export function createStoreContextTool() {
       sections: z.record(z.string(), z.string()),
     }),
     execute: async (input) => {
-      // The Gateway expects `files` and `summary`. We serialize sections into summary.
-      // And we send an empty `files` object because the actual context is in `summary`.
       const payload = {
         provider: input.provider,
         owner: input.owner,
         repo: input.repo,
         prNumber: input.prNumber || 0, // 0 for repository baseline
-        files: {},
         summary: JSON.stringify(input.sections),
       };
 

@@ -52,5 +52,7 @@ export function createTicketAgent({
     }),
     outputSchema: ticketReportSchema,
     includeContents: 'none',
+    disallowTransferToParent: true,
+    disallowTransferToPeers: true,
   });
 }

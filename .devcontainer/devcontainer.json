@@ -1,14 +1,20 @@
 {
-  "name": "Node.js + Antigravity + Neovim",
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+  "name": "Node.js + Antigravity",
   "image": "mcr.microsoft.com/devcontainers/typescript-node:24",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1.1.1": {},
+    "ghcr.io/usermeme/devcontainer-features/dotfiles:1": {},
+    "ghcr.io/usermeme/devcontainer-features/pnpm:1": {
+      "runInstall": true
+    },
+    "ghcr.io/usermeme/devcontainer-features/antigravity:1": {},
+    "ghcr.io/usermeme/devcontainer-features/neovim:1": {},
+    "ghcr.io/usermeme/devcontainer-features/node-modules-volume:1": {}
+  },
 
-  "mounts": [
-    "source=${localEnv:HOME}/.gemini,target=/home/node/.gemini,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.agents/skills,target=/home/node/.agents/skills,type=bind,consistency=cached,readonly",
-    "source=${localEnv:HOME}/dotfiles,target=/home/node/dotfiles,type=bind,consistency=cached,readonly",
-    "source=${localEnv:HOME}/.config/gcloud,target=/home/node/.config/gcloud,type=bind,readonly"
-  ],
-  "postCreateCommand": "bash .devcontainer/post-create.sh",
-
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind,consistency=cached",
+  "forwardPorts": [8081],
   "remoteUser": "node"
 }

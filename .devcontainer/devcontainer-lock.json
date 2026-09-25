@@ -1,9 +1,34 @@
 {
   "features": {
-    "ghcr.io/devcontainers-extra/features/neovim-apt-get:1": {
-      "version": "1.0.20",
-      "resolved": "ghcr.io/devcontainers-extra/features/neovim-apt-get@sha256:99663f4dfdfac03321caa2f72e64132a43ae778e7cc2da2681e6a50e4f071038",
-      "integrity": "sha256:99663f4dfdfac03321caa2f72e64132a43ae778e7cc2da2681e6a50e4f071038"
+    "ghcr.io/devcontainers/features/github-cli:1.1.1": {
+      "version": "1.1.1",
+      "resolved": "ghcr.io/devcontainers/features/github-cli@sha256:94879eebb6a0e4e2f197de9f12db7427cb4a25b82d93c55239ce8c8fc394a1b4",
+      "integrity": "sha256:94879eebb6a0e4e2f197de9f12db7427cb4a25b82d93c55239ce8c8fc394a1b4"
+    },
+    "ghcr.io/usermeme/devcontainer-features/antigravity:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/usermeme/devcontainer-features/antigravity@sha256:6034ca93f05fccf29f9b3b0e547693b0bcff69426390966da9c5dffeddfd4cdc",
+      "integrity": "sha256:6034ca93f05fccf29f9b3b0e547693b0bcff69426390966da9c5dffeddfd4cdc"
+    },
+    "ghcr.io/usermeme/devcontainer-features/dotfiles:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/usermeme/devcontainer-features/dotfiles@sha256:598b5675e5d7159da73edff3604993090f647b0736223ad009e0123da7c23ecd",
+      "integrity": "sha256:598b5675e5d7159da73edff3604993090f647b0736223ad009e0123da7c23ecd"
+    },
+    "ghcr.io/usermeme/devcontainer-features/neovim:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/usermeme/devcontainer-features/neovim@sha256:b83760e25f419497aa596fd7cdca7d961c7adb12cec8335019f038128444d00d",
+      "integrity": "sha256:b83760e25f419497aa596fd7cdca7d961c7adb12cec8335019f038128444d00d"
+    },
+    "ghcr.io/usermeme/devcontainer-features/node-modules-volume:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/usermeme/devcontainer-features/node-modules-volume@sha256:44b974f39b0356388be27407a0d480ed8bbad60de86aeb6b97ced1277a096215",
+      "integrity": "sha256:44b974f39b0356388be27407a0d480ed8bbad60de86aeb6b97ced1277a096215"
+    },
+    "ghcr.io/usermeme/devcontainer-features/pnpm:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/usermeme/devcontainer-features/pnpm@sha256:0cd789d5a19fcd4ba9c746620512df302cfe50d9222e639a8ec74003cd97e189",
+      "integrity": "sha256:0cd789d5a19fcd4ba9c746620512df302cfe50d9222e639a8ec74003cd97e189"
     }
   }
 }

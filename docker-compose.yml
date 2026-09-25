@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: apps/gateway/Dockerfile
+    ports:
+      - "3000:8080"
+    environment:
+      - PORT=8080
+      - HOST=0.0.0.0
+      - GIT_ADAPTER=github
+      - GIT_ADAPTER_WEBHOOK_SECRET=local-webhook-secret
+      - GIT_ADAPTER_TOKEN=dummy-token
+      - PUBSUB_SECRET_TOKEN=local-internal-secret
+      - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
+      - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
+      - PUBSUB_PROJECT_ID=local-project
+    depends_on:
+      - firestore-emulator
+      - pubsub-emulator
+
+  agent-context-builder:
+    build:
+      context: .
+      dockerfile: apps/agent-context-builder/Dockerfile
+    ports:
+      - "8001:8080"
+    environment:
+      - PORT=8080
+      - GATEWAY_URL=http://gateway:8080
+      - REVIEW_MODEL=gemini-2.5-flash
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
+      - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
+      - PUBSUB_PROJECT_ID=local-project
+    depends_on:
+      - gateway
+      - pubsub-emulator
+
+  agent-code-reviewer:
+    build:
+      context: .
+      dockerfile: apps/agent-code-reviewer/Dockerfile
+    ports:
+      - "8002:8080"
+    environment:
+      - PORT=8080
+      - GATEWAY_URL=http://gateway:8080
+      - REVIEW_MODEL=gemini-2.5-flash
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
+      - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
+      - PUBSUB_PROJECT_ID=local-project
+    depends_on:
+      - gateway
+      - pubsub-emulator
+
+  firestore-emulator:
+    image: google/cloud-sdk:emulators
+    ports:
+      - "8081:8080"
+    command: gcloud beta emulators firestore start --host-port=0.0.0.0:8080
+
+  pubsub-emulator:
+    image: google/cloud-sdk:emulators
+    ports:
+      - "8085:8085"
+    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=local-project

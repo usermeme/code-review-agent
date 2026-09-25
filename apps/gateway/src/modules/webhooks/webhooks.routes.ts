@@ -23,10 +23,14 @@ export const webhooksRoutes: FastifyPluginAsync<{
     const adapter = match.adapter;
 
     try {
+      const rawBody =
+        typeof request.rawBody === 'string'
+          ? request.rawBody
+          : (request.rawBody?.toString('utf8') ?? '');
       const isValid = await webhooksService.verifySignature(
         adapter,
         request.headers,
-        request.rawBody,
+        rawBody,
       );
       if (!isValid) {
         throw new Error('Verification failed');
