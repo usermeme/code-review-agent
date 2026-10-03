@@ -27,6 +27,8 @@ export interface ReviewResultPayload {
   repo: string;
   prNumber: number;
   comments: { path: string; position: number; body: string }[];
+  summary?: string;
+  ticketCoverage?: string;
 }
 
 export interface WebhookEventPayload {

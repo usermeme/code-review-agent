@@ -30,6 +30,18 @@ export interface GitAdapter {
   ): Promise<ProcessedWebhookResult>;
 
   /**
+   * Post top-level review summary to the git provider's PR.
+   */
+  postReviewSummary?(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    summary: string,
+    ticketCoverage?: string,
+    findingsCount?: number,
+  ): Promise<void>;
+
+  /**
    * Post inline comments to the git provider's PR.
    */
   postInlineComments?(

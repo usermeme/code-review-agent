@@ -61,6 +61,8 @@ export function createPublishReviewResultsTool(gatewayUrl: string) {
         repo,
         prNumber,
         comments,
+        summary: input.summary,
+        ticketCoverage: input.ticketCoverage,
       };
 
       try {
@@ -68,7 +70,7 @@ export function createPublishReviewResultsTool(gatewayUrl: string) {
         await pubsub.topic(topicName).publishMessage({
           json: payload,
         });
-        return `Successfully published ${comments.length} review comments to Pub/Sub topic "${topicName}".`;
+        return `Successfully published ${comments.length} review findings and summary to Pub/Sub topic "${topicName}".`;
       } catch (pubsubError) {
         console.warn('Pub/Sub publish failed, attempting direct HTTP POST to gateway...', pubsubError);
 
@@ -95,7 +97,7 @@ export function createPublishReviewResultsTool(gatewayUrl: string) {
           );
         }
 
-        return `Successfully sent ${comments.length} review comments directly to gateway.`;
+        return `Successfully sent ${comments.length} review findings and summary directly to gateway.`;
       }
     },
   });

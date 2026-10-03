@@ -327,6 +327,75 @@ export class GithubAdapter implements GitAdapter {
     });
   }
 
+  async postReviewSummary(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    summary: string,
+    ticketCoverage?: string,
+    findingsCount?: number,
+  ): Promise<void> {
+    console.log(
+      `[GithubAdapter] Posting top-level review summary to ${owner}/${repo}#${prNumber}`,
+    );
+
+    let body = `## 🤖 AI Code Review Summary\n\n${summary}`;
+    if (ticketCoverage) {
+      body += `\n\n### 🎯 Ticket & Requirements Coverage\n\n${ticketCoverage}`;
+    }
+    if (typeof findingsCount === 'number') {
+      const plural = findingsCount === 1 ? '' : 's';
+      body += `\n\n---\n*Found ${findingsCount} inline review comment${plural}.*`;
+    }
+
+    let commit_id: string | undefined;
+    try {
+      const prData = await this.octokitClient.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: prNumber,
+      });
+      commit_id = prData.data.head.sha;
+    } catch (e) {
+      console.warn('Failed to fetch PR head sha for review summary', e);
+    }
+
+    try {
+      await this.octokitClient.rest.pulls.createReview({
+        owner,
+        repo,
+        pull_number: prNumber,
+        body,
+        event: 'COMMENT',
+        ...(commit_id ? { commit_id } : {}),
+      });
+      console.log(
+        `[GithubAdapter] Submitted formal review to ${owner}/${repo}#${prNumber}`,
+      );
+    } catch (reviewErr) {
+      console.warn(
+        `[GithubAdapter] Failed to submit formal PR review, falling back to issue comment:`,
+        reviewErr,
+      );
+      try {
+        await this.octokitClient.rest.issues.createComment({
+          owner,
+          repo,
+          issue_number: prNumber,
+          body,
+        });
+        console.log(
+          `[GithubAdapter] Posted issue comment fallback to ${owner}/${repo}#${prNumber}`,
+        );
+      } catch (commentErr) {
+        console.error(
+          `[GithubAdapter] Failed to post issue comment to ${owner}/${repo}#${prNumber}`,
+          commentErr,
+        );
+      }
+    }
+  }
+
   async postInlineComments(
     owner: string,
     repo: string,
