@@ -47,24 +47,36 @@ export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (
         !payload.provider ||
         !payload.owner ||
         !payload.repo ||
-        !payload.prNumber ||
-        !payload.comments
+        !payload.prNumber
       ) {
         return reply.code(400).send({ error: 'Invalid payload' });
       }
 
       const adapter = gitService.getAdapter(payload.provider);
 
-      if (adapter && adapter.postInlineComments) {
-        await adapter.postInlineComments(
-          payload.owner,
-          payload.repo,
-          payload.prNumber,
-          payload.comments,
-        );
+      if (adapter) {
+        if (payload.summary && adapter.postReviewSummary) {
+          await adapter.postReviewSummary(
+            payload.owner,
+            payload.repo,
+            payload.prNumber,
+            payload.summary,
+            payload.ticketCoverage,
+            payload.comments ? payload.comments.length : 0,
+          );
+        }
+
+        if (adapter.postInlineComments && payload.comments && payload.comments.length > 0) {
+          await adapter.postInlineComments(
+            payload.owner,
+            payload.repo,
+            payload.prNumber,
+            payload.comments,
+          );
+        }
       } else {
         fastify.log.warn(
-          `No adapter or postInlineComments method found for provider: ${payload.provider}`,
+          `No adapter found for provider: ${payload.provider}`,
         );
       }
 

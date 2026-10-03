@@ -48,6 +48,7 @@ describe('publishReviewResultsTool', () => {
     const result = await (tool as any).execute(
       {
         summary: 'Critical security issue detected',
+        ticketCoverage: 'All acceptance criteria met except input sanitization.',
         findings: [
           {
             title: 'SQL Injection Vulnerability',
@@ -63,7 +64,7 @@ describe('publishReviewResultsTool', () => {
       mockCtx,
     );
 
-    expect(result).toContain('Successfully sent 1 review comments');
+    expect(result).toContain('Successfully sent 1 review findings and summary directly to gateway');
     expect(capturedBody).toBeDefined();
 
     const decoded = JSON.parse(
@@ -74,6 +75,10 @@ describe('publishReviewResultsTool', () => {
     expect(decoded.owner).toBe('test-owner');
     expect(decoded.repo).toBe('test-repo');
     expect(decoded.prNumber).toBe(42);
+    expect(decoded.summary).toBe('Critical security issue detected');
+    expect(decoded.ticketCoverage).toBe(
+      'All acceptance criteria met except input sanitization.',
+    );
     expect(decoded.comments).toHaveLength(1);
     expect(decoded.comments[0].path).toBe('src/db.ts');
     expect(decoded.comments[0].position).toBe(12);

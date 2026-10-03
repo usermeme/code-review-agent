@@ -52,3 +52,9 @@ Thumbs.db
 .terraform/
 *.tfstate
 *.tfstate.backup
+
+# Environment files
+.env
+.env.*
+.env.local
+!.env.example

@@ -9,6 +9,23 @@ Feature: Review Results Ingestion & Publishing
     And inline comment is posted to "usermeme/test-repo" PR #40 at "src/auth.ts" line 12
     And the PR status for "github:usermeme:test-repo:40" is marked as "completed"
 
+  Scenario: Ingesting review plan with top-level summary and inline comments
+    Given PR "github:usermeme:test-repo:41" is reviewing
+    When a PubSub push message arrives at "/api/v1/review/results" with token "secure-pubsub-token" containing summary "Found critical security issue" and findings:
+      | path        | position | body                        |
+      | src/db.ts   | 25       | SQL injection vulnerability |
+    Then the response status is 200
+    And review summary is posted to "usermeme/test-repo" PR #41 containing "Found critical security issue"
+    And inline comment is posted to "usermeme/test-repo" PR #41 at "src/db.ts" line 25
+    And the PR status for "github:usermeme:test-repo:41" is marked as "completed"
+
+  Scenario: Ingesting clean review plan with summary and zero findings
+    Given PR "github:usermeme:test-repo:42" is reviewing
+    When a PubSub push message arrives at "/api/v1/review/results" with token "secure-pubsub-token" containing summary "All checks passed cleanly" and zero findings
+    Then the response status is 200
+    And review summary is posted to "usermeme/test-repo" PR #42 containing "All checks passed cleanly"
+    And the PR status for "github:usermeme:test-repo:42" is marked as "completed"
+
   Scenario: Rejecting review results push message without token
     When a PubSub push message arrives at "/api/v1/review/results" without token
     Then the response status is 401

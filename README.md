@@ -10,7 +10,7 @@ A fully autonomous, context-aware AI Code Review system powered by [`@google/adk
 
 - **Context-Aware Reviews**: Automatically generates and continuously updates a full baseline architectural context of your codebase to eliminate hallucinations.
 - **Agentic Multi-Role Swarm**: Spawns parallel specialized reviewers (Code Quality, Bug Detection, Ticket Alignment) using `@google/adk`.
-- **Inline GitHub Comments**: Directly posts actionable inline review comments on GitHub Pull Requests.
+- **Top-Level Summaries & Inline Comments**: Submits formal top-level pull request reviews (with overall verdict, ticket alignment analysis, and defect counts) alongside actionable inline review comments.
 - **Container-First & Open-Source**: Decoupled from any specific infrastructure or IaC tool. Packaged into production-grade multi-architecture Docker containers published to GitHub Container Registry (`ghcr.io`).
 - **Flexible Deployment**: Run locally with Docker Compose, deploy serverlessly to Google Cloud Run, or orchestrate with Kubernetes or any container runtime.
 
@@ -51,7 +51,7 @@ sequenceDiagram
 
     ReviewAgent->>Gateway: HTTP POST /api/v1/review/results
     Gateway->>DB: Store results
-    Gateway->>GitHub: Post Inline Review Comments via Octokit
+    Gateway->>GitHub: Post Review Summary & Inline Comments via Octokit
 ```
 
 ---

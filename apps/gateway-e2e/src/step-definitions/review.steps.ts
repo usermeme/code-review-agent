@@ -63,6 +63,119 @@ When(
   },
 );
 
+When(
+  'a PubSub push message arrives at {string} with token {string} containing summary {string} and findings:',
+  async function (
+    this: GatewayWorld,
+    endpoint: string,
+    token: string,
+    summary: string,
+    dataTable: DataTable,
+  ) {
+    const rows = dataTable.hashes();
+    const comments = rows.map((row) => ({
+      path: row.path,
+      position: parseInt(row.position, 10),
+      body: row.body,
+    }));
+
+    const payload = {
+      provider: 'github',
+      owner: 'usermeme',
+      repo: 'test-repo',
+      prNumber: 41,
+      summary,
+      comments,
+    };
+
+    const envelope = {
+      message: {
+        data: Buffer.from(JSON.stringify(payload)).toString('base64'),
+        messageId: 'mock-pubsub-msg-findings-summary',
+      },
+      subscription: 'projects/test-project/subscriptions/test-sub',
+    };
+
+    this.lastResponse = await this.app.inject({
+      method: 'POST',
+      url: `${endpoint}?token=${token}`,
+      headers: {
+        'content-type': 'application/json',
+      },
+      payload: JSON.stringify(envelope),
+    });
+  },
+);
+
+When(
+  'a PubSub push message arrives at {string} with token {string} containing summary {string} and zero findings',
+  async function (
+    this: GatewayWorld,
+    endpoint: string,
+    token: string,
+    summary: string,
+  ) {
+    const payload = {
+      provider: 'github',
+      owner: 'usermeme',
+      repo: 'test-repo',
+      prNumber: 42,
+      summary,
+      comments: [],
+    };
+
+    const envelope = {
+      message: {
+        data: Buffer.from(JSON.stringify(payload)).toString('base64'),
+        messageId: 'mock-pubsub-msg-zero-findings',
+      },
+      subscription: 'projects/test-project/subscriptions/test-sub',
+    };
+
+    this.lastResponse = await this.app.inject({
+      method: 'POST',
+      url: `${endpoint}?token=${token}`,
+      headers: {
+        'content-type': 'application/json',
+      },
+      payload: JSON.stringify(envelope),
+    });
+  },
+);
+
+Then(
+  'review summary is posted to {string} PR #{int} containing {string}',
+  function (
+    this: GatewayWorld,
+    repoFullName: string,
+    prNumber: number,
+    expectedContent: string,
+  ) {
+    const [owner, repo] = repoFullName.split('/');
+    const foundInReviews = this.octokit.postedReviews.some(
+      (r) =>
+        r.owner === owner &&
+        r.repo === repo &&
+        r.pull_number === prNumber &&
+        r.body.includes(expectedContent),
+    );
+    const foundInComments = this.octokit.postedIssueComments.some(
+      (c) =>
+        c.owner === owner &&
+        c.repo === repo &&
+        c.issue_number === prNumber &&
+        c.body.includes(expectedContent),
+    );
+
+    assert(
+      foundInReviews || foundInComments,
+      `Expected review summary on ${repoFullName}#${prNumber} containing "${expectedContent}", but found reviews: ${JSON.stringify(
+        this.octokit.postedReviews,
+      )} and comments: ${JSON.stringify(this.octokit.postedIssueComments)}`,
+    );
+  },
+);
+
 Then(
   'inline comment is posted to {string} PR #{int} at {string} line {int}',
   function (
