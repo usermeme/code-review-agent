@@ -1,7 +1,7 @@
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 import { STATE } from '../constants/state-keys.constant.js';
-import { cloneShallow } from '../services/clone.service.js';
+import { downloadRepoArchive } from '../services/archive.service.js';
 import { collectFiles, buildChunks } from '../services/chunker.service.js';
 import { collectAgentDocs } from '../services/agent-docs.service.js';
 
@@ -44,13 +44,14 @@ export function createPrepareRepoTool() {
         input.prNumber
       ) {
         // INCREMENTAL MODE: Fetch only changed files using GitHub API
+        const token = input.token || process.env.GIT_ADAPTER_TOKEN;
+        const headers: Record<string, string> = token
+          ? { Authorization: `Bearer ${token}` }
+          : {};
+
         const filesResponse = await fetch(
           `https://api.github.com/repos/${input.owner}/${input.repo}/pulls/${input.prNumber}/files`,
-          {
-            headers: input.token
-              ? { Authorization: `Bearer ${input.token}` }
-              : {},
-          },
+          { headers },
         );
 
         if (!filesResponse.ok) {
@@ -65,11 +66,7 @@ export function createPrepareRepoTool() {
         for (const file of changedFilesData) {
           if (file.status === 'removed') continue;
 
-          const contentResponse = await fetch(file.raw_url, {
-            headers: input.token
-              ? { Authorization: `Bearer ${input.token}` }
-              : {},
-          });
+          const contentResponse = await fetch(file.raw_url, { headers });
 
           if (contentResponse.ok) {
             const content = await contentResponse.text();
@@ -90,25 +87,24 @@ export function createPrepareRepoTool() {
 
         return `Incremental update prepared successfully. Found ${chunks.length} chunks of changed files.`;
       } else {
-        // BASELINE MODE: Clone entire repository
-        if (!input.cloneUrl || !input.ref) {
-          throw new Error(
-            'cloneUrl and ref are required for baseline context generation',
-          );
-        }
+        // BASELINE MODE: Download repository archive via Git provider API
+        const token = input.token || process.env.GIT_ADAPTER_TOKEN;
+        const ref = input.ref || 'main';
 
-        const cloned = await cloneShallow({
+        const snapshot = await downloadRepoArchive({
           cloneUrl: input.cloneUrl,
-          ref: input.ref,
-          token: input.token,
+          ref,
+          token,
+          owner: input.owner,
+          repo: input.repo,
         });
 
-        const files = await collectFiles(cloned.dir, options.extraIgnores);
+        const files = await collectFiles(snapshot.dir, options.extraIgnores);
         const agentDocs = collectAgentDocs(files);
         const { chunks, overflow } = buildChunks(files, options);
 
-        ctx.state[STATE.repoDir] = cloned.dir;
-        ctx.state[STATE.headSha] = cloned.headSha;
+        ctx.state[STATE.repoDir] = snapshot.dir;
+        ctx.state[STATE.headSha] = snapshot.headSha;
         ctx.state[STATE.chunks] = chunks;
         ctx.state[STATE.overflowPaths] = overflow;
         ctx.state[STATE.agentDocs] = agentDocs;

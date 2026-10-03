@@ -35,38 +35,70 @@ export interface GithubWebhookPayload {
   };
 }
 
+export interface GithubAdapterDependencies {
+  pubsub?: PubSub;
+  octokit?: Octokit;
+}
+
 export class GithubAdapter implements GitAdapter {
   private webhooks?: Webhooks;
   private octokit?: Octokit;
-  private pubsub: PubSub;
+  private pubsub?: PubSub;
 
   constructor(
     private prRepository: PrRepository,
-    private contextRepository: ContextRepository
+    private contextRepository: ContextRepository,
+    deps: GithubAdapterDependencies = {},
   ) {
-    this.pubsub = new PubSub();
+    if (deps.pubsub) {
+      this.pubsub = deps.pubsub;
+    }
+    if (deps.octokit) {
+      this.octokit = deps.octokit;
+    }
   }
 
   async init(logger: FastifyBaseLogger): Promise<void> {
-    const secretName =
-      process.env.GITHUB_WEBHOOK_SECRET_ID || 'dummy-secret-for-local-dev';
-    const tokenName =
-      process.env.GITHUB_TOKEN_SECRET_ID || 'dummy-token-for-local-dev';
-    
-    let githubSecret = 'dummy';
-    let githubToken = 'dummy';
+    let githubSecret = process.env.GIT_ADAPTER_WEBHOOK_SECRET || 'dummy-secret-for-local-dev';
+    let githubToken = process.env.GIT_ADAPTER_TOKEN || 'dummy-token-for-local-dev';
 
-    if (secretName !== 'dummy-secret-for-local-dev') {
+    if (githubSecret.startsWith('projects/')) {
       try {
-        githubSecret = await getSecret(secretName);
-        githubToken = await getSecret(tokenName);
+        githubSecret = await getSecret(githubSecret);
       } catch (e) {
-        logger.error(`Failed to fetch github secrets: ${e}`);
+        logger.error(`Failed to fetch github secret: ${e}`);
+      }
+    }
+
+    if (githubToken.startsWith('projects/')) {
+      try {
+        githubToken = await getSecret(githubToken);
+      } catch (e) {
+        logger.error(`Failed to fetch github token: ${e}`);
       }
     }
 
     this.webhooks = new Webhooks({ secret: githubSecret });
-    this.octokit = new Octokit({ auth: githubToken });
+    if (!this.octokit) {
+      this.octokit = new Octokit({ auth: githubToken });
+    }
+    if (!this.pubsub) {
+      this.pubsub = new PubSub();
+    }
+  }
+
+  private get octokitClient(): Octokit {
+    if (!this.octokit) {
+      throw new Error('GithubAdapter not initialized: octokit is missing');
+    }
+    return this.octokit;
+  }
+
+  private get pubsubClient(): PubSub {
+    if (!this.pubsub) {
+      throw new Error('GithubAdapter not initialized: pubsub is missing');
+    }
+    return this.pubsub;
   }
 
   canHandle(headers: Record<string, string | string[] | undefined>): boolean {
@@ -108,8 +140,7 @@ export class GithubAdapter implements GitAdapter {
   }
 
   private async fetchPRDiff(owner: string, repo: string, prNumber: number): Promise<string> {
-    if (!this.octokit) throw new Error('Octokit not initialized');
-    const response = await this.octokit.rest.pulls.get({
+    const response = await this.octokitClient.rest.pulls.get({
       owner,
       repo,
       pull_number: prNumber,
@@ -121,13 +152,12 @@ export class GithubAdapter implements GitAdapter {
   }
 
   private async fetchChangedFiles(owner: string, repo: string, prNumber: number): Promise<string> {
-    if (!this.octokit) throw new Error('Octokit not initialized');
-    const response = await this.octokit.rest.pulls.listFiles({
+    const response = await this.octokitClient.rest.pulls.listFiles({
       owner,
       repo,
       pull_number: prNumber,
     });
-    return response.data.map((file) => file.filename).join('\\n');
+    return response.data.map((file) => file.filename).join('\n');
   }
 
   private async processPullRequestEvent(
@@ -178,6 +208,10 @@ export class GithubAdapter implements GitAdapter {
 
       // No baseline context found. Trigger full build context.
       logger.info(`No baseline context found. Triggering full build for ${owner}/${repo}`);
+      const baseRef = (payload.pull_request as any)?.base?.ref || 'main';
+      const cloneUrl =
+        (payload.pull_request as any)?.base?.repo?.clone_url ||
+        `https://github.com/${owner}/${repo}.git`;
       await this.publishContextBuild({
         provider: 'github',
         owner,
@@ -185,6 +219,8 @@ export class GithubAdapter implements GitAdapter {
         prNumber,
         action,
         htmlUrl: payload.pull_request?.html_url || '',
+        cloneUrl,
+        ref: baseRef,
       });
 
       return { ignored: false, reason: 'Context build triggered for GitHub' };
@@ -202,8 +238,7 @@ export class GithubAdapter implements GitAdapter {
 
     let prData = prDataParam;
     if (!prData) {
-      if (!this.octokit) throw new Error('Octokit not initialized');
-      const response = await this.octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+      const response = await this.octokitClient.rest.pulls.get({ owner, repo, pull_number: prNumber });
       prData = response.data;
     }
 
@@ -224,7 +259,7 @@ export class GithubAdapter implements GitAdapter {
     };
 
     const topicName = process.env.REVIEW_CODE_TOPIC || 'review-code-topic';
-    await this.pubsub.topic(topicName).publishMessage({
+    await this.pubsubClient.topic(topicName).publishMessage({
       json: reviewPayload,
     });
   }
@@ -263,6 +298,8 @@ export class GithubAdapter implements GitAdapter {
             ? (payload.issue as any).pull_request.html_url ||
               payload.issue.html_url
             : payload.issue.html_url,
+          cloneUrl: `https://github.com/${owner}/${repo}.git`,
+          ref: 'main',
         });
 
         return { ignored: false, reason: 'Manual review context build triggered' };
@@ -285,7 +322,7 @@ export class GithubAdapter implements GitAdapter {
     });
 
     const topicName = process.env.BUILD_CONTEXT_TOPIC || 'build-context-topic';
-    await this.pubsub.topic(topicName).publishMessage({
+    await this.pubsubClient.topic(topicName).publishMessage({
       json: data,
     });
   }
@@ -296,13 +333,11 @@ export class GithubAdapter implements GitAdapter {
     prNumber: number,
     comments: { path: string; position: number; body: string }[],
   ): Promise<void> {
-    if (!this.octokit) throw new Error('Octokit not initialized');
-
     console.log(`[GithubAdapter] Posting ${comments.length} inline comments to ${owner}/${repo}#${prNumber}`);
 
     let commit_id: string;
     try {
-      const prData = await this.octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+      const prData = await this.octokitClient.rest.pulls.get({ owner, repo, pull_number: prNumber });
       commit_id = prData.data.head.sha;
     } catch (e) {
       console.error('Failed to fetch PR head sha for comments', e);
@@ -311,7 +346,7 @@ export class GithubAdapter implements GitAdapter {
 
     for (const comment of comments) {
       try {
-        await this.octokit.rest.pulls.createReviewComment({
+        await this.octokitClient.rest.pulls.createReviewComment({
           owner,
           repo,
           pull_number: prNumber,

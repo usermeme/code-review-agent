@@ -38,6 +38,9 @@ export function createGetDiscussionTool(
       );
 
       if (!response.ok) {
+        if (response.status === 404) {
+          return [];
+        }
         throw new Error(
           `Failed to search discussions from gateway: ${response.statusText}`,
         );

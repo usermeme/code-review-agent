@@ -12,7 +12,7 @@
         "platform": "node",
         "outputPath": "dist/apps/agent-context-builder",
         "format": ["cjs"],
-        "bundle": false,
+        "bundle": true,
         "main": "apps/agent-context-builder/src/main.ts",
         "tsConfig": "apps/agent-context-builder/tsconfig.app.json",
         "assets": ["apps/agent-context-builder/src/assets"],
@@ -79,6 +79,24 @@
         "production": {
           "buildTarget": "agent-context-builder:build:production"
         }
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p apps/agent-context-builder/tsconfig.app.json --noEmit"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint apps/agent-context-builder"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run apps/agent-context-builder"
       }
     }
   },

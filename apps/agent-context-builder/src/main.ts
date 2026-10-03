@@ -5,7 +5,7 @@ import { createSummarizeRepoTool } from './tools/summarize-chunks.tool.js';
 import { createSynthesizeContextTool } from './tools/synthesize-context.tool.js';
 import { createFetchContextTool } from './tools/fetch-context.tool.js';
 
-// 1. Fetch the required environment variable config at initialization
+// 1. Fetch required environment variable config at initialization
 const gatewayUrl = process.env.GATEWAY_URL;
 if (!gatewayUrl) {
   throw new Error('GATEWAY_URL environment variable is required');
@@ -30,3 +30,5 @@ export const contextBuilderAgent = createContextOrchestrator({
   model: reviewModel,
   tools,
 });
+export const rootAgent = contextBuilderAgent;
+export default contextBuilderAgent;

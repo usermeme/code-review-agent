@@ -29,13 +29,12 @@ export function createFetchContextTool(gatewayUrl: string) {
 
         const data = await response.json();
 
-        // Ensure we handle both legacy structures and new JSON strings
         let parsedSections: Record<string, string> = {};
-        if (data.context && data.context.summary) {
+        if (data.summary) {
           try {
-            parsedSections = JSON.parse(data.context.summary);
+            parsedSections = JSON.parse(data.summary);
           } catch {
-            parsedSections = { legacy: data.context.summary };
+            parsedSections = { architecture: data.summary };
           }
         }
 

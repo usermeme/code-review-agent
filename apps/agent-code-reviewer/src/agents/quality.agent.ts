@@ -76,5 +76,7 @@ export function createQualityAgent({
     }),
     outputSchema: findingsReportSchema,
     includeContents: 'none',
+    disallowTransferToParent: true,
+    disallowTransferToPeers: true,
   });
 }

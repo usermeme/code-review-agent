@@ -1,0 +1,11 @@
+{
+  "default": {
+    "paths": ["apps/gateway-e2e/src/features/**/*.feature"],
+    "import": [
+      "apps/gateway-e2e/src/support/**/*.ts",
+      "apps/gateway-e2e/src/step-definitions/**/*.ts"
+    ],
+    "format": ["summary", "progress-bar"],
+    "publishQuiet": true
+  }
+}

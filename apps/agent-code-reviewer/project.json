@@ -12,7 +12,7 @@
         "platform": "node",
         "outputPath": "dist/apps/agent-code-reviewer",
         "format": ["cjs"],
-        "bundle": false,
+        "bundle": true,
         "main": "apps/agent-code-reviewer/src/main.ts",
         "tsConfig": "apps/agent-code-reviewer/tsconfig.app.json",
         "assets": ["apps/agent-code-reviewer/src/assets"],
@@ -79,6 +79,24 @@
         "production": {
           "buildTarget": "agent-code-reviewer:build:production"
         }
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p apps/agent-code-reviewer/tsconfig.app.json --noEmit"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint apps/agent-code-reviewer"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run apps/agent-code-reviewer"
       }
     }
   },

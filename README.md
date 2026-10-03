@@ -1,20 +1,22 @@
-# Code Review Agent Architecture
+# Code Review Agent 🤖
 
-This monorepo contains a fully autonomous, event-driven Code Review system powered by `@google/adk`. It consists of a central **Fastify Gateway** and two AI agent microservices (**Context Builder** and **Code Reviewer**).
+A fully autonomous, context-aware AI Code Review system powered by [`@google/adk`](https://github.com/google/adk) and Google Gemini.
 
-## The Idea & Logic
+`code-review-agent` combines a high-performance **Fastify Gateway** with two specialized AI agent microservices (**Context Builder** and **Code Reviewer**). Rather than analyzing pull requests in isolation, it builds a deep repository baseline context so code reviews understand your broader system architecture, patterns, and libraries.
 
-The core idea is to perform highly accurate AI code reviews by maintaining a deep **baseline repository context**. A common problem with AI code reviewers is they only see the specific PR diff and hallucinate comments because they don't understand the broader repository architecture, utilities, and testing patterns.
+---
 
-Our system solves this by introducing a **Context Builder Agent**. 
-When a Pull Request is opened:
-1. **Smart Routing**: The Gateway intercepts the GitHub Webhook and checks Firestore to see if the repository's "baseline context" has already been built.
-2. **Context Building**: If the baseline does not exist, the Gateway pauses the review and triggers the **Context Builder Agent** via Pub/Sub. This agent clones the entire repository, chunks the files, generates intelligent summaries of the architecture/patterns using Google Gemini, and synthesizes a permanent baseline context document.
-3. **Review Swarm**: Once the baseline is ready (or if it already existed), the Gateway fetches the PR diff and triggers the **Code Review Agent**. This agent acts as an orchestrator, spawning parallel sub-agents (Quality, Problems, Tickets) to review the diff against the deep baseline context.
-4. **Actionable Output**: The orchestrator merges the findings into a precise JSON payload and sends it back to the Gateway, which uses Octokit to natively post the findings as inline review comments on GitHub.
-5. **Continuous Learning**: When a PR is merged, the Gateway triggers an incremental baseline update, ensuring the Context Builder patches the baseline with the new code, keeping the AI's understanding up to date!
+## 🌟 Key Features
 
-## Architecture Diagram
+- **Context-Aware Reviews**: Automatically generates and continuously updates a full baseline architectural context of your codebase to eliminate hallucinations.
+- **Agentic Multi-Role Swarm**: Spawns parallel specialized reviewers (Code Quality, Bug Detection, Ticket Alignment) using `@google/adk`.
+- **Inline GitHub Comments**: Directly posts actionable inline review comments on GitHub Pull Requests.
+- **Container-First & Open-Source**: Decoupled from any specific infrastructure or IaC tool. Packaged into production-grade multi-architecture Docker containers published to GitHub Container Registry (`ghcr.io`).
+- **Flexible Deployment**: Run locally with Docker Compose, deploy serverlessly to Google Cloud Run, or orchestrate with Kubernetes or any container runtime.
+
+---
+
+## 🏗️ Architecture
 
 ```mermaid
 sequenceDiagram
@@ -24,95 +26,184 @@ sequenceDiagram
     participant DB as Firestore
     participant ContextAgent as Context Builder Agent (ADK)
     participant ReviewAgent as Code Review Agent (ADK)
-    
+
     %% Webhook ingestion and DB check
-    GitHub->>Gateway: Trigger Webhook (Push / PR opened)
+    GitHub->>Gateway: Trigger Webhook (Pull Request Opened / Synchronized)
     Gateway->>DB: Check if repository baseline context exists
-    
+
     alt Context is Missing
         Gateway->>PubSub: Publish Event (build-context-topic)
         PubSub->>ContextAgent: Trigger Context Builder
-        
-        Note over ContextAgent: Agent clones repo and builds context
-        
+        Note over ContextAgent: Clones repository, chunks files, synthesizes baseline
         ContextAgent->>Gateway: POST /api/v1/internal/pubsub (context ready)
         Gateway->>DB: Save generated baseline context
     end
-    
+
     %% Code Review Workflow
     Gateway->>GitHub: Fetch PR Diff via Octokit
     Gateway->>PubSub: Publish Event (review-code-topic)
     PubSub->>ReviewAgent: Trigger Code Reviewer Orchestrator
-    
+
     ReviewAgent->>Gateway: HTTP GET /api/v1/context/:prKey
     Gateway-->>ReviewAgent: Return Repository Baseline Context
-    
-    Note over ReviewAgent: Swarm of sub-agents review diff safely
-    
+
+    Note over ReviewAgent: Swarm of sub-agents review diff against baseline
+
     ReviewAgent->>Gateway: HTTP POST /api/v1/review/results
     Gateway->>DB: Store results
     Gateway->>GitHub: Post Inline Review Comments via Octokit
 ```
 
-## Step-by-Step Deployment Guide
+---
 
-Follow these steps to deploy and run the system:
+## 📦 Published Container Images
 
-### 1. Prerequisites
-- **Node.js** v20+
-- **Google Cloud Platform** account (Firestore, Pub/Sub, Gemini API enabled)
-- **GitHub App** or Personal Access Token with repository read/write and webhook access.
+Every merge to `main` and version tag publishes multi-architecture (`linux/amd64`, `linux/arm64`) images to the GitHub Container Registry:
 
-### 2. Environment Configuration
-Create a `.env` file at the root of the workspace (or set these in your deployment environment):
+| Service | Image | Description |
+| :--- | :--- | :--- |
+| **Gateway** | `ghcr.io/<owner>/code-review-agent-gateway:latest` | Webhook ingestion, Firestore state, GitHub commenting |
+| **Context Builder** | `ghcr.io/<owner>/code-review-agent-context-builder:latest` | ADK agent for repo indexing & baseline context |
+| **Code Reviewer** | `ghcr.io/<owner>/code-review-agent-code-reviewer:latest` | ADK agent for diff analysis & inline suggestions |
 
-```env
-# Google Cloud
-GOOGLE_CLOUD_PROJECT=your-gcp-project-id
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+---
 
-# Pub/Sub Topics
-BUILD_CONTEXT_TOPIC=build-context-topic
-CONTEXT_READY_TOPIC=context-ready-topic
-REVIEW_CODE_TOPIC=review-code-topic
+## 🚀 Quickstart: Local Development
 
-# Server Ports
-PORT=3000
-HOST=0.0.0.0
+You can run the entire system locally using Docker Compose, which includes Firestore and Pub/Sub emulators:
 
-# GitHub Integration
-GITHUB_WEBHOOK_SECRET_ID=your-webhook-secret # Kept in Secret Manager
-GITHUB_TOKEN_SECRET_ID=your-github-token     # Kept in Secret Manager
+```bash
+# 1. Clone the repository
+git clone https://github.com/<owner>/code-review-agent.git
+cd code-review-agent
+
+# 2. Copy and customize the environment file
+cp .env.example .env
+
+# 3. Start the stack with Docker Compose
+docker compose up --build
 ```
 
-### 3. Google Cloud Pub/Sub Setup
-Ensure you have created the three Pub/Sub topics listed above in your GCP project.
-For local development, you can use the Google Cloud Pub/Sub Emulator. For production, you must set up push subscriptions:
-- `context-ready-topic` pushes to `https://your-gateway-url.com/api/v1/internal/pubsub`
-- `review-result-topic` pushes to `https://your-gateway-url.com/api/v1/review/results`
+The Gateway will be available at `http://localhost:3000` with healthchecks at `http://localhost:3000/healthz`.
 
-### 4. Automated CI/CD via Google Cloud Build
-We have configured a fully native Google Cloud CI/CD pipeline using `cloudbuild.yaml`. You do not need to build Docker images manually.
+---
 
-To enable automated deployments:
-1. Go to the **Cloud Build** console in Google Cloud.
-2. Click **Triggers** -> **Create Trigger**.
-3. Connect your GitHub repository.
-4. Set the Event to **Push to a branch** (e.g., `main`).
-5. Select **Cloud Build configuration file (yaml or json)** as the configuration type and point it to `/cloudbuild.yaml`.
+## ☁️ Deployment Guide (Google Cloud Run / Kubernetes / Containers)
 
-### 5. What Happens During Deployment?
-When you push to the repository, Google Cloud Build will automatically:
-1. Install dependencies and run quality checks (`npm ci`, `lint`, `typecheck`).
-2. Build the Nx monorepo (`npm run build`).
-3. **Deploy the Gateway**: It natively deploys the Fastify Gateway directly to Cloud Run using `gcloud run deploy --source .`. Google Cloud Buildpacks handles compiling the Node.js application seamlessly.
-4. **Deploy the Agents**: It deploys both the Context Builder and Code Reviewer agents natively using the `@google/adk` deployment CLI (`npx adk deploy`).
+Deploying `code-review-agent` requires:
+1. **Firestore Database** (Native Mode) for saving repository context baselines and pull request review states.
+2. **Pub/Sub Topics**: `build-context-topic`, `context-ready-topic`, `review-code-topic`, `review-result-topic`.
+3. **Secret Storage**: GitHub Webhook Secret, GitHub Personal Access Token, and Gemini API Key (or Vertex AI IAM credentials).
 
-### 6. GitHub Webhook Setup
-Once Cloud Run provides you with the deployed URL for the Gateway, go to your GitHub Repository Settings -> Webhooks.
-- **Payload URL**: `https://<YOUR_CLOUD_RUN_URL>/api/v1/webhooks`
+### 1. Setup Topics & Firestore (Using gcloud CLI)
+
+```bash
+export PROJECT_ID="YOUR_GCP_PROJECT_ID"
+export REGION="us-central1"
+export OWNER="<your-github-username>"
+
+# Enable Required Google Cloud APIs
+gcloud services enable run.googleapis.com pubsub.googleapis.com firestore.googleapis.com secretmanager.googleapis.com
+
+# Create Firestore Database (Native mode)
+gcloud firestore databases create --location="$REGION" --type=firestore-native || true
+
+# Create Pub/Sub Topics
+gcloud pubsub topics create build-context-topic || true
+gcloud pubsub topics create context-ready-topic || true
+gcloud pubsub topics create review-code-topic || true
+gcloud pubsub topics create review-result-topic || true
+```
+
+### 2. Deploy Prebuilt Containers to Cloud Run
+
+Deploy directly using the published container images from `ghcr.io`:
+
+```bash
+# 1. Deploy Gateway
+gcloud run deploy gateway-service \
+  --image "ghcr.io/$OWNER/code-review-agent-gateway:latest" \
+  --region "$REGION" \
+  --allow-unauthenticated \
+  --set-env-vars "APP_NAME=gateway,BUILD_CONTEXT_TOPIC=build-context-topic,CONTEXT_READY_TOPIC=context-ready-topic,REVIEW_CODE_TOPIC=review-code-topic,PUBSUB_SECRET_TOKEN=YOUR_INTERNAL_SECRET,GIT_ADAPTER=github,GIT_ADAPTER_WEBHOOK_SECRET=YOUR_WEBHOOK_SECRET,GIT_ADAPTER_TOKEN=ghp_YOUR_TOKEN"
+
+# Capture Gateway URL
+GATEWAY_URL=$(gcloud run services describe gateway-service --region "$REGION" --format 'value(status.url)')
+
+# 2. Deploy Context Builder Agent
+gcloud run deploy agent-context-builder \
+  --image "ghcr.io/$OWNER/code-review-agent-context-builder:latest" \
+  --region "$REGION" \
+  --set-env-vars "GATEWAY_URL=$GATEWAY_URL,REVIEW_MODEL=gemini-2.5-flash,GEMINI_API_KEY=YOUR_GEMINI_KEY,GOOGLE_GENAI_USE_VERTEXAI=0"
+
+# 3. Deploy Code Reviewer Agent
+gcloud run deploy agent-code-reviewer \
+  --image "ghcr.io/$OWNER/code-review-agent-code-reviewer:latest" \
+  --region "$REGION" \
+  --set-env-vars "GATEWAY_URL=$GATEWAY_URL,REVIEW_MODEL=gemini-2.5-flash,GEMINI_API_KEY=YOUR_GEMINI_KEY,GOOGLE_GENAI_USE_VERTEXAI=0"
+```
+
+> [!TIP]
+> In production, use Google Secret Manager references (`--set-secrets`) or your cloud orchestrator's secret store instead of plain environment variables.
+
+### 3. Wire Pub/Sub Push Subscriptions
+
+Create the push subscriptions delivering events to your Gateway:
+
+```bash
+gcloud pubsub subscriptions create context-ready-sub \
+  --topic=context-ready-topic \
+  --push-endpoint="$GATEWAY_URL/api/v1/internal/pubsub?token=YOUR_INTERNAL_SECRET" \
+  --ack-deadline=600
+
+gcloud pubsub subscriptions create review-result-sub \
+  --topic=review-result-topic \
+  --push-endpoint="$GATEWAY_URL/api/v1/review/results?token=YOUR_INTERNAL_SECRET" \
+  --ack-deadline=600
+```
+
+### 4. Configure GitHub Webhook
+
+In your target GitHub repository (or organization):
+- **Payload URL**: `https://<GATEWAY_URL>/api/v1/webhooks`
 - **Content type**: `application/json`
-- **Secret**: Match the webhook secret stored in your GCP Secret Manager.
-- **Events**: Select `Pull requests` and `Issue comments`.
+- **Secret**: The secret matching `GIT_ADAPTER_WEBHOOK_SECRET`
+- **Events**: Pull requests, Issue comments
 
-You are now fully deployed on serverless Google Cloud infrastructure! Opening a Pull Request will automatically trigger the pipeline.
+---
+
+## 🏢 Enterprise & Organization Deployments
+
+This repository is designed as a decoupled upstream artifact publisher. To deploy within your organization:
+
+1. **Pull Pre-built Containers**: Use `ghcr.io/<owner>/code-review-agent-gateway:latest`, `ghcr.io/<owner>/code-review-agent-context-builder:latest`, and `ghcr.io/<owner>/code-review-agent-code-reviewer:latest` directly in your organization's deployment pipeline (Kubernetes / Helm, Cloud Run, ECS, Nomad, or Docker Compose).
+2. **Inject Secrets Securely**: Supply runtime secrets (`GEMINI_API_KEY`, `GIT_ADAPTER_TOKEN`, `GIT_ADAPTER_WEBHOOK_SECRET`, `PUBSUB_SECRET_TOKEN`) via your platform's native secret manager (e.g. Google Secret Manager, HashiCorp Vault, AWS Secrets Manager).
+3. **Automate Updates via GitOps**: Use standard GitOps tooling (such as ArgoCD, Flux, Renovate, or an internal CI/CD pipeline) in your private infrastructure repository to track semantic version tags published by this project's release workflow.
+
+---
+
+## 🛠️ Local Development & Testing
+
+```bash
+# Install dependencies
+pnpm install
+
+# Run linters and typechecks
+pnpm run lint
+pnpm run typecheck
+
+# Run unit tests
+pnpm run test
+
+# Run end-to-end BDD tests (Cucumber / Gherkin)
+pnpm run e2e
+
+# Build all applications with Nx
+pnpm run build
+```
+
+---
+
+## 📄 License
+
+MIT

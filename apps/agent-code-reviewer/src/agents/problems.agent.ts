@@ -75,5 +75,7 @@ export function createProblemsAgent({
     }),
     outputSchema: findingsReportSchema,
     includeContents: 'none',
+    disallowTransferToParent: true,
+    disallowTransferToPeers: true,
   });
 }

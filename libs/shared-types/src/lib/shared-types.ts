@@ -12,14 +12,12 @@ export interface ContextReadyPayload {
   owner: string;
   repo: string;
   prNumber: number;
-  files: { path: string; content: string }[];
-  summary?: string;
+  summary: string;
 }
 
 export interface RepositoryContext {
   prKey: string;
-  files: { path: string; content: string }[];
-  summary?: string;
+  summary: string;
   updatedAt: Date;
 }
 
@@ -37,6 +35,9 @@ export interface WebhookEventPayload {
   owner: string;
   repo: string;
   htmlUrl: string;
+  cloneUrl?: string;
+  ref?: string;
+  token?: string;
   installationId?: number;
   isIncrementalUpdate?: boolean;
 }

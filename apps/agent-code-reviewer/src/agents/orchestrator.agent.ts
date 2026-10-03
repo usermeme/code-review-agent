@@ -96,11 +96,8 @@ Follow these steps IN ORDER:
    this PR.
 3. For each candidate finding worth publishing, call getDiscussion with a short query describing it.
 4. Deduplicate and merge overlapping findings. Keep at most ${MAX_FINDINGS} findings.
-5. Reply with ONLY a fenced json code block containing the final review plan:
-   {"summary": "<overall verdict paragraph, markdown>",
-    "ticketCoverage": "<markdown section on ticket completeness>",
-    "findings": [{"title", "severity": "critical"|"major"|"minor", "path", "startLine", "endLine",
-                  "body", "confidence": 0..1, "suggestion"?}]}`;
+5. Call publishReviewResults with the final findings, summary, and ticketCoverage so comments are posted to GitHub.
+6. Reply with a concise summary of the review results published.`;
   };
 }
 
@@ -108,6 +105,7 @@ export interface OrchestratorTools {
   getRepoContext: BaseTool;
   getDiscussion: BaseTool;
   storeDiscussion: BaseTool;
+  publishReviewResults: BaseTool;
 }
 
 export interface CreateOrchestratorPayload {
@@ -129,6 +127,7 @@ export function createOrchestrator({
     instruction: instruction(),
     tools: [
       tools.getRepoContext,
+      tools.publishReviewResults,
       tools.getDiscussion,
       tools.storeDiscussion,
       new AgentTool({
