@@ -172,13 +172,156 @@ In your target GitHub repository (or organization):
 
 ---
 
-## 🏢 Enterprise & Organization Deployments
+---
 
-This repository is designed as a decoupled upstream artifact publisher. To deploy within your organization:
+## 🚀 Dedicated Deployment Repository (Recommended GitOps Pattern)
 
-1. **Pull Pre-built Containers**: Use `ghcr.io/<owner>/code-review-agent-gateway:latest`, `ghcr.io/<owner>/code-review-agent-context-builder:latest`, and `ghcr.io/<owner>/code-review-agent-code-reviewer:latest` directly in your organization's deployment pipeline (Kubernetes / Helm, Cloud Run, ECS, Nomad, or Docker Compose).
-2. **Inject Secrets Securely**: Supply runtime secrets (`GEMINI_API_KEY`, `GIT_ADAPTER_TOKEN`, `GIT_ADAPTER_WEBHOOK_SECRET`, `PUBSUB_SECRET_TOKEN`) via your platform's native secret manager (e.g. Google Secret Manager, HashiCorp Vault, AWS Secrets Manager).
-3. **Automate Updates via GitOps**: Use standard GitOps tooling (such as ArgoCD, Flux, Renovate, or an internal CI/CD pipeline) in your private infrastructure repository to track semantic version tags published by this project's release workflow.
+You do **not** need to fork or rebuild this entire monorepo in your other accounts. Because this repository publishes prebuilt, production-ready multi-architecture images to GitHub Packages (`ghcr.io`), you can manage your deployment using a separate, lightweight repository in your other GitHub account.
+
+### 1. Structure of Your Deployment Repository
+
+Create a new repository (e.g. `code-review-agent-deploy`) with this structure:
+
+```
+code-review-agent-deploy/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml          # GitHub Action to trigger / redeploy
+├── docker-compose.prod.yml     # Pulls published images from ghcr.io
+├── .env.example                # Configuration template
+└── README.md
+```
+
+### 2. Ready-to-Use `docker-compose.prod.yml`
+
+This file pulls the prebuilt images directly from `ghcr.io/usermeme`:
+
+```yaml
+version: '3.8'
+
+services:
+  gateway:
+    image: ghcr.io/usermeme/code-review-agent-gateway:latest
+    restart: always
+    ports:
+      - "80:8080"
+    environment:
+      - PORT=8080
+      - HOST=0.0.0.0
+      - GIT_ADAPTER=github
+      - GIT_ADAPTER_WEBHOOK_SECRET=${GIT_ADAPTER_WEBHOOK_SECRET}
+      - GIT_ADAPTER_TOKEN=${GIT_ADAPTER_TOKEN}
+      - PUBSUB_SECRET_TOKEN=${PUBSUB_SECRET_TOKEN}
+      - BUILD_CONTEXT_TOPIC=build-context-topic
+      - CONTEXT_READY_TOPIC=context-ready-topic
+      - REVIEW_CODE_TOPIC=review-code-topic
+      - REVIEW_RESULT_TOPIC=review-result-topic
+      - FIRESTORE_EMULATOR_HOST=firestore:8080
+      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - PUBSUB_PROJECT_ID=local-project
+    depends_on:
+      - firestore
+      - pubsub
+
+  agent-context-builder:
+    image: ghcr.io/usermeme/code-review-agent-context-builder:latest
+    restart: always
+    environment:
+      - PORT=8080
+      - GATEWAY_URL=http://gateway:8080
+      - REVIEW_MODEL=gemini-2.5-flash
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - PUBSUB_PROJECT_ID=local-project
+    depends_on:
+      - gateway
+      - pubsub
+
+  agent-code-reviewer:
+    image: ghcr.io/usermeme/code-review-agent-code-reviewer:latest
+    restart: always
+    environment:
+      - PORT=8080
+      - GATEWAY_URL=http://gateway:8080
+      - REVIEW_MODEL=gemini-2.5-flash
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - PUBSUB_PROJECT_ID=local-project
+    depends_on:
+      - gateway
+      - pubsub
+
+  firestore:
+    image: google/cloud-sdk:emulators
+    command: gcloud beta emulators firestore start --host-port=0.0.0.0:8080
+
+  pubsub:
+    image: google/cloud-sdk:emulators
+    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=local-project
+
+  pubsub-init:
+    image: google/cloud-sdk:emulators
+    depends_on:
+      - pubsub
+      - gateway
+    entrypoint: >
+      bash -c "
+        while ! curl -s http://pubsub:8085 > /dev/null; do sleep 1; done;
+        curl -s -X PUT http://pubsub:8085/v1/projects/local-project/topics/build-context-topic;
+        curl -s -X PUT http://pubsub:8085/v1/projects/local-project/topics/context-ready-topic;
+        curl -s -X PUT http://pubsub:8085/v1/projects/local-project/topics/review-code-topic;
+        curl -s -X PUT http://pubsub:8085/v1/projects/local-project/topics/review-result-topic;
+        curl -s -X PUT http://pubsub:8085/v1/projects/local-project/subscriptions/context-ready-sub \
+          -H 'Content-Type: application/json' \
+          -d '{\"topic\":\"projects/local-project/topics/context-ready-topic\",\"pushConfig\":{\"pushEndpoint\":\"http://gateway:8080/api/v1/internal/pubsub?token=${PUBSUB_SECRET_TOKEN}\"}}';
+        curl -s -X PUT http://pubsub:8085/v1/projects/local-project/subscriptions/review-result-sub \
+          -H 'Content-Type: application/json' \
+          -d '{\"topic\":\"projects/local-project/topics/review-result-topic\",\"pushConfig\":{\"pushEndpoint\":\"http://gateway:8080/api/v1/review/results?token=${PUBSUB_SECRET_TOKEN}\"}}';
+      "
+```
+
+### 3. Deploy Workflow (`.github/workflows/deploy.yml`)
+
+Add an automated workflow in your deployment repository to trigger redeployments on push or manually via GitHub Actions:
+
+```yaml
+name: Deploy Code Review Agent
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Deployment Repo
+        uses: actions/checkout@v4
+
+      - name: Deploy to Remote Host via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: GEMINI_API_KEY,GIT_ADAPTER_TOKEN,GIT_ADAPTER_WEBHOOK_SECRET,PUBSUB_SECRET_TOKEN
+          script: |
+            cd /opt/code-review-agent-deploy
+            git pull origin main
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+```
+
+### 4. Secret Configuration
+
+Configure your credentials in **Settings** → **Secrets and variables** → **Actions** in your deployment repository:
+- `GEMINI_API_KEY`: API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+- `GIT_ADAPTER_TOKEN`: Personal Access Token from your GitHub account (with `repo` permissions).
+- `GIT_ADAPTER_WEBHOOK_SECRET`: Secret used to authenticate GitHub webhooks.
+- `PUBSUB_SECRET_TOKEN`: Shared secret for internal gateway push callbacks.
+
+A single running instance can review PRs across any repository and owner that your `GIT_ADAPTER_TOKEN` has permission to access.
 
 ---
 
