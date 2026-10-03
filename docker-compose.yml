@@ -66,3 +66,27 @@ services:
     ports:
       - "8085:8085"
     command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=local-project
+
+  pubsub-init:
+    image: google/cloud-sdk:emulators
+    depends_on:
+      - pubsub-emulator
+      - gateway
+    entrypoint: >
+      bash -c "
+        echo 'Waiting for PubSub emulator...';
+        while ! curl -s http://pubsub-emulator:8085 > /dev/null; do sleep 1; done;
+        echo 'Creating PubSub topics...';
+        curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/build-context-topic;
+        curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/context-ready-topic;
+        curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/review-code-topic;
+        curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/review-result-topic;
+        echo 'Creating PubSub push subscriptions...';
+        curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/subscriptions/context-ready-sub \
+          -H 'Content-Type: application/json' \
+          -d '{\"topic\":\"projects/local-project/topics/context-ready-topic\",\"pushConfig\":{\"pushEndpoint\":\"http://gateway:8080/api/v1/internal/pubsub?token=local-internal-secret\"}}';
+        curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/subscriptions/review-result-sub \
+          -H 'Content-Type: application/json' \
+          -d '{\"topic\":\"projects/local-project/topics/review-result-topic\",\"pushConfig\":{\"pushEndpoint\":\"http://gateway:8080/api/v1/review/results?token=local-internal-secret\"}}';
+        echo 'PubSub emulator initialized successfully.';
+      "
