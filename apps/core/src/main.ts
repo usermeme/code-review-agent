@@ -1,14 +1,16 @@
+import { z } from 'zod';
+import { Env } from 'env';
 import { buildCoreServer } from './app.js';
 
-const host = process.env['HOST'];
-if (!host) {
-  throw new Error('HOST environment variable is required');
-}
-const portStr = process.env['PORT'];
-if (!portStr) {
-  throw new Error('PORT environment variable is required');
-}
-const port = Number(portStr);
+const env = new Env(
+  z.object({
+    HOST: z.string().min(1),
+    PORT: z.string().transform(Number),
+  }),
+);
+
+const host = env.get('HOST');
+const port = env.get('PORT');
 
 const server = await buildCoreServer({
   fastifyOptions: { logger: true },

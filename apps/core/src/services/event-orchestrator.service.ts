@@ -10,6 +10,8 @@ import {
 } from 'contracts';
 import { ContextReadyPayload, ReviewResultPayload } from 'shared-types';
 import { Client } from '@connectrpc/connect';
+import { z } from 'zod';
+import { Env } from 'env';
 
 export interface EventOrchestratorDependencies {
   pubsub?: PubSub;
@@ -247,20 +249,24 @@ export class EventOrchestratorService {
   }
 
   private async publishContextBuild(data: Record<string, any>): Promise<void> {
-    const topicName = process.env['BUILD_CONTEXT_TOPIC'];
-    if (!topicName) {
-      throw new Error('BUILD_CONTEXT_TOPIC environment variable is required');
-    }
+    const env = new Env(
+      z.object({
+        BUILD_CONTEXT_TOPIC: z.string().min(1),
+      }),
+    );
+    const topicName = env.get('BUILD_CONTEXT_TOPIC');
     await this.pubsub.topic(topicName).publishMessage({
       json: data,
     });
   }
 
   private async publishReviewCode(data: Record<string, any>): Promise<void> {
-    const topicName = process.env['REVIEW_CODE_TOPIC'];
-    if (!topicName) {
-      throw new Error('REVIEW_CODE_TOPIC environment variable is required');
-    }
+    const env = new Env(
+      z.object({
+        REVIEW_CODE_TOPIC: z.string().min(1),
+      }),
+    );
+    const topicName = env.get('REVIEW_CODE_TOPIC');
     await this.pubsub.topic(topicName).publishMessage({
       json: data,
     });

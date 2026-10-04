@@ -12,6 +12,8 @@ import { coreRpcRoutes } from './rpc/core.routes.js';
 import { createClient, Client } from '@connectrpc/connect';
 import { createConnectTransport } from '@connectrpc/connect-node';
 import { GatewayService, createAuthClientInterceptor } from 'contracts';
+import { z } from 'zod';
+import { Env } from 'env';
 
 export interface BuildCoreServerOptions {
   databaseService?: DatabaseService;
@@ -35,10 +37,12 @@ export async function buildCoreServer(
 
   let gatewayClient = options.gatewayClient;
   if (!gatewayClient) {
-    const gatewayUrl = process.env['GATEWAY_URL'];
-    if (!gatewayUrl) {
-      throw new Error('GATEWAY_URL environment variable is required');
-    }
+    const env = new Env(
+      z.object({
+        GATEWAY_URL: z.string().min(1),
+      }),
+    );
+    const gatewayUrl = env.get('GATEWAY_URL');
     const transport = createConnectTransport({
       baseUrl: gatewayUrl,
       httpVersion: '1.1',

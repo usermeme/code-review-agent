@@ -9,6 +9,8 @@ import {
 import { ProcessedWebhookResult } from '../webhooks/interfaces/webhooks.interface.js';
 import { Client } from '@connectrpc/connect';
 import { CoreService, IngestPREventRequest } from 'contracts';
+import { z } from 'zod';
+import { Env } from 'env';
 
 export interface GithubServiceDependencies {
   octokit?: Octokit;
@@ -25,18 +27,20 @@ export class GithubService {
   constructor(deps: GithubServiceDependencies) {
     this.coreClient = deps.coreClient;
 
-    const githubSecret = deps.webhookSecret ?? process.env['GIT_ADAPTER_WEBHOOK_SECRET'];
-    if (!githubSecret) {
-      throw new Error('GIT_ADAPTER_WEBHOOK_SECRET environment variable is required');
-    }
+    const env = new Env(
+      z.object({
+        GIT_ADAPTER_WEBHOOK_SECRET: z.string().min(1),
+        GIT_ADAPTER_TOKEN: z.string().min(1),
+      }),
+      {
+        GIT_ADAPTER_WEBHOOK_SECRET:
+          deps.webhookSecret ?? process.env['GIT_ADAPTER_WEBHOOK_SECRET'],
+        GIT_ADAPTER_TOKEN: deps.token ?? process.env['GIT_ADAPTER_TOKEN'],
+      },
+    );
 
-    const githubToken = deps.token ?? process.env['GIT_ADAPTER_TOKEN'];
-    if (!githubToken) {
-      throw new Error('GIT_ADAPTER_TOKEN environment variable is required');
-    }
-
-    this.webhooks = new Webhooks({ secret: githubSecret });
-    this.octokit = deps.octokit ?? new Octokit({ auth: githubToken });
+    this.webhooks = new Webhooks({ secret: env.get('GIT_ADAPTER_WEBHOOK_SECRET') });
+    this.octokit = deps.octokit ?? new Octokit({ auth: env.get('GIT_ADAPTER_TOKEN') });
   }
 
   private get octokitClient(): Octokit {

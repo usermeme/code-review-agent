@@ -6,6 +6,8 @@ import { healthModule } from './modules/health/health.module.js';
 import { gatewayRpcRoutes } from './rpc/gateway.routes.js';
 import { createClient, Client } from '@connectrpc/connect';
 import { createConnectTransport } from '@connectrpc/connect-node';
+import { z } from 'zod';
+import { Env } from 'env';
 import { CoreService, createAuthClientInterceptor } from 'contracts';
 
 export interface BuildServerOptions {
@@ -26,10 +28,12 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   let coreClient = options.coreClient;
   if (!coreClient) {
-    const coreUrl = process.env['CORE_URL'];
-    if (!coreUrl) {
-      throw new Error('CORE_URL environment variable is required');
-    }
+    const env = new Env(
+      z.object({
+        CORE_URL: z.string().min(1),
+      }),
+    );
+    const coreUrl = env.get('CORE_URL');
     const transport = createConnectTransport({
       baseUrl: coreUrl,
       httpVersion: '1.1',

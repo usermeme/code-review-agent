@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { PubSub } from '@google-cloud/pubsub';
 import { STATE } from '../constants/state-keys.constant.js';
 import type { ReviewResultPayload } from 'shared-types';
+import { Env } from 'env';
 
 export const findingItemSchema = z.object({
   title: z.string().describe('Short headline of the finding'),
@@ -16,14 +17,14 @@ export const findingItemSchema = z.object({
 
 export function createPublishReviewResultsTool(coreUrl: string) {
   const pubsub = new PubSub();
-  const topicName = process.env['REVIEW_RESULT_TOPIC'];
-  if (!topicName) {
-    throw new Error('REVIEW_RESULT_TOPIC environment variable is required');
-  }
-  const token = process.env['PUBSUB_SECRET_TOKEN'];
-  if (!token) {
-    throw new Error('PUBSUB_SECRET_TOKEN environment variable is required');
-  }
+  const env = new Env(
+    z.object({
+      REVIEW_RESULT_TOPIC: z.string().min(1),
+      PUBSUB_SECRET_TOKEN: z.string().min(1),
+    }),
+  );
+  const topicName = env.get('REVIEW_RESULT_TOPIC');
+  const token = env.get('PUBSUB_SECRET_TOKEN');
 
   return new FunctionTool({
     name: 'publishReviewResults',

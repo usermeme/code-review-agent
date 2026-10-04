@@ -77,6 +77,7 @@ code-review-agent/
 │   ├── agent-context-builder/   # ADK agent for repo indexing & baseline context
 │   └── agent-code-reviewer/     # ADK agent for diff review & inline findings
 ├── libs/
+│   ├── env/                     # Type-safe environment manager with eager Zod schema validation
 │   ├── contracts/               # Protobuf schemas & ConnectRPC client/server contracts
 │   └── shared-types/            # Common domain TypeScript interfaces & schemas
 ├── .github/

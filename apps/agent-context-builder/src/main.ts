@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { Env } from 'env';
 import { createContextOrchestrator } from './agents/orchestrator.agent.js';
 import { createPrepareRepoTool } from './tools/prepare-repo.tool.js';
 import { createStoreContextTool } from './tools/store-context.tool.js';
@@ -5,15 +7,15 @@ import { createSummarizeRepoTool } from './tools/summarize-chunks.tool.js';
 import { createSynthesizeContextTool } from './tools/synthesize-context.tool.js';
 import { createFetchContextTool } from './tools/fetch-context.tool.js';
 
-const coreUrl = process.env.CORE_URL;
-if (!coreUrl) {
-  throw new Error('CORE_URL environment variable is required');
-}
+const env = new Env(
+  z.object({
+    CORE_URL: z.string().min(1),
+    REVIEW_MODEL: z.string().min(1),
+  }),
+);
 
-const reviewModel = process.env.REVIEW_MODEL;
-if (!reviewModel) {
-  throw new Error('REVIEW_MODEL environment variable is required');
-}
+const coreUrl = env.get('CORE_URL');
+const reviewModel = env.get('REVIEW_MODEL');
 
 // 2. Setup the tools
 const tools = {

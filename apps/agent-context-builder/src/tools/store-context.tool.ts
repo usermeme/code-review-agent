@@ -1,13 +1,16 @@
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 import { PubSub } from '@google-cloud/pubsub';
+import { Env } from 'env';
 
 export function createStoreContextTool() {
   const pubsub = new PubSub();
-  const topicName = process.env['CONTEXT_READY_TOPIC'];
-  if (!topicName) {
-    throw new Error('CONTEXT_READY_TOPIC environment variable is required');
-  }
+  const env = new Env(
+    z.object({
+      CONTEXT_READY_TOPIC: z.string().min(1),
+    }),
+  );
+  const topicName = env.get('CONTEXT_READY_TOPIC');
 
   return new FunctionTool({
     name: 'store_context',
