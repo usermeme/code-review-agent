@@ -1,13 +1,21 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { GithubService } from './github.service.js';
+import { EnvService } from 'env';
+import { gatewayEnvSchema, GatewayEnvService } from '../../env.js';
 
 describe('GithubService', () => {
   let mockCoreClient: any;
   let mockOctokit: any;
+  let testEnvService: GatewayEnvService;
 
   beforeEach(() => {
-    process.env['GIT_ADAPTER_WEBHOOK_SECRET'] = 'test-secret';
-    process.env['GIT_ADAPTER_TOKEN'] = 'test-token';
+    testEnvService = new EnvService(gatewayEnvSchema, {
+      HOST: '0.0.0.0',
+      PORT: '8080',
+      CORE_URL: 'http://localhost:8080',
+      GIT_ADAPTER_WEBHOOK_SECRET: 'test-secret',
+      GIT_ADAPTER_TOKEN: 'test-token',
+    });
     mockCoreClient = {
       ingestPREvent: vi.fn().mockResolvedValue({
         success: true,
@@ -42,7 +50,11 @@ describe('GithubService', () => {
   });
 
   it('processWebhook forwards PR opened event to CoreService via ConnectRPC', async () => {
-    const service = new GithubService({ coreClient: mockCoreClient, octokit: mockOctokit });
+    const service = new GithubService({
+      coreClient: mockCoreClient,
+      octokit: mockOctokit,
+      envService: testEnvService,
+    });
     const mockLogger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() } as any;
 
     const payload = {
@@ -82,7 +94,11 @@ describe('GithubService', () => {
   });
 
   it('postReview creates formal review and inline comments via Octokit', async () => {
-    const service = new GithubService({ coreClient: mockCoreClient, octokit: mockOctokit });
+    const service = new GithubService({
+      coreClient: mockCoreClient,
+      octokit: mockOctokit,
+      envService: testEnvService,
+    });
 
     const result = await service.postReview({
       owner: 'my-org',

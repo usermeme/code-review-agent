@@ -1,11 +1,11 @@
 import { FastifyPluginAsync } from 'fastify';
 import { EventOrchestratorService } from '../../services/event-orchestrator.service.js';
 import { reviewRoutes } from './review.routes.js';
-import { CoreEnvService } from '../../env.js';
+import type { CoreEnvService } from '../../env.js';
 
 export interface ReviewModuleOptions {
+  envService: CoreEnvService;
   orchestrator: EventOrchestratorService;
-  envService?: CoreEnvService;
 }
 
 export const reviewModule: FastifyPluginAsync<ReviewModuleOptions> = async (

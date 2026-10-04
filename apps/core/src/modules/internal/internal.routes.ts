@@ -2,7 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { EventOrchestratorService } from '../../services/event-orchestrator.service.js';
 import { ContextRepository } from '../database/repositories/context.repository.js';
 import { ContextReadyPayload, ReviewResultPayload } from 'shared-types';
-import { envService as defaultEnvService, CoreEnvService } from '../../env.js';
+import type { CoreEnvService } from '../../env.js';
 
 interface PubSubMessage {
   message: {
@@ -14,22 +14,21 @@ interface PubSubMessage {
 }
 
 export interface InternalRoutesOptions {
+  envService: CoreEnvService;
   orchestrator: EventOrchestratorService;
   contextRepository: ContextRepository;
-  envService?: CoreEnvService;
 }
 
 export const internalRoutes: FastifyPluginAsync<InternalRoutesOptions> = async (
   fastify,
   options,
 ) => {
-  const { orchestrator, contextRepository } = options;
-  const env = options.envService ?? defaultEnvService;
+  const { orchestrator, contextRepository, envService } = options;
 
   // 1. Context Ready Callback
   fastify.post('/pubsub', async (request, reply) => {
     const query = request.query as { token?: string };
-    const expectedToken = env.get('PUBSUB_SECRET_TOKEN');
+    const expectedToken = envService.get('PUBSUB_SECRET_TOKEN');
 
     if (!expectedToken || query.token !== expectedToken) {
       return reply.code(401).send({ error: 'Unauthorized' });
@@ -61,7 +60,7 @@ export const internalRoutes: FastifyPluginAsync<InternalRoutesOptions> = async (
   // 2. Review Results Callback
   fastify.post('/review-results', async (request, reply) => {
     const query = request.query as { token?: string };
-    const expectedToken = env.get('PUBSUB_SECRET_TOKEN');
+    const expectedToken = envService.get('PUBSUB_SECRET_TOKEN');
 
     if (!expectedToken || query.token !== expectedToken) {
       return reply.code(401).send({ error: 'Unauthorized' });

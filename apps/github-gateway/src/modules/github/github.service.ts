@@ -9,14 +9,14 @@ import {
 import { ProcessedWebhookResult } from '../webhooks/interfaces/webhooks.interface.js';
 import { Client } from '@connectrpc/connect';
 import { CoreService, IngestPREventRequest } from 'contracts';
-import { envService as defaultEnvService, GatewayEnvService } from '../../env.js';
+import type { GatewayEnvService } from '../../env.js';
 
 export interface GithubServiceDependencies {
-  octokit?: Octokit;
+  envService: GatewayEnvService;
   coreClient: Client<typeof CoreService>;
+  octokit?: Octokit;
   webhookSecret?: string;
   token?: string;
-  envService?: GatewayEnvService;
 }
 
 export class GithubService {
@@ -26,10 +26,9 @@ export class GithubService {
 
   constructor(deps: GithubServiceDependencies) {
     this.coreClient = deps.coreClient;
-    const env = deps.envService ?? defaultEnvService;
 
-    const webhookSecret = deps.webhookSecret ?? env.get('GIT_ADAPTER_WEBHOOK_SECRET');
-    const token = deps.token ?? env.get('GIT_ADAPTER_TOKEN');
+    const webhookSecret = deps.webhookSecret ?? deps.envService.get('GIT_ADAPTER_WEBHOOK_SECRET');
+    const token = deps.token ?? deps.envService.get('GIT_ADAPTER_TOKEN');
 
     this.webhooks = new Webhooks({ secret: webhookSecret });
     this.octokit = deps.octokit ?? new Octokit({ auth: token });

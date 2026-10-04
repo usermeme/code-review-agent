@@ -10,14 +10,14 @@ import {
 } from 'contracts';
 import { ContextReadyPayload, ReviewResultPayload } from 'shared-types';
 import { Client } from '@connectrpc/connect';
-import { envService as defaultEnvService, CoreEnvService } from '../env.js';
+import type { CoreEnvService } from '../env.js';
 
 export interface EventOrchestratorDependencies {
-  pubsub?: PubSub;
+  envService: CoreEnvService;
   prRepository: PrRepository;
   contextRepository: ContextRepository;
   gatewayClient: Client<typeof GatewayService>;
-  envService?: CoreEnvService;
+  pubsub?: PubSub;
 }
 
 export class EventOrchestratorService {
@@ -32,7 +32,7 @@ export class EventOrchestratorService {
     this.prRepository = deps.prRepository;
     this.contextRepository = deps.contextRepository;
     this.gatewayClient = deps.gatewayClient;
-    this.envService = deps.envService ?? defaultEnvService;
+    this.envService = deps.envService;
   }
 
   async ingestPREvent(

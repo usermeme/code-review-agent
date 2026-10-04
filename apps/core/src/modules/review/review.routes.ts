@@ -1,11 +1,11 @@
 import { FastifyPluginAsync } from 'fastify';
 import { EventOrchestratorService } from '../../services/event-orchestrator.service.js';
 import type { ReviewResultPayload } from 'shared-types';
-import { envService as defaultEnvService, CoreEnvService } from '../../env.js';
+import type { CoreEnvService } from '../../env.js';
 
 export interface ReviewRoutesOptions {
+  envService: CoreEnvService;
   orchestrator: EventOrchestratorService;
-  envService?: CoreEnvService;
 }
 
 interface PubSubMessage {
@@ -21,12 +21,11 @@ export const reviewRoutes: FastifyPluginAsync<ReviewRoutesOptions> = async (
   fastify,
   options,
 ) => {
-  const { orchestrator } = options;
-  const env = options.envService ?? defaultEnvService;
+  const { orchestrator, envService } = options;
 
   fastify.post('/results', async (request, reply) => {
     const query = request.query as { token?: string };
-    const expectedToken = env.get('PUBSUB_SECRET_TOKEN');
+    const expectedToken = envService.get('PUBSUB_SECRET_TOKEN');
 
     if (!expectedToken || query.token !== expectedToken) {
       return reply.code(401).send({ error: 'Unauthorized' });

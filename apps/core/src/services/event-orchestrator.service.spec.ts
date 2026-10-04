@@ -1,17 +1,26 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { EventOrchestratorService } from './event-orchestrator.service.js';
 import { IngestPREventRequest } from 'contracts';
+import { EnvService } from 'env';
+import { coreEnvSchema, CoreEnvService } from '../env.js';
 
 describe('EventOrchestratorService', () => {
   let mockPubSub: any;
   let mockPrRepo: any;
   let mockContextRepo: any;
   let mockGatewayClient: any;
+  let testEnvService: CoreEnvService;
   let publishedMessages: { topic: string; data: any }[];
 
   beforeEach(() => {
-    process.env['BUILD_CONTEXT_TOPIC'] = 'build-context-topic';
-    process.env['REVIEW_CODE_TOPIC'] = 'review-code-topic';
+    testEnvService = new EnvService(coreEnvSchema, {
+      HOST: '0.0.0.0',
+      PORT: '8080',
+      GATEWAY_URL: 'http://localhost:8080',
+      PUBSUB_SECRET_TOKEN: 'test-token',
+      BUILD_CONTEXT_TOPIC: 'build-context-topic',
+      REVIEW_CODE_TOPIC: 'review-code-topic',
+    });
     publishedMessages = [];
     mockPubSub = {
       topic: vi.fn().mockImplementation((topicName: string) => ({
@@ -42,6 +51,7 @@ describe('EventOrchestratorService', () => {
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
       gatewayClient: mockGatewayClient,
+      envService: testEnvService,
     });
 
     const req = {
@@ -91,6 +101,7 @@ describe('EventOrchestratorService', () => {
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
       gatewayClient: mockGatewayClient,
+      envService: testEnvService,
     });
 
     const req = {
@@ -134,6 +145,7 @@ describe('EventOrchestratorService', () => {
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
       gatewayClient: mockGatewayClient,
+      envService: testEnvService,
     });
 
     await orchestrator.handleReviewResults({

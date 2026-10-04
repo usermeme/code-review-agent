@@ -11,24 +11,23 @@ import { internalModule } from './modules/internal/internal.module.js';
 import { coreRpcRoutes } from './rpc/core.routes.js';
 import { createClient, Client } from '@connectrpc/connect';
 import { createConnectTransport } from '@connectrpc/connect-node';
-import { envService as defaultEnvService, CoreEnvService } from './env.js';
+import type { CoreEnvService } from './env.js';
 import { GatewayService, createAuthClientInterceptor } from 'contracts';
 
 export interface BuildCoreServerOptions {
+  envService: CoreEnvService;
   databaseService?: DatabaseService;
   prRepository?: PrRepository;
   contextRepository?: ContextRepository;
   gatewayClient?: Client<typeof GatewayService>;
   orchestrator?: EventOrchestratorService;
   fastifyOptions?: FastifyServerOptions;
-  envService?: CoreEnvService;
 }
 
 export async function buildCoreServer(
-  options: BuildCoreServerOptions = {},
+  options: BuildCoreServerOptions,
 ): Promise<FastifyInstance> {
   const server = Fastify(options.fastifyOptions ?? { logger: true });
-  const env = options.envService ?? defaultEnvService;
 
   const databaseService = options.databaseService ?? new FirestoreDatabaseService();
   await databaseService.connect(server.log);
@@ -38,7 +37,7 @@ export async function buildCoreServer(
 
   let gatewayClient = options.gatewayClient;
   if (!gatewayClient) {
-    const gatewayUrl = env.get('GATEWAY_URL');
+    const gatewayUrl = options.envService.get('GATEWAY_URL');
     const transport = createConnectTransport({
       baseUrl: gatewayUrl,
       httpVersion: '1.1',
@@ -53,7 +52,7 @@ export async function buildCoreServer(
       prRepository,
       contextRepository,
       gatewayClient,
-      envService: env,
+      envService: options.envService,
     });
 
   // 1. Health check module
@@ -67,7 +66,7 @@ export async function buildCoreServer(
     prefix: '/api/v1/internal',
     orchestrator,
     contextRepository,
-    envService: env,
+    envService: options.envService,
   });
 
   // 4. Context lookup module
@@ -80,7 +79,7 @@ export async function buildCoreServer(
   await server.register(reviewModule, {
     prefix: '/api/v1/review',
     orchestrator,
-    envService: env,
+    envService: options.envService,
   });
 
   return server;

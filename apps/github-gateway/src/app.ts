@@ -6,19 +6,18 @@ import { healthModule } from './modules/health/health.module.js';
 import { gatewayRpcRoutes } from './rpc/gateway.routes.js';
 import { createClient, Client } from '@connectrpc/connect';
 import { createConnectTransport } from '@connectrpc/connect-node';
-import { envService as defaultEnvService, GatewayEnvService } from './env.js';
+import type { GatewayEnvService } from './env.js';
 import { CoreService, createAuthClientInterceptor } from 'contracts';
 
 export interface BuildServerOptions {
+  envService: GatewayEnvService;
   coreClient?: Client<typeof CoreService>;
   githubService?: GithubService;
   fastifyOptions?: FastifyServerOptions;
-  envService?: GatewayEnvService;
 }
 
-export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
+export async function buildServer(options: BuildServerOptions): Promise<FastifyInstance> {
   const server = Fastify(options.fastifyOptions ?? { logger: true });
-  const env = options.envService ?? defaultEnvService;
 
   await server.register(fastifyRawBody, {
     field: 'rawBody',
@@ -29,7 +28,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   let coreClient = options.coreClient;
   if (!coreClient) {
-    const coreUrl = env.get('CORE_URL');
+    const coreUrl = options.envService.get('CORE_URL');
     const transport = createConnectTransport({
       baseUrl: coreUrl,
       httpVersion: '1.1',
@@ -39,7 +38,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   }
 
   const githubService =
-    options.githubService ?? new GithubService({ coreClient, envService: env });
+    options.githubService ?? new GithubService({ coreClient, envService: options.envService });
 
   // 1. Health check module
   await server.register(healthModule);

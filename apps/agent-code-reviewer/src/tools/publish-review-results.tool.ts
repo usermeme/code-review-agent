@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { PubSub } from '@google-cloud/pubsub';
 import { STATE } from '../constants/state-keys.constant.js';
 import type { ReviewResultPayload } from 'shared-types';
-import { envService as defaultEnvService, CodeReviewerEnvService } from '../env.js';
+import type { CodeReviewerEnvService } from '../env.js';
 
 export const findingItemSchema = z.object({
   title: z.string().describe('Short headline of the finding'),
@@ -16,17 +16,16 @@ export const findingItemSchema = z.object({
 });
 
 export interface PublishReviewResultsToolDependencies {
-  envService?: CodeReviewerEnvService;
+  envService: CodeReviewerEnvService;
 }
 
 export function createPublishReviewResultsTool(
   coreUrl: string,
-  deps: PublishReviewResultsToolDependencies = {},
+  deps: PublishReviewResultsToolDependencies,
 ) {
   const pubsub = new PubSub();
-  const env = deps.envService ?? defaultEnvService;
-  const topicName = env.get('REVIEW_RESULT_TOPIC');
-  const token = env.get('PUBSUB_SECRET_TOKEN');
+  const topicName = deps.envService.get('REVIEW_RESULT_TOPIC');
+  const token = deps.envService.get('PUBSUB_SECRET_TOKEN');
 
   return new FunctionTool({
     name: 'publishReviewResults',
