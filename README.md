@@ -159,9 +159,343 @@ code-review-agent-deploy/ (Private Repo)
 └── docker-compose.prod.yml       # Production Compose or Kubernetes manifests
 ```
 
-#### Example 1: Deploying with Docker Compose in Private Repo
+#### Private Repo Recommended Layout
 
-In your private deployment repo, create `docker-compose.prod.yml` referencing the pre-built GHCR images:
+```text
+code-review-agent-deploy/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml               # Automated Cloud Run deployment workflow (all 4 services)
+├── scripts/
+│   └── setup-gcp-infra.sh           # Idempotent GCP setup (APIs, Firestore, Pub/Sub topics, push subscriptions)
+├── terraform/                       # Optional: Declarative Terraform configuration
+│   ├── main.tf
+│   ├── variables.tf
+│   └── outputs.tf
+├── docker-compose.prod.yml          # Production Compose for VM / on-premise deployments
+├── .env.example                     # Reference template for production secrets & config
+└── README.md                        # Deployment instructions & ops runbook
+```
+
+---
+
+### 📋 Ready-to-Use Artifacts for Your Private Deployment Repo
+
+#### 1. Cloud Run CI/CD Workflow (`.github/workflows/deploy.yml`)
+
+This automated workflow deploys all 4 microservices to Cloud Run and configures the Pub/Sub push subscriptions with OIDC authentication:
+
+```yaml
+name: Deploy Code Review Agent to Cloud Run
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+env:
+  GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  IMAGE_OWNER: ${{ vars.IMAGE_OWNER }}
+  IMAGE_TAG: ${{ vars.IMAGE_TAG || 'latest' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      # 1. Deploy Core Service
+      - name: Deploy Core Service
+        run: |
+          gcloud run deploy core-service \
+            --image "ghcr.io/${{ env.IMAGE_OWNER }}/code-review-agent-core:${{ env.IMAGE_TAG }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --platform managed \
+            --no-allow-unauthenticated \
+            --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,BUILD_CONTEXT_TOPIC=build-context-topic,CONTEXT_READY_TOPIC=context-ready-topic,REVIEW_CODE_TOPIC=review-code-topic,REVIEW_RESULT_TOPIC=review-result-topic,PUBSUB_SECRET_TOKEN=${{ secrets.PUBSUB_SECRET_TOKEN }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+
+          CORE_URL=$(gcloud run services describe core-service --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
+          echo "CORE_URL=${CORE_URL}" >> $GITHUB_ENV
+
+      # 2. Deploy Context Builder Agent (ADK)
+      - name: Deploy Context Builder Agent
+        run: |
+          gcloud run deploy agent-context-builder \
+            --image "ghcr.io/${{ env.IMAGE_OWNER }}/code-review-agent-context-builder:${{ env.IMAGE_TAG }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --platform managed \
+            --no-allow-unauthenticated \
+            --memory 2Gi \
+            --cpu 2 \
+            --timeout 600s \
+            --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},CONTEXT_READY_TOPIC=context-ready-topic,GIT_ADAPTER_TOKEN=${{ secrets.GIT_ADAPTER_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+
+          CONTEXT_BUILDER_URL=$(gcloud run services describe agent-context-builder --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
+          echo "CONTEXT_BUILDER_URL=${CONTEXT_BUILDER_URL}" >> $GITHUB_ENV
+
+      # 3. Deploy Code Reviewer Agent (ADK)
+      - name: Deploy Code Reviewer Agent
+        run: |
+          gcloud run deploy agent-code-reviewer \
+            --image "ghcr.io/${{ env.IMAGE_OWNER }}/code-review-agent-code-reviewer:${{ env.IMAGE_TAG }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --platform managed \
+            --no-allow-unauthenticated \
+            --memory 2Gi \
+            --cpu 2 \
+            --timeout 600s \
+            --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},REVIEW_RESULT_TOPIC=review-result-topic,PUBSUB_SECRET_TOKEN=${{ secrets.PUBSUB_SECRET_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+
+          CODE_REVIEWER_URL=$(gcloud run services describe agent-code-reviewer --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
+          echo "CODE_REVIEWER_URL=${CODE_REVIEWER_URL}" >> $GITHUB_ENV
+
+      # 4. Deploy GitHub Gateway (Public Ingress)
+      - name: Deploy GitHub Gateway
+        run: |
+          gcloud run deploy github-gateway \
+            --image "ghcr.io/${{ env.IMAGE_OWNER }}/code-review-agent-github-gateway:${{ env.IMAGE_TAG }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,CORE_URL=${{ env.CORE_URL }},GIT_ADAPTER_WEBHOOK_SECRET=${{ secrets.GIT_ADAPTER_WEBHOOK_SECRET }},GIT_ADAPTER_TOKEN=${{ secrets.GIT_ADAPTER_TOKEN }},PUBSUB_SECRET_TOKEN=${{ secrets.PUBSUB_SECRET_TOKEN }}"
+
+          GATEWAY_URL=$(gcloud run services describe github-gateway --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
+          echo "GATEWAY_URL=${GATEWAY_URL}" >> $GITHUB_ENV
+
+      # 5. Link Gateway URL back to Core Service
+      - name: Update Core Service with Gateway URL
+        run: |
+          gcloud run services update core-service \
+            --region "${{ env.GCP_REGION }}" \
+            --update-env-vars "GATEWAY_URL=${{ env.GATEWAY_URL }}"
+
+      # 6. Configure Pub/Sub Push Subscriptions
+      - name: Configure Pub/Sub Push Subscriptions
+        run: |
+          SA_EMAIL="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
+
+          # Subscription 1: build-context-topic -> agent-context-builder
+          gcloud pubsub subscriptions create build-context-sub \
+            --topic=build-context-topic \
+            --push-endpoint="${{ env.CONTEXT_BUILDER_URL }}/" \
+            --push-auth-service-account="${SA_EMAIL}" \
+            --ack-deadline=600 || \
+          gcloud pubsub subscriptions update build-context-sub \
+            --push-endpoint="${{ env.CONTEXT_BUILDER_URL }}/"
+
+          # Subscription 2: context-ready-topic -> core
+          gcloud pubsub subscriptions create context-ready-sub \
+            --topic=context-ready-topic \
+            --push-endpoint="${{ env.CORE_URL }}/api/v1/internal/pubsub?token=${{ secrets.PUBSUB_SECRET_TOKEN }}" \
+            --push-auth-service-account="${SA_EMAIL}" \
+            --ack-deadline=60 || \
+          gcloud pubsub subscriptions update context-ready-sub \
+            --push-endpoint="${{ env.CORE_URL }}/api/v1/internal/pubsub?token=${{ secrets.PUBSUB_SECRET_TOKEN }}"
+
+          # Subscription 3: review-code-topic -> agent-code-reviewer
+          gcloud pubsub subscriptions create review-code-sub \
+            --topic=review-code-topic \
+            --push-endpoint="${{ env.CODE_REVIEWER_URL }}/" \
+            --push-auth-service-account="${SA_EMAIL}" \
+            --ack-deadline=600 || \
+          gcloud pubsub subscriptions update review-code-sub \
+            --push-endpoint="${{ env.CODE_REVIEWER_URL }}/"
+
+          # Subscription 4: review-result-topic -> core
+          gcloud pubsub subscriptions create review-result-sub \
+            --topic=review-result-topic \
+            --push-endpoint="${{ env.CORE_URL }}/api/v1/review/results?token=${{ secrets.PUBSUB_SECRET_TOKEN }}" \
+            --push-auth-service-account="${SA_EMAIL}" \
+            --ack-deadline=60 || \
+          gcloud pubsub subscriptions update review-result-sub \
+            --push-endpoint="${{ env.CORE_URL }}/api/v1/review/results?token=${{ secrets.PUBSUB_SECRET_TOKEN }}"
+```
+
+---
+
+#### 2. Infrastructure Setup Script (`scripts/setup-gcp-infra.sh`)
+
+Run this idempotent script once in your private repo to initialize Firestore, Pub/Sub topics, and IAM permissions:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Configuration
+PROJECT_ID="${GCP_PROJECT_ID:-$(gcloud config get-value project)}"
+REGION="${GCP_REGION:-us-central1}"
+SA_NAME="code-review-agent-sa"
+SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+echo "Setting up GCP infrastructure for Project: ${PROJECT_ID} in Region: ${REGION}..."
+
+# 1. Enable required GCP APIs
+echo "Enabling GCP APIs..."
+gcloud services enable \
+  run.googleapis.com \
+  pubsub.googleapis.com \
+  firestore.googleapis.com \
+  iam.googleapis.com
+
+# 2. Provision Firestore in Native mode (if not already existing)
+echo "Checking Firestore database..."
+if ! gcloud firestore databases describe --database="(default)" &>/dev/null; then
+  echo "Creating Firestore (default) database in Native mode..."
+  gcloud firestore databases create --location="${REGION}" --type=firestore-native
+else
+  echo "Firestore database already exists."
+fi
+
+# 3. Create Pub/Sub Topics
+echo "Creating Pub/Sub topics..."
+for TOPIC in build-context-topic context-ready-topic review-code-topic review-result-topic; do
+  if ! gcloud pubsub topics describe "${TOPIC}" &>/dev/null; then
+    gcloud pubsub topics create "${TOPIC}"
+    echo "Created topic: ${TOPIC}"
+  else
+    echo "Topic ${TOPIC} already exists."
+  fi
+done
+
+# 4. Create Service Account
+echo "Configuring Service Account: ${SA_EMAIL}..."
+if ! gcloud iam service-accounts describe "${SA_EMAIL}" &>/dev/null; then
+  gcloud iam service-accounts create "${SA_NAME}" \
+    --display-name="Code Review Agent Service Account"
+fi
+
+# 5. Grant IAM roles to Service Account
+echo "Granting IAM roles to ${SA_EMAIL}..."
+ROLES=(
+  "roles/datastore.user"
+  "roles/pubsub.publisher"
+  "roles/run.invoker"
+)
+for ROLE in "${ROLES[@]}"; do
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="${ROLE}" --quiet
+done
+
+# 6. Allow Pub/Sub service agent to create auth tokens for push subscriptions
+PROJECT_NUMBER=$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')
+PUBSUB_SA="service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
+echo "Granting Service Account Token Creator to Pub/Sub SA: ${PUBSUB_SA}..."
+gcloud iam service-accounts add-iam-policy-binding "${SA_EMAIL}" \
+  --member="serviceAccount:${PUBSUB_SA}" \
+  --role="roles/iam.serviceAccountTokenCreator" --quiet
+
+echo "GCP Infrastructure setup complete! You are ready to deploy."
+```
+
+---
+
+#### 3. Declarative Terraform Configuration (`terraform/main.tf`)
+
+If your team prefers Terraform, include this in `terraform/main.tf`:
+
+```hcl
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.0"
+    }
+  }
+}
+
+variable "project_id" {
+  description = "Google Cloud Project ID"
+  type        = string
+}
+
+variable "region" {
+  description = "Default Google Cloud Region"
+  type        = string
+  default     = "us-central1"
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+# 1. Enable APIs
+resource "google_project_service" "apis" {
+  for_each = toset([
+    "run.googleapis.com",
+    "pubsub.googleapis.com",
+    "firestore.googleapis.com",
+    "iam.googleapis.com",
+  ])
+  service = each.key
+  disable_on_destroy = false
+}
+
+# 2. Firestore Database
+resource "google_firestore_database" "database" {
+  name        = "(default)"
+  location_id = var.region
+  type        = "FIRESTORE_NATIVE"
+  depends_on  = [google_project_service.apis]
+}
+
+# 3. Pub/Sub Topics
+resource "google_pubsub_topic" "topics" {
+  for_each = toset([
+    "build-context-topic",
+    "context-ready-topic",
+    "review-code-topic",
+    "review-result-topic",
+  ])
+  name       = each.key
+  depends_on = [google_project_service.apis]
+}
+
+# 4. Service Account & IAM Roles
+resource "google_service_account" "agent_sa" {
+  account_id   = "code-review-agent-sa"
+  display_name = "Code Review Agent Service Account"
+}
+
+resource "google_project_iam_member" "sa_roles" {
+  for_each = toset([
+    "roles/datastore.user",
+    "roles/pubsub.publisher",
+    "roles/run.invoker",
+  ])
+  project = var.project_id
+  role    = each.key
+  member  = "serviceAccount:${google_service_account.agent_sa.email}"
+}
+
+# 5. Allow Pub/Sub to mint OIDC tokens using agent service account
+data "google_project" "current" {}
+
+resource "google_service_account_iam_member" "pubsub_token_creator" {
+  service_account_id = google_service_account.agent_sa.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+```
+
+---
+
+#### 4. Docker Compose for Self-Hosted Deployments (`docker-compose.prod.yml`)
+
+For teams running on a single cloud VM or on-premise Docker host:
 
 ```yaml
 version: '3.8'
@@ -176,7 +510,6 @@ services:
       - PORT=8080
       - HOST=0.0.0.0
       - CORE_URL=http://core:8080
-      - GIT_ADAPTER=github
       - GIT_ADAPTER_WEBHOOK_SECRET=${GIT_ADAPTER_WEBHOOK_SECRET}
       - GIT_ADAPTER_TOKEN=${GIT_ADAPTER_TOKEN}
       - PUBSUB_SECRET_TOKEN=${PUBSUB_SECRET_TOKEN}
@@ -211,6 +544,7 @@ services:
       - REVIEW_MODEL=gemini-2.5-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - CONTEXT_READY_TOPIC=context-ready-topic
+      - GIT_ADAPTER_TOKEN=${GIT_ADAPTER_TOKEN}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
 
   agent-code-reviewer:
@@ -226,78 +560,51 @@ services:
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
 ```
 
-#### Example 2: Deploying to Google Cloud Run in Private Repo
-
-In your private deployment repo, create a GitHub Actions workflow that deploys the services and configures Pub/Sub push subscriptions:
-
-```yaml
-name: Deploy Code Review Agent to Cloud Run
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Deploy Core Service
-        run: |
-          gcloud run deploy core-service \
-            --image "ghcr.io/${{ vars.IMAGE_OWNER }}/code-review-agent-core:latest" \
-            --region "${{ vars.GCP_REGION }}" \
-            --platform managed \
-            --no-allow-unauthenticated \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,GATEWAY_URL=${{ vars.GATEWAY_URL }},BUILD_CONTEXT_TOPIC=build-context-topic,CONTEXT_READY_TOPIC=context-ready-topic,REVIEW_CODE_TOPIC=review-code-topic,REVIEW_RESULT_TOPIC=review-result-topic,PUBSUB_SECRET_TOKEN=${{ secrets.PUBSUB_SECRET_TOKEN }}"
-
-      - name: Deploy GitHub Gateway
-        run: |
-          gcloud run deploy github-gateway \
-            --image "ghcr.io/${{ vars.IMAGE_OWNER }}/code-review-agent-github-gateway:latest" \
-            --region "${{ vars.GCP_REGION }}" \
-            --platform managed \
-            --allow-unauthenticated \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,CORE_URL=${{ vars.CORE_URL }},GIT_ADAPTER_WEBHOOK_SECRET=${{ secrets.GIT_ADAPTER_WEBHOOK_SECRET }},GIT_ADAPTER_TOKEN=${{ secrets.GIT_ADAPTER_TOKEN }},PUBSUB_SECRET_TOKEN=${{ secrets.PUBSUB_SECRET_TOKEN }}"
-```
-
-#### Example 3: Deploying via SSH / Docker Compose in Private Repo
-
-```yaml
-name: Deploy via SSH
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy to Remote Host via SSH
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: GEMINI_API_KEY,GIT_ADAPTER_TOKEN,GIT_ADAPTER_WEBHOOK_SECRET,PUBSUB_SECRET_TOKEN
-          script: |
-            cd /opt/code-review-agent-deploy
-            git pull origin main
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
-```
-
 ---
+
+### 🤖 Instructions to Pass to an Autonomous AI Agent
+
+If you want an AI agent (such as Antigravity, Claude, Cursor, or Devin) to build and populate your private deployment repository from scratch, copy and paste this prompt:
+
+````markdown
+Please create a new private GitOps deployment repository named `code-review-agent-deploy` for the `code-review-agent` system.
+
+The application publishes 4 multi-arch container images to GitHub Container Registry (GHCR):
+- `ghcr.io/<owner>/code-review-agent-github-gateway:latest`
+- `ghcr.io/<owner>/code-review-agent-core:latest`
+- `ghcr.io/<owner>/code-review-agent-context-builder:latest`
+- `ghcr.io/<owner>/code-review-agent-code-reviewer:latest`
+
+Please generate the complete, production-ready repository with the following files:
+
+1. `.github/workflows/deploy.yml`:
+   - Deploys all 4 services to Google Cloud Run in this order: Core, Context Builder, Code Reviewer, Gateway.
+   - Updates Core with the deployed Gateway URL.
+   - Configures the 4 Pub/Sub push subscriptions with OIDC authentication using service account `code-review-agent-sa@<project>.iam.gserviceaccount.com`:
+     - `build-context-sub` -> Agent Context Builder root (`/`)
+     - `context-ready-sub` -> Core endpoint (`/api/v1/internal/pubsub?token=${PUBSUB_SECRET_TOKEN}`)
+     - `review-code-sub` -> Agent Code Reviewer root (`/`)
+     - `review-result-sub` -> Core endpoint (`/api/v1/review/results?token=${PUBSUB_SECRET_TOKEN}`)
+
+2. `scripts/setup-gcp-infra.sh`:
+   - Idempotent bash script to enable GCP APIs (`run`, `pubsub`, `firestore`, `iam`).
+   - Creates Firestore native database `(default)`.
+   - Creates the 4 Pub/Sub topics: `build-context-topic`, `context-ready-topic`, `review-code-topic`, `review-result-topic`.
+   - Provisions `code-review-agent-sa` service account with `roles/datastore.user`, `roles/pubsub.publisher`, and `roles/run.invoker`.
+   - Grants `roles/iam.serviceAccountTokenCreator` to the Pub/Sub service agent so push subscriptions can mint OIDC tokens.
+
+3. `terraform/main.tf`, `terraform/variables.tf`, `terraform/outputs.tf`:
+   - Full Terraform declarations equivalent to `setup-gcp-infra.sh`.
+
+4. `docker-compose.prod.yml`:
+   - Production Docker Compose setup running all 4 services referencing the GHCR images.
+
+5. `.env.example`:
+   - Complete template documenting all required secrets: `GIT_ADAPTER_WEBHOOK_SECRET`, `GIT_ADAPTER_TOKEN`, `PUBSUB_SECRET_TOKEN`, `GEMINI_API_KEY`, `GCP_PROJECT_ID`, and `GCP_REGION`.
+
+6. `README.md`:
+   - Step-by-step instructions on setting GitHub repository secrets/variables, running the infra setup, and triggering the deployment workflow.
+````
 
 ## ⚙️ Environment Variables Reference
 
@@ -338,6 +645,7 @@ Each service strictly validates required variables and fails fast at startup if 
 | `CORE_URL` | Yes | HTTP base URL of the Core microservice for fetching/saving context |
 | `REVIEW_MODEL` | Yes | Gemini model identifier (e.g. `gemini-2.5-flash`) |
 | `CONTEXT_READY_TOPIC` | Yes | Google Cloud Pub/Sub topic to publish completion event to |
+| `GIT_ADAPTER_TOKEN` | Optional | GitHub Personal Access Token (classic with `repo` scope) to clone private repositories or fetch PR diffs |
 | `GEMINI_API_KEY` | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI) |
 | `GOOGLE_GENAI_USE_VERTEXAI` | Optional | Set to `1` to authenticate via Google Cloud Vertex AI ADC |
 
