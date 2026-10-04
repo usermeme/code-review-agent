@@ -4,6 +4,7 @@ import { STATE } from '../constants/state-keys.constant.js';
 import { downloadRepoArchive } from '../services/archive.service.js';
 import { collectFiles, buildChunks } from '../services/chunker.service.js';
 import { collectAgentDocs } from '../services/agent-docs.service.js';
+import type { ContextBuilderEnvService } from '../env.js';
 
 export interface PrepareRepoPayload {
   provider: string;
@@ -11,12 +12,15 @@ export interface PrepareRepoPayload {
   repo: string;
   ref?: string;
   cloneUrl?: string;
-  token?: string;
   prNumber?: number;
   isIncrementalUpdate?: boolean;
 }
 
-export function createPrepareRepoTool() {
+export interface PrepareRepoToolDependencies {
+  envService: ContextBuilderEnvService;
+}
+
+export function createPrepareRepoTool(deps: PrepareRepoToolDependencies) {
   return new FunctionTool({
     name: 'prepare_repository',
     description:
@@ -27,7 +31,6 @@ export function createPrepareRepoTool() {
       repo: z.string(),
       ref: z.string().optional(),
       cloneUrl: z.string().optional(),
-      token: z.string().optional(),
       prNumber: z.number().nullable().optional(),
       isIncrementalUpdate: z.boolean().optional(),
     }),
@@ -44,7 +47,7 @@ export function createPrepareRepoTool() {
         input.prNumber
       ) {
         // INCREMENTAL MODE: Fetch only changed files using GitHub API
-        const token = input.token || process.env.GIT_ADAPTER_TOKEN;
+        const token = deps.envService.get('GIT_ADAPTER_TOKEN');
         const headers: Record<string, string> = token
           ? { Authorization: `Bearer ${token}` }
           : {};
@@ -88,7 +91,7 @@ export function createPrepareRepoTool() {
         return `Incremental update prepared successfully. Found ${chunks.length} chunks of changed files.`;
       } else {
         // BASELINE MODE: Download repository archive via Git provider API
-        const token = input.token || process.env.GIT_ADAPTER_TOKEN;
+        const token = deps.envService.get('GIT_ADAPTER_TOKEN');
         const ref = input.ref || 'main';
 
         const snapshot = await downloadRepoArchive({

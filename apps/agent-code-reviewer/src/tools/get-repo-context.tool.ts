@@ -9,7 +9,7 @@ export interface RepoContextTarget {
   prNumber: number;
 }
 
-export function createGetRepoContextTool(gatewayUrl: string) {
+export function createGetRepoContextTool(coreUrl: string) {
   return new FunctionTool({
     name: 'getRepoContext',
     description:
@@ -36,33 +36,45 @@ export function createGetRepoContextTool(gatewayUrl: string) {
       // We always fetch the baseline repository context (prNumber = 0)
       const prKey = `${provider}:${owner}:${repo}:0`;
 
-      const response = await fetch(
-        `${gatewayUrl}/api/v1/context/${prKey}`,
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to fetch repo context from gateway: ${response.statusText}`,
-        );
-      }
-
-      const doc = await response.json();
-      const state = toolContext.state;
+      // 1. If baselineContext was passed directly in state via review-code-topic, use it!
+      const directContext = toolContext.state.get<string>('baselineContext');
       let sections: Record<string, string> = {};
-      if (doc.summary) {
-         try {
+
+      if (directContext) {
+        try {
+          sections = JSON.parse(directContext);
+        } catch {
+          sections = { architecture: directContext };
+        }
+      } else {
+        // Fallback: fetch from Core HTTP API
+        const response = await fetch(
+          `${coreUrl}/api/v1/context/${prKey}`,
+          {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch repo context from service: ${response.statusText}`,
+          );
+        }
+
+        const doc = await response.json();
+        if (doc.summary) {
+          try {
             sections = JSON.parse(doc.summary);
-         } catch {
+          } catch {
             sections = { architecture: doc.summary };
-         }
+          }
+        }
       }
 
+      const state = toolContext.state;
       state.set(STATE.ctxArchitecture, sections['architecture'] ?? '');
       state.set(STATE.ctxModules, sections['modules'] ?? '');
       state.set(STATE.ctxPatterns, sections['patterns'] ?? '');

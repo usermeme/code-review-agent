@@ -1,26 +1,19 @@
+import { envService } from './env.js';
 import { createOrchestrator } from './agents/orchestrator.agent.js';
 import { createGetRepoContextTool } from './tools/get-repo-context.tool.js';
 import { createGetDiscussionTool } from './tools/get-discussion.tool.js';
 import { createStoreDiscussionTool } from './tools/store-discussion.tool.js';
 import { createPublishReviewResultsTool } from './tools/publish-review-results.tool.js';
 
-// 1. Fetch required environment variable config at initialization
-const gatewayUrl = process.env.GATEWAY_URL;
-if (!gatewayUrl) {
-  throw new Error('GATEWAY_URL environment variable is required');
-}
+const coreUrl = envService.get('CORE_URL');
+const reviewModel = envService.get('REVIEW_MODEL');
 
-const reviewModel = process.env.REVIEW_MODEL;
-if (!reviewModel) {
-  throw new Error('REVIEW_MODEL environment variable is required');
-}
-
-// 2. Setup the tools with the gateway URL
+// 2. Setup the tools with the Core service URL and envService
 const tools = {
-  getRepoContext: createGetRepoContextTool(gatewayUrl),
-  publishReviewResults: createPublishReviewResultsTool(gatewayUrl),
-  getDiscussion: createGetDiscussionTool(gatewayUrl),
-  storeDiscussion: createStoreDiscussionTool(gatewayUrl),
+  getRepoContext: createGetRepoContextTool(coreUrl),
+  publishReviewResults: createPublishReviewResultsTool(coreUrl, { envService }),
+  getDiscussion: createGetDiscussionTool(coreUrl),
+  storeDiscussion: createStoreDiscussionTool(coreUrl),
 };
 
 // 3. Export the LlmAgent instance.

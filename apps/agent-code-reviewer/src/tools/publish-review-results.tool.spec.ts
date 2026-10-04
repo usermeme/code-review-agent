@@ -1,11 +1,20 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { createPublishReviewResultsTool } from './publish-review-results.tool.js';
 import { STATE } from '../constants/state-keys.constant.js';
+import { EnvService } from 'env';
+import { codeReviewerEnvSchema, CodeReviewerEnvService } from '../env.js';
 
 describe('publishReviewResultsTool', () => {
   const originalFetch = global.fetch;
+  let testEnvService: CodeReviewerEnvService;
 
   beforeEach(() => {
+    testEnvService = new EnvService(codeReviewerEnvSchema, {
+      CORE_URL: 'http://localhost:8080',
+      REVIEW_MODEL: 'gemini-2.5-pro',
+      REVIEW_RESULT_TOPIC: 'review-result-topic',
+      PUBSUB_SECRET_TOKEN: 'test-token',
+    });
     vi.restoreAllMocks();
   });
 
@@ -14,7 +23,9 @@ describe('publishReviewResultsTool', () => {
   });
 
   it('has correct tool name and description', () => {
-    const tool = createPublishReviewResultsTool('http://localhost:8080');
+    const tool = createPublishReviewResultsTool('http://localhost:8080', {
+      envService: testEnvService,
+    });
     expect(tool.name).toBe('publishReviewResults');
     expect(tool.description).toContain('Publishes the final review findings');
   });
@@ -30,7 +41,9 @@ describe('publishReviewResultsTool', () => {
       };
     }) as any;
 
-    const tool = createPublishReviewResultsTool('http://mock-gateway:8080');
+    const tool = createPublishReviewResultsTool('http://mock-gateway:8080', {
+      envService: testEnvService,
+    });
     const mockCtx = {
       state: new Map([
         [

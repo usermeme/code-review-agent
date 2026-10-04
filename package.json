@@ -8,7 +8,8 @@
     "test": "nx run-many -t test",
     "e2e": "nx run-many -t e2e",
     "build": "nx run-many -t build",
-    "docker:build:gateway": "docker build -f apps/gateway/Dockerfile -t code-review-agent-gateway .",
+    "docker:build:github-gateway": "docker build -f apps/github-gateway/Dockerfile -t code-review-agent-github-gateway .",
+    "docker:build:core": "docker build -f apps/core/Dockerfile -t code-review-agent-core .",
     "docker:build:context-builder": "docker build -f apps/agent-context-builder/Dockerfile -t code-review-agent-context-builder .",
     "docker:build:code-reviewer": "docker build -f apps/agent-code-reviewer/Dockerfile -t code-review-agent-code-reviewer ."
   },
@@ -18,6 +19,8 @@
   },
   "private": true,
   "devDependencies": {
+    "@bufbuild/buf": "^1.73.0",
+    "@bufbuild/protoc-gen-es": "^2.16.0",
     "@cucumber/cucumber": "^13.2.1",
     "@eslint/js": "^10.0.1",
     "@google/adk-devtools": "^2.1.0",
@@ -39,6 +42,10 @@
     "vitest": "^5.0.1"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.16.0",
+    "@connectrpc/connect": "^2.2.0",
+    "@connectrpc/connect-fastify": "^2.2.0",
+    "@connectrpc/connect-node": "^2.2.0",
     "@fastify/autoload": "~6.5.0",
     "@fastify/sensible": "~6.0.5",
     "@google-cloud/firestore": "^9.2.0",

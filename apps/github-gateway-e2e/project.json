@@ -1,0 +1,39 @@
+{
+  "name": "github-gateway-e2e",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/github-gateway-e2e/src",
+  "targets": {
+    "e2e": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cucumber-js --config apps/github-gateway-e2e/cucumber.json",
+        "env": {
+          "NODE_OPTIONS": "--import tsx",
+          "HOST": "0.0.0.0",
+          "PORT": "8080",
+          "CORE_URL": "http://localhost:8080",
+          "GATEWAY_URL": "http://localhost:8080",
+          "GIT_ADAPTER_WEBHOOK_SECRET": "test-webhook-secret",
+          "GIT_ADAPTER_TOKEN": "test-github-token",
+          "PUBSUB_SECRET_TOKEN": "test-internal-token",
+          "BUILD_CONTEXT_TOPIC": "build-context-topic",
+          "REVIEW_CODE_TOPIC": "review-code-topic"
+        }
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint apps/github-gateway-e2e"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p apps/github-gateway-e2e/tsconfig.json --noEmit"
+      }
+    }
+  },
+  "tags": []
+}

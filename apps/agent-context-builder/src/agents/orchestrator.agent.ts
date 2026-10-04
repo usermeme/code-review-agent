@@ -61,7 +61,7 @@ Return a success message as your final response.`;
     case 'full_baseline':
       return `You are the orchestrator for building a baseline repository context document from scratch.
 You MUST execute the following tools in this EXACT sequence:
-1. prepare_repository: Call this with provider "${input.provider}", owner "${input.owner}", repo "${input.repo}", cloneUrl "${input.cloneUrl || ''}", ref "${input.ref || ''}", and token "${input.token || ''}". Wait for it to finish.
+1. prepare_repository: Call this with provider "${input.provider}", owner "${input.owner}", repo "${input.repo}", cloneUrl "${input.cloneUrl || ''}", and ref "${input.ref || ''}". Wait for it to finish.
 2. summarize_chunks: Summarizes the chunks concurrently. Wait for it to finish.
 3. synthesize_context: Merges all chunk summaries into a brand new structured JSON context.
 4. store_context: Sends the synthesized context back to Gateway with prNumber 0 (as the baseline). Wait for this to finish.
