@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { Env } from './env.js';
+import { EnvService } from './env.service.js';
 
-describe('Env', () => {
-  it('successfully parses valid environment variables and retrieves them via get', () => {
+describe('EnvService', () => {
+  it('successfully parses valid environment variables and retrieves them via get and getOrThrow', () => {
     const schema = z.object({
       PORT: z.string().transform(Number),
       HOST: z.string(),
@@ -11,17 +11,18 @@ describe('Env', () => {
       IS_ENABLED: z.string().transform((v) => v === 'true'),
     });
 
-    const env = new Env(schema, {
+    const envService = new EnvService(schema, {
       PORT: '8080',
       HOST: '0.0.0.0',
       NODE_ENV: 'test',
       IS_ENABLED: 'true',
     });
 
-    expect(env.get('PORT')).toBe(8080);
-    expect(env.get('HOST')).toBe('0.0.0.0');
-    expect(env.get('NODE_ENV')).toBe('test');
-    expect(env.get('IS_ENABLED')).toBe(true);
+    expect(envService.get('PORT')).toBe(8080);
+    expect(envService.get('HOST')).toBe('0.0.0.0');
+    expect(envService.get('NODE_ENV')).toBe('test');
+    expect(envService.get('IS_ENABLED')).toBe(true);
+    expect(envService.getOrThrow('PORT')).toBe(8080);
   });
 
   it('throws an error in constructor when a required variable is missing', () => {
@@ -31,7 +32,7 @@ describe('Env', () => {
     });
 
     expect(() => {
-      new Env(schema, {
+      new EnvService(schema, {
         REQUIRED_KEY: 'present',
       });
     }).toThrowError(/Environment validation failed:\s+- ANOTHER_KEY:/);
@@ -43,7 +44,7 @@ describe('Env', () => {
     });
 
     expect(() => {
-      new Env(schema, {
+      new EnvService(schema, {
         SERVICE_URL: 'not-a-valid-url',
       });
     }).toThrowError(/Environment validation failed:\s+- SERVICE_URL:/);
@@ -56,9 +57,22 @@ describe('Env', () => {
       TEST_DEFAULT_ENV_VAR: z.string(),
     });
 
-    const env = new Env(schema);
-    expect(env.get('TEST_DEFAULT_ENV_VAR')).toBe('hello-from-process-env');
+    const envService = new EnvService(schema);
+    expect(envService.get('TEST_DEFAULT_ENV_VAR')).toBe('hello-from-process-env');
+    expect(envService.getOrThrow('TEST_DEFAULT_ENV_VAR')).toBe('hello-from-process-env');
 
     delete process.env['TEST_DEFAULT_ENV_VAR'];
+  });
+
+  it('throws when getOrThrow is called on an undefined optional variable', () => {
+    const schema = z.object({
+      OPTIONAL_KEY: z.string().optional(),
+    });
+
+    const envService = new EnvService(schema, {});
+    expect(envService.get('OPTIONAL_KEY')).toBeUndefined();
+    expect(() => envService.getOrThrow('OPTIONAL_KEY')).toThrowError(
+      /Environment variable "OPTIONAL_KEY" is not defined\./,
+    );
   });
 });

@@ -11,9 +11,8 @@ import { internalModule } from './modules/internal/internal.module.js';
 import { coreRpcRoutes } from './rpc/core.routes.js';
 import { createClient, Client } from '@connectrpc/connect';
 import { createConnectTransport } from '@connectrpc/connect-node';
+import { envService as defaultEnvService, CoreEnvService } from './env.js';
 import { GatewayService, createAuthClientInterceptor } from 'contracts';
-import { z } from 'zod';
-import { Env } from 'env';
 
 export interface BuildCoreServerOptions {
   databaseService?: DatabaseService;
@@ -22,12 +21,14 @@ export interface BuildCoreServerOptions {
   gatewayClient?: Client<typeof GatewayService>;
   orchestrator?: EventOrchestratorService;
   fastifyOptions?: FastifyServerOptions;
+  envService?: CoreEnvService;
 }
 
 export async function buildCoreServer(
   options: BuildCoreServerOptions = {},
 ): Promise<FastifyInstance> {
   const server = Fastify(options.fastifyOptions ?? { logger: true });
+  const env = options.envService ?? defaultEnvService;
 
   const databaseService = options.databaseService ?? new FirestoreDatabaseService();
   await databaseService.connect(server.log);
@@ -37,11 +38,6 @@ export async function buildCoreServer(
 
   let gatewayClient = options.gatewayClient;
   if (!gatewayClient) {
-    const env = new Env(
-      z.object({
-        GATEWAY_URL: z.string().min(1),
-      }),
-    );
     const gatewayUrl = env.get('GATEWAY_URL');
     const transport = createConnectTransport({
       baseUrl: gatewayUrl,
@@ -57,6 +53,7 @@ export async function buildCoreServer(
       prRepository,
       contextRepository,
       gatewayClient,
+      envService: env,
     });
 
   // 1. Health check module
@@ -70,6 +67,7 @@ export async function buildCoreServer(
     prefix: '/api/v1/internal',
     orchestrator,
     contextRepository,
+    envService: env,
   });
 
   // 4. Context lookup module
@@ -82,6 +80,7 @@ export async function buildCoreServer(
   await server.register(reviewModule, {
     prefix: '/api/v1/review',
     orchestrator,
+    envService: env,
   });
 
   return server;

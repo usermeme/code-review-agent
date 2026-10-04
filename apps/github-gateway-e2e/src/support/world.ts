@@ -12,11 +12,14 @@ import {
   IngestPREventResponse,
 } from 'contracts';
 import { Octokit } from '@octokit/rest';
+import { EnvService } from 'env';
+import { gatewayEnvSchema, GatewayEnvService } from '../../../github-gateway/src/env.js';
 
 export class GithubGatewayWorld extends World {
   public app!: FastifyInstance;
   public octokit: MockOctokit;
   public githubService!: GithubService;
+  public envService!: GatewayEnvService;
   public ingestedEvents: IngestPREventRequest[] = [];
   public webhookSecret = 'test-webhook-secret';
   public internalToken = 'test-internal-token';
@@ -29,9 +32,14 @@ export class GithubGatewayWorld extends World {
   }
 
   async initApp(): Promise<void> {
-    process.env['GIT_ADAPTER_WEBHOOK_SECRET'] = this.webhookSecret;
-    process.env['GIT_ADAPTER_TOKEN'] = 'test-github-token';
-    process.env['PUBSUB_SECRET_TOKEN'] = this.internalToken;
+    this.envService = new EnvService(gatewayEnvSchema, {
+      HOST: '0.0.0.0',
+      PORT: '8080',
+      CORE_URL: 'http://localhost:8080',
+      GIT_ADAPTER_WEBHOOK_SECRET: this.webhookSecret,
+      GIT_ADAPTER_TOKEN: 'test-github-token',
+      PUBSUB_SECRET_TOKEN: this.internalToken,
+    });
 
     // 1. Mock in-process ConnectRPC transport for CoreService
     const coreTransport = createRouterTransport((router) => {
@@ -53,12 +61,14 @@ export class GithubGatewayWorld extends World {
     this.githubService = new GithubService({
       octokit: this.octokit as unknown as Octokit,
       coreClient,
+      envService: this.envService,
     });
 
     // 3. Build Fastify Gateway application
     this.app = await buildGatewayServer({
       githubService: this.githubService,
       coreClient,
+      envService: this.envService,
       fastifyOptions: { logger: false },
     });
 

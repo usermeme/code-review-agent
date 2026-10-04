@@ -1,18 +1,11 @@
-import { z } from 'zod';
-import { Env } from 'env';
+import { envService } from './env.js';
 import { buildServer } from './app.js';
 
-const env = new Env(
-  z.object({
-    HOST: z.string().min(1),
-    PORT: z.string().transform(Number),
-  }),
-);
-
-const host = env.get('HOST');
-const port = env.get('PORT');
+const host = envService.get('HOST');
+const port = envService.get('PORT');
 
 const server = await buildServer({
+  envService,
   fastifyOptions: { logger: true },
 });
 

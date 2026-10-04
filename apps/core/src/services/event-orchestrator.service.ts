@@ -10,14 +10,14 @@ import {
 } from 'contracts';
 import { ContextReadyPayload, ReviewResultPayload } from 'shared-types';
 import { Client } from '@connectrpc/connect';
-import { z } from 'zod';
-import { Env } from 'env';
+import { envService as defaultEnvService, CoreEnvService } from '../env.js';
 
 export interface EventOrchestratorDependencies {
   pubsub?: PubSub;
   prRepository: PrRepository;
   contextRepository: ContextRepository;
   gatewayClient: Client<typeof GatewayService>;
+  envService?: CoreEnvService;
 }
 
 export class EventOrchestratorService {
@@ -25,12 +25,14 @@ export class EventOrchestratorService {
   private prRepository: PrRepository;
   private contextRepository: ContextRepository;
   private gatewayClient: Client<typeof GatewayService>;
+  private envService: CoreEnvService;
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub ?? new PubSub();
     this.prRepository = deps.prRepository;
     this.contextRepository = deps.contextRepository;
     this.gatewayClient = deps.gatewayClient;
+    this.envService = deps.envService ?? defaultEnvService;
   }
 
   async ingestPREvent(
@@ -249,24 +251,14 @@ export class EventOrchestratorService {
   }
 
   private async publishContextBuild(data: Record<string, any>): Promise<void> {
-    const env = new Env(
-      z.object({
-        BUILD_CONTEXT_TOPIC: z.string().min(1),
-      }),
-    );
-    const topicName = env.get('BUILD_CONTEXT_TOPIC');
+    const topicName = this.envService.get('BUILD_CONTEXT_TOPIC');
     await this.pubsub.topic(topicName).publishMessage({
       json: data,
     });
   }
 
   private async publishReviewCode(data: Record<string, any>): Promise<void> {
-    const env = new Env(
-      z.object({
-        REVIEW_CODE_TOPIC: z.string().min(1),
-      }),
-    );
-    const topicName = env.get('REVIEW_CODE_TOPIC');
+    const topicName = this.envService.get('REVIEW_CODE_TOPIC');
     await this.pubsub.topic(topicName).publishMessage({
       json: data,
     });

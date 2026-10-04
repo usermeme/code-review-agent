@@ -1,15 +1,15 @@
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 import { PubSub } from '@google-cloud/pubsub';
-import { Env } from 'env';
+import { envService as defaultEnvService, ContextBuilderEnvService } from '../env.js';
 
-export function createStoreContextTool() {
+export interface StoreContextToolDependencies {
+  envService?: ContextBuilderEnvService;
+}
+
+export function createStoreContextTool(deps: StoreContextToolDependencies = {}) {
   const pubsub = new PubSub();
-  const env = new Env(
-    z.object({
-      CONTEXT_READY_TOPIC: z.string().min(1),
-    }),
-  );
+  const env = deps.envService ?? defaultEnvService;
   const topicName = env.get('CONTEXT_READY_TOPIC');
 
   return new FunctionTool({

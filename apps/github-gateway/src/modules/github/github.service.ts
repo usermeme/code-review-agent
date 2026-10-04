@@ -9,14 +9,14 @@ import {
 import { ProcessedWebhookResult } from '../webhooks/interfaces/webhooks.interface.js';
 import { Client } from '@connectrpc/connect';
 import { CoreService, IngestPREventRequest } from 'contracts';
-import { z } from 'zod';
-import { Env } from 'env';
+import { envService as defaultEnvService, GatewayEnvService } from '../../env.js';
 
 export interface GithubServiceDependencies {
   octokit?: Octokit;
   coreClient: Client<typeof CoreService>;
   webhookSecret?: string;
   token?: string;
+  envService?: GatewayEnvService;
 }
 
 export class GithubService {
@@ -26,21 +26,13 @@ export class GithubService {
 
   constructor(deps: GithubServiceDependencies) {
     this.coreClient = deps.coreClient;
+    const env = deps.envService ?? defaultEnvService;
 
-    const env = new Env(
-      z.object({
-        GIT_ADAPTER_WEBHOOK_SECRET: z.string().min(1),
-        GIT_ADAPTER_TOKEN: z.string().min(1),
-      }),
-      {
-        GIT_ADAPTER_WEBHOOK_SECRET:
-          deps.webhookSecret ?? process.env['GIT_ADAPTER_WEBHOOK_SECRET'],
-        GIT_ADAPTER_TOKEN: deps.token ?? process.env['GIT_ADAPTER_TOKEN'],
-      },
-    );
+    const webhookSecret = deps.webhookSecret ?? env.get('GIT_ADAPTER_WEBHOOK_SECRET');
+    const token = deps.token ?? env.get('GIT_ADAPTER_TOKEN');
 
-    this.webhooks = new Webhooks({ secret: env.get('GIT_ADAPTER_WEBHOOK_SECRET') });
-    this.octokit = deps.octokit ?? new Octokit({ auth: env.get('GIT_ADAPTER_TOKEN') });
+    this.webhooks = new Webhooks({ secret: webhookSecret });
+    this.octokit = deps.octokit ?? new Octokit({ auth: token });
   }
 
   private get octokitClient(): Octokit {

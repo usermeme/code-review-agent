@@ -14,6 +14,8 @@ import {
   PostReviewResponse,
 } from 'contracts';
 import { PubSub } from '@google-cloud/pubsub';
+import { EnvService } from 'env';
+import { coreEnvSchema, CoreEnvService } from '../../../core/src/env.js';
 
 export class CoreWorld extends World {
   public app!: FastifyInstance;
@@ -22,6 +24,7 @@ export class CoreWorld extends World {
   public prRepository: PrRepository;
   public contextRepository: ContextRepository;
   public orchestrator!: EventOrchestratorService;
+  public envService!: CoreEnvService;
   public postedReviews: PostReviewRequest[] = [];
   public coreRpcClient!: Client<typeof CoreService>;
   public pubsubSecretToken = 'secure-pubsub-token';
@@ -36,9 +39,14 @@ export class CoreWorld extends World {
   }
 
   async initApp(): Promise<void> {
-    process.env['PUBSUB_SECRET_TOKEN'] = this.pubsubSecretToken;
-    process.env['BUILD_CONTEXT_TOPIC'] = 'build-context-topic';
-    process.env['REVIEW_CODE_TOPIC'] = 'review-code-topic';
+    this.envService = new EnvService(coreEnvSchema, {
+      HOST: '0.0.0.0',
+      PORT: '8080',
+      GATEWAY_URL: 'http://localhost:8080',
+      PUBSUB_SECRET_TOKEN: this.pubsubSecretToken,
+      BUILD_CONTEXT_TOPIC: 'build-context-topic',
+      REVIEW_CODE_TOPIC: 'review-code-topic',
+    });
 
     // 1. Mock in-process GatewayService transport
     const gatewayTransport = createRouterTransport((router) => {
@@ -62,6 +70,7 @@ export class CoreWorld extends World {
       prRepository: this.prRepository,
       contextRepository: this.contextRepository,
       gatewayClient,
+      envService: this.envService,
     });
 
     // 3. Build Core Fastify application
@@ -71,6 +80,7 @@ export class CoreWorld extends World {
       contextRepository: this.contextRepository,
       gatewayClient,
       orchestrator: this.orchestrator,
+      envService: this.envService,
       fastifyOptions: { logger: false },
     });
 

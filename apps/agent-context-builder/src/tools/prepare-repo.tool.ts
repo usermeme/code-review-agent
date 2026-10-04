@@ -4,6 +4,7 @@ import { STATE } from '../constants/state-keys.constant.js';
 import { downloadRepoArchive } from '../services/archive.service.js';
 import { collectFiles, buildChunks } from '../services/chunker.service.js';
 import { collectAgentDocs } from '../services/agent-docs.service.js';
+import { envService as defaultEnvService, ContextBuilderEnvService } from '../env.js';
 
 export interface PrepareRepoPayload {
   provider: string;
@@ -16,7 +17,13 @@ export interface PrepareRepoPayload {
   isIncrementalUpdate?: boolean;
 }
 
-export function createPrepareRepoTool() {
+export interface PrepareRepoToolDependencies {
+  envService?: ContextBuilderEnvService;
+}
+
+export function createPrepareRepoTool(deps: PrepareRepoToolDependencies = {}) {
+  const env = deps.envService ?? defaultEnvService;
+
   return new FunctionTool({
     name: 'prepare_repository',
     description:
@@ -44,7 +51,7 @@ export function createPrepareRepoTool() {
         input.prNumber
       ) {
         // INCREMENTAL MODE: Fetch only changed files using GitHub API
-        const token = input.token || process.env.GIT_ADAPTER_TOKEN;
+        const token = input.token || env.get('GIT_ADAPTER_TOKEN');
         const headers: Record<string, string> = token
           ? { Authorization: `Bearer ${token}` }
           : {};
@@ -88,7 +95,7 @@ export function createPrepareRepoTool() {
         return `Incremental update prepared successfully. Found ${chunks.length} chunks of changed files.`;
       } else {
         // BASELINE MODE: Download repository archive via Git provider API
-        const token = input.token || process.env.GIT_ADAPTER_TOKEN;
+        const token = input.token || env.get('GIT_ADAPTER_TOKEN');
         const ref = input.ref || 'main';
 
         const snapshot = await downloadRepoArchive({
