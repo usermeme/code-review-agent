@@ -95,71 +95,74 @@ Deploying `code-review-agent` requires:
 2. **Pub/Sub Topics**: `build-context-topic`, `context-ready-topic`, `review-code-topic`, `review-result-topic`.
 3. **Secret Storage**: GitHub Webhook Secret, GitHub Personal Access Token, and Gemini API Key (or Vertex AI IAM credentials).
 
-### 1. Setup Topics & Firestore (Using gcloud CLI)
+### 1. Setup Infrastructure via Script
+
+Run the automated setup script to enable APIs, create the native Firestore database, and provision the Pub/Sub topics:
 
 ```bash
 export PROJECT_ID="YOUR_GCP_PROJECT_ID"
 export REGION="us-central1"
-export OWNER="<your-github-username>"
+export PUBSUB_SECRET_TOKEN="$(openssl rand -hex 20)"
 
-# Enable Required Google Cloud APIs
-gcloud services enable run.googleapis.com pubsub.googleapis.com firestore.googleapis.com secretmanager.googleapis.com
-
-# Create Firestore Database (Native mode)
-gcloud firestore databases create --location="$REGION" --type=firestore-native || true
-
-# Create Pub/Sub Topics
-gcloud pubsub topics create build-context-topic || true
-gcloud pubsub topics create context-ready-topic || true
-gcloud pubsub topics create review-code-topic || true
-gcloud pubsub topics create review-result-topic || true
+bash scripts/setup-gcp-infra.sh
 ```
 
-### 2. Deploy Prebuilt Containers to Cloud Run
+### 2. Automated Deployment via GitHub Actions (Recommended)
 
-Deploy directly using the published container images from `ghcr.io`:
+This repository includes a turnkey GitHub Actions workflow ([`.github/workflows/deploy-cloudrun.yml`](.github/workflows/deploy-cloudrun.yml)) that builds and deploys all 3 services and automatically wires push subscriptions to the live Gateway URL.
+
+#### Required GitHub Secrets
+In your GitHub repository, navigate to **Settings** → **Secrets and variables** → **Actions** and add:
+
+| Secret | Description |
+| :--- | :--- |
+| `GCP_PROJECT_ID` | Your Google Cloud Project ID |
+| `GCP_SA_KEY` | JSON key of a Service Account with Cloud Run Admin, Pub/Sub Editor, and Service Account User roles |
+| `GEMINI_API_KEY` | API Key from [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| `GIT_ADAPTER_TOKEN` | GitHub Personal Access Token (classic) with `repo` permissions |
+| `GIT_ADAPTER_WEBHOOK_SECRET` | Secret string for verifying incoming webhooks |
+| `PUBSUB_SECRET_TOKEN` | Secret string matching your `setup-gcp-infra.sh` token |
+
+Once configured, either:
+- Push code to `main` (deploys after container release builds succeed).
+- Or click **Actions** → **Deploy to Google Cloud Run** → **Run workflow**.
+
+### 3. Manual Deployment (Alternative via gcloud CLI)
+
+If deploying manually from your terminal:
 
 ```bash
+export PROJECT_ID="YOUR_GCP_PROJECT_ID"
+export REGION="us-central1"
+export OWNER="<your-github-username-or-org>"
+
 # 1. Deploy Gateway
 gcloud run deploy gateway-service \
   --image "ghcr.io/$OWNER/code-review-agent-gateway:latest" \
   --region "$REGION" \
+  --project "$PROJECT_ID" \
   --allow-unauthenticated \
-  --set-env-vars "APP_NAME=gateway,BUILD_CONTEXT_TOPIC=build-context-topic,CONTEXT_READY_TOPIC=context-ready-topic,REVIEW_CODE_TOPIC=review-code-topic,PUBSUB_SECRET_TOKEN=YOUR_INTERNAL_SECRET,GIT_ADAPTER=github,GIT_ADAPTER_WEBHOOK_SECRET=YOUR_WEBHOOK_SECRET,GIT_ADAPTER_TOKEN=ghp_YOUR_TOKEN"
+  --set-env-vars "APP_NAME=gateway,PORT=8080,HOST=0.0.0.0,BUILD_CONTEXT_TOPIC=build-context-topic,CONTEXT_READY_TOPIC=context-ready-topic,REVIEW_CODE_TOPIC=review-code-topic,REVIEW_RESULT_TOPIC=review-result-topic,GIT_ADAPTER=github,GIT_ADAPTER_WEBHOOK_SECRET=$GIT_ADAPTER_WEBHOOK_SECRET,GIT_ADAPTER_TOKEN=$GIT_ADAPTER_TOKEN,PUBSUB_SECRET_TOKEN=$PUBSUB_SECRET_TOKEN"
 
-# Capture Gateway URL
-GATEWAY_URL=$(gcloud run services describe gateway-service --region "$REGION" --format 'value(status.url)')
+# 2. Capture Gateway URL and wire push subscriptions
+GATEWAY_URL=$(gcloud run services describe gateway-service --region "$REGION" --project "$PROJECT_ID" --format 'value(status.url)')
+GATEWAY_URL="$GATEWAY_URL" PUBSUB_SECRET_TOKEN="$PUBSUB_SECRET_TOKEN" bash scripts/setup-gcp-infra.sh
 
-# 2. Deploy Context Builder Agent
+# 3. Deploy Context Builder Agent
 gcloud run deploy agent-context-builder \
   --image "ghcr.io/$OWNER/code-review-agent-context-builder:latest" \
   --region "$REGION" \
-  --set-env-vars "GATEWAY_URL=$GATEWAY_URL,REVIEW_MODEL=gemini-2.5-flash,GEMINI_API_KEY=YOUR_GEMINI_KEY,GOOGLE_GENAI_USE_VERTEXAI=0"
+  --project "$PROJECT_ID" \
+  --no-allow-unauthenticated \
+  --set-env-vars "GATEWAY_URL=$GATEWAY_URL,REVIEW_MODEL=gemini-2.5-flash,GEMINI_API_KEY=$GEMINI_API_KEY,GOOGLE_GENAI_USE_VERTEXAI=0"
 
-# 3. Deploy Code Reviewer Agent
+# 4. Deploy Code Reviewer Agent
 gcloud run deploy agent-code-reviewer \
   --image "ghcr.io/$OWNER/code-review-agent-code-reviewer:latest" \
   --region "$REGION" \
-  --set-env-vars "GATEWAY_URL=$GATEWAY_URL,REVIEW_MODEL=gemini-2.5-flash,GEMINI_API_KEY=YOUR_GEMINI_KEY,GOOGLE_GENAI_USE_VERTEXAI=0"
-```
-
-> [!TIP]
-> In production, use Google Secret Manager references (`--set-secrets`) or your cloud orchestrator's secret store instead of plain environment variables.
-
-### 3. Wire Pub/Sub Push Subscriptions
-
-Create the push subscriptions delivering events to your Gateway:
-
-```bash
-gcloud pubsub subscriptions create context-ready-sub \
-  --topic=context-ready-topic \
-  --push-endpoint="$GATEWAY_URL/api/v1/internal/pubsub?token=YOUR_INTERNAL_SECRET" \
-  --ack-deadline=600
-
-gcloud pubsub subscriptions create review-result-sub \
-  --topic=review-result-topic \
-  --push-endpoint="$GATEWAY_URL/api/v1/review/results?token=YOUR_INTERNAL_SECRET" \
-  --ack-deadline=600
+  --project "$PROJECT_ID" \
+  --no-allow-unauthenticated \
+  --set-env-vars "GATEWAY_URL=$GATEWAY_URL,REVIEW_MODEL=gemini-2.5-flash,GEMINI_API_KEY=$GEMINI_API_KEY,GOOGLE_GENAI_USE_VERTEXAI=0"
 ```
 
 ### 4. Configure GitHub Webhook
