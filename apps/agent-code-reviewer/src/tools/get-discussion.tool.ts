@@ -2,7 +2,7 @@ import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
 export function createGetDiscussionTool(
-  gatewayUrl: string,
+  coreUrl: string,
   repo?: string,
   limit: number = 5,
 ) {
@@ -17,7 +17,7 @@ export function createGetDiscussionTool(
         .string()
         .optional()
         .describe(
-          'The repository to search in (e.g. owner/repo). If not provided, relies on the Gateway default.',
+          'The repository to search in (e.g. owner/repo). If not provided, relies on the Core default.',
         ),
       query: z
         .string()
@@ -28,7 +28,7 @@ export function createGetDiscussionTool(
     execute: async ({ repo: queryRepo, query }) => {
       const targetRepo = queryRepo || repo;
       const response = await fetch(
-        `${gatewayUrl}/api/discussions/search?repo=${encodeURIComponent(targetRepo || '')}&query=${encodeURIComponent(query)}&limit=${limit}`,
+        `${coreUrl}/api/discussions/search?repo=${encodeURIComponent(targetRepo || '')}&query=${encodeURIComponent(query)}&limit=${limit}`,
         {
           method: 'GET',
           headers: {

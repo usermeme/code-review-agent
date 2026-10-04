@@ -23,9 +23,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - app: gateway
-            image: code-review-agent-gateway
-            file: apps/gateway/Dockerfile
+          - app: github-gateway
+            image: code-review-agent-github-gateway
+            file: apps/github-gateway/Dockerfile
+          - app: core
+            image: code-review-agent-core
+            file: apps/core/Dockerfile
           - app: agent-context-builder
             image: code-review-agent-context-builder
             file: apps/agent-context-builder/Dockerfile

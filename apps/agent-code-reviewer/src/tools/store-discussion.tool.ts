@@ -2,7 +2,7 @@ import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
 export function createStoreDiscussionTool(
-  gatewayUrl: string,
+  coreUrl: string,
   repo?: string,
   prNumber?: number,
 ) {
@@ -16,13 +16,13 @@ export function createStoreDiscussionTool(
         .string()
         .optional()
         .describe(
-          'The repository to store the note for (e.g. owner/repo). If not provided, relies on the Gateway default.',
+          'The repository to store the note for (e.g. owner/repo). If not provided, relies on the Core default.',
         ),
       prNumber: z
         .number()
         .optional()
         .describe(
-          'The PR number to store the note for. If not provided, relies on the Gateway default.',
+          'The PR number to store the note for. If not provided, relies on the Core default.',
         ),
       body: z.string().describe('The note to remember'),
       filePath: z
@@ -39,7 +39,7 @@ export function createStoreDiscussionTool(
       const targetRepo = queryRepo || repo;
       const targetPrNumber = queryPrNumber || prNumber;
 
-      const response = await fetch(`${gatewayUrl}/api/discussions`, {
+      const response = await fetch(`${coreUrl}/api/discussions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package gateway.v1;
+
+message ReviewComment {
+  string path = 1;
+  int32 position = 2;
+  string body = 3;
+}
+
+message PostReviewRequest {
+  string provider = 1;
+  string owner = 2;
+  string repo = 3;
+  int32 pr_number = 4;
+  string summary = 5;
+  string ticket_coverage = 6;
+  repeated ReviewComment comments = 7;
+}
+
+message PostReviewResponse {
+  bool success = 1;
+  string message = 2;
+  string review_id = 3;
+}
+
+service GatewayService {
+  rpc PostReview (PostReviewRequest) returns (PostReviewResponse);
+}

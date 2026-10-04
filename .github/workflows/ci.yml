@@ -54,8 +54,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - app: gateway
-            file: apps/gateway/Dockerfile
+          - app: github-gateway
+            file: apps/github-gateway/Dockerfile
+          - app: core
+            file: apps/core/Dockerfile
           - app: agent-context-builder
             file: apps/agent-context-builder/Dockerfile
           - app: agent-code-reviewer

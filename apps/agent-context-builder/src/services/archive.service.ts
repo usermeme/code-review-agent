@@ -43,7 +43,7 @@ export async function downloadRepoArchive(params: {
   }
 
   const ref = params.ref || 'main';
-  const token = params.token || process.env.GIT_ADAPTER_TOKEN;
+  const token = params.token;
 
   const dir = await mkdtemp(join(tmpdir(), 'repoctx-'));
 

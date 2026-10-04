@@ -2,11 +2,11 @@ import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 import { STATE } from '../constants/state-keys.constant.js';
 
-export function createFetchContextTool(gatewayUrl: string) {
+export function createFetchContextTool(coreUrl: string) {
   return new FunctionTool({
     name: 'fetch_context',
     description:
-      'Fetches the existing baseline repository context from the Gateway.',
+      'Fetches the existing baseline repository context from the Core service.',
     parameters: z.object({
       provider: z.string(),
       owner: z.string(),
@@ -17,14 +17,14 @@ export function createFetchContextTool(gatewayUrl: string) {
       const repoKey = `${input.provider}:${input.owner}:${input.repo}:0`;
 
       try {
-        const response = await fetch(`${gatewayUrl}/api/v1/context/${repoKey}`);
+        const response = await fetch(`${coreUrl}/api/v1/context/${repoKey}`);
 
         if (!response.ok) {
           if (response.status === 404) {
             ctx.state[STATE.existingContext] = null;
             return `No existing context found for ${repoKey}.`;
           }
-          throw new Error(`Gateway returned status: ${response.status}`);
+          throw new Error(`Core service returned status: ${response.status}`);
         }
 
         const data = await response.json();

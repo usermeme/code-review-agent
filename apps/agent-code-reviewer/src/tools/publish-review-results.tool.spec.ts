@@ -6,6 +6,8 @@ describe('publishReviewResultsTool', () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
+    process.env['REVIEW_RESULT_TOPIC'] = 'review-result-topic';
+    process.env['PUBSUB_SECRET_TOKEN'] = 'test-token';
     vi.restoreAllMocks();
   });
 

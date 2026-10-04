@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package core.v1;
+
+message PRMeta {
+  string provider = 1;
+  string owner = 2;
+  string repo = 3;
+  int32 pr_number = 4;
+  string title = 5;
+  string author = 6;
+  string branch = 7;
+  string body = 8;
+  string html_url = 9;
+  string action = 10;
+  string clone_url = 11;
+  string base_ref = 12;
+  bool is_incremental_update = 13;
+}
+
+message IngestPREventRequest {
+  PRMeta pr_meta = 1;
+  string diff = 2;
+  repeated string changed_files = 3;
+}
+
+message IngestPREventResponse {
+  bool success = 1;
+  string status = 2;
+  string message = 3;
+}
+
+service CoreService {
+  rpc IngestPREvent (IngestPREventRequest) returns (IngestPREventResponse);
+}

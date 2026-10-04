@@ -5,6 +5,11 @@ export interface PRState {
   prNumber: number;
   status: 'queued' | 'building_context' | 'reviewing' | 'completed' | 'failed';
   updatedAt: Date;
+  diff?: string;
+  changedFiles?: string[];
+  prMeta?: Record<string, any>;
+  summary?: string;
+  error?: string;
 }
 
 export interface ContextReadyPayload {

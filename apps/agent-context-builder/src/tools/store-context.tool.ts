@@ -4,7 +4,10 @@ import { PubSub } from '@google-cloud/pubsub';
 
 export function createStoreContextTool() {
   const pubsub = new PubSub();
-  const topicName = process.env.CONTEXT_READY_TOPIC || 'context-ready-topic';
+  const topicName = process.env['CONTEXT_READY_TOPIC'];
+  if (!topicName) {
+    throw new Error('CONTEXT_READY_TOPIC environment variable is required');
+  }
 
   return new FunctionTool({
     name: 'store_context',

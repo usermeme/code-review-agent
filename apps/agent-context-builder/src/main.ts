@@ -5,10 +5,9 @@ import { createSummarizeRepoTool } from './tools/summarize-chunks.tool.js';
 import { createSynthesizeContextTool } from './tools/synthesize-context.tool.js';
 import { createFetchContextTool } from './tools/fetch-context.tool.js';
 
-// 1. Fetch required environment variable config at initialization
-const gatewayUrl = process.env.GATEWAY_URL;
-if (!gatewayUrl) {
-  throw new Error('GATEWAY_URL environment variable is required');
+const coreUrl = process.env.CORE_URL;
+if (!coreUrl) {
+  throw new Error('CORE_URL environment variable is required');
 }
 
 const reviewModel = process.env.REVIEW_MODEL;
@@ -18,7 +17,7 @@ if (!reviewModel) {
 
 // 2. Setup the tools
 const tools = {
-  fetchContext: createFetchContextTool(gatewayUrl),
+  fetchContext: createFetchContextTool(coreUrl),
   prepareRepo: createPrepareRepoTool(),
   summarizeChunks: createSummarizeRepoTool({ model: reviewModel }),
   synthesizeContext: createSynthesizeContextTool({ model: reviewModel }),

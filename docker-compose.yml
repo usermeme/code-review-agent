@@ -4,19 +4,36 @@ services:
   gateway:
     build:
       context: .
-      dockerfile: apps/gateway/Dockerfile
+      dockerfile: apps/github-gateway/Dockerfile
     ports:
       - "3000:8080"
     environment:
       - PORT=8080
       - HOST=0.0.0.0
+      - CORE_URL=http://core:8080
       - GIT_ADAPTER=github
       - GIT_ADAPTER_WEBHOOK_SECRET=local-webhook-secret
       - GIT_ADAPTER_TOKEN=dummy-token
       - PUBSUB_SECRET_TOKEN=local-internal-secret
+    depends_on:
+      - core
+
+  core:
+    build:
+      context: .
+      dockerfile: apps/core/Dockerfile
+    ports:
+      - "3001:8080"
+    environment:
+      - PORT=8080
+      - HOST=0.0.0.0
+      - GATEWAY_URL=http://gateway:8080
+      - PUBSUB_SECRET_TOKEN=local-internal-secret
       - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-project
+      - BUILD_CONTEXT_TOPIC=build-context-topic
+      - REVIEW_CODE_TOPIC=review-code-topic
     depends_on:
       - firestore-emulator
       - pubsub-emulator
@@ -29,13 +46,14 @@ services:
       - "8001:8080"
     environment:
       - PORT=8080
-      - GATEWAY_URL=http://gateway:8080
+      - CORE_URL=http://core:8080
       - REVIEW_MODEL=gemini-2.5-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-project
+      - CONTEXT_READY_TOPIC=context-ready-topic
     depends_on:
-      - gateway
+      - core
       - pubsub-emulator
 
   agent-code-reviewer:
@@ -46,13 +64,15 @@ services:
       - "8002:8080"
     environment:
       - PORT=8080
-      - GATEWAY_URL=http://gateway:8080
+      - CORE_URL=http://core:8080
       - REVIEW_MODEL=gemini-2.5-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-project
+      - REVIEW_RESULT_TOPIC=review-result-topic
+      - PUBSUB_SECRET_TOKEN=local-internal-secret
     depends_on:
-      - gateway
+      - core
       - pubsub-emulator
 
   firestore-emulator:
@@ -71,7 +91,7 @@ services:
     image: google/cloud-sdk:emulators
     depends_on:
       - pubsub-emulator
-      - gateway
+      - core
     entrypoint: >
       bash -c "
         echo 'Waiting for PubSub emulator...';
@@ -81,12 +101,12 @@ services:
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/context-ready-topic;
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/review-code-topic;
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/review-result-topic;
-        echo 'Creating PubSub push subscriptions...';
+        echo 'Creating PubSub push subscriptions to Core...';
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/subscriptions/context-ready-sub \
           -H 'Content-Type: application/json' \
-          -d '{\"topic\":\"projects/local-project/topics/context-ready-topic\",\"pushConfig\":{\"pushEndpoint\":\"http://gateway:8080/api/v1/internal/pubsub?token=local-internal-secret\"}}';
+          -d '{\"topic\":\"projects/local-project/topics/context-ready-topic\",\"pushConfig\":{\"pushEndpoint\":\"http://core:8080/api/v1/internal/pubsub?token=local-internal-secret\"}}';
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/subscriptions/review-result-sub \
           -H 'Content-Type: application/json' \
-          -d '{\"topic\":\"projects/local-project/topics/review-result-topic\",\"pushConfig\":{\"pushEndpoint\":\"http://gateway:8080/api/v1/review/results?token=local-internal-secret\"}}';
+          -d '{\"topic\":\"projects/local-project/topics/review-result-topic\",\"pushConfig\":{\"pushEndpoint\":\"http://core:8080/api/v1/internal/review-results?token=local-internal-secret\"}}';
         echo 'PubSub emulator initialized successfully.';
       "

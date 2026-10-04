@@ -14,14 +14,21 @@ export const findingItemSchema = z.object({
   suggestion: z.string().optional().describe('Concrete code suggestion replacement, if any'),
 });
 
-export function createPublishReviewResultsTool(gatewayUrl: string) {
+export function createPublishReviewResultsTool(coreUrl: string) {
   const pubsub = new PubSub();
-  const topicName = process.env.REVIEW_RESULT_TOPIC || 'review-result-topic';
+  const topicName = process.env['REVIEW_RESULT_TOPIC'];
+  if (!topicName) {
+    throw new Error('REVIEW_RESULT_TOPIC environment variable is required');
+  }
+  const token = process.env['PUBSUB_SECRET_TOKEN'];
+  if (!token) {
+    throw new Error('PUBSUB_SECRET_TOKEN environment variable is required');
+  }
 
   return new FunctionTool({
     name: 'publishReviewResults',
     description:
-      'Publishes the final review findings and comments to the Gateway so they can be posted inline to GitHub.',
+      'Publishes the final review findings and comments so they can be processed and posted inline to GitHub.',
     parameters: z.object({
       provider: z.string().optional().describe('Git provider (e.g. github)'),
       owner: z.string().optional().describe('Repository owner'),
@@ -72,11 +79,10 @@ export function createPublishReviewResultsTool(gatewayUrl: string) {
         });
         return `Successfully published ${comments.length} review findings and summary to Pub/Sub topic "${topicName}".`;
       } catch (pubsubError) {
-        console.warn('Pub/Sub publish failed, attempting direct HTTP POST to gateway...', pubsubError);
+        console.warn('Pub/Sub publish failed, attempting direct HTTP POST to Core...', pubsubError);
 
-        // 2. Direct HTTP fallback to Gateway review results endpoint
-        const token = process.env.PUBSUB_SECRET_TOKEN;
-        const endpoint = `${gatewayUrl}/api/v1/review/results${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+        // 2. Direct HTTP fallback to Core review results endpoint
+        const endpoint = `${coreUrl}/api/v1/review/results?token=${encodeURIComponent(token)}`;
 
         const httpResponse = await fetch(endpoint, {
           method: 'POST',

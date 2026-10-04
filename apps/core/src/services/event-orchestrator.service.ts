@@ -1,0 +1,268 @@
+import { PubSub } from '@google-cloud/pubsub';
+import { FastifyBaseLogger } from 'fastify';
+import { PrRepository } from '../modules/database/repositories/pr.repository.js';
+import { ContextRepository } from '../modules/database/repositories/context.repository.js';
+import {
+  IngestPREventRequest,
+  IngestPREventResponse,
+  GatewayService,
+  PostReviewRequest,
+} from 'contracts';
+import { ContextReadyPayload, ReviewResultPayload } from 'shared-types';
+import { Client } from '@connectrpc/connect';
+
+export interface EventOrchestratorDependencies {
+  pubsub?: PubSub;
+  prRepository: PrRepository;
+  contextRepository: ContextRepository;
+  gatewayClient: Client<typeof GatewayService>;
+}
+
+export class EventOrchestratorService {
+  private pubsub: PubSub;
+  private prRepository: PrRepository;
+  private contextRepository: ContextRepository;
+  private gatewayClient: Client<typeof GatewayService>;
+
+  constructor(deps: EventOrchestratorDependencies) {
+    this.pubsub = deps.pubsub ?? new PubSub();
+    this.prRepository = deps.prRepository;
+    this.contextRepository = deps.contextRepository;
+    this.gatewayClient = deps.gatewayClient;
+  }
+
+  async ingestPREvent(
+    req: IngestPREventRequest,
+    logger?: FastifyBaseLogger,
+  ): Promise<IngestPREventResponse> {
+    const meta = req.prMeta;
+    if (!meta) {
+      return {
+        success: false,
+        status: 'error',
+        message: 'Missing PR metadata',
+      } as IngestPREventResponse;
+    }
+
+    const { provider, owner, repo, prNumber, action } = meta;
+    const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
+    const baselineKey = `${provider}:${owner}:${repo}:0`;
+
+    logger?.info(`[Core] Ingesting PR event: ${action} for ${prKey}`);
+
+    // If PR is merged, trigger incremental context update
+    if (action === 'closed' && meta.isIncrementalUpdate) {
+      logger?.info(`[Core] PR merged event for ${prKey}. Triggering incremental context build.`);
+      await this.publishContextBuild({
+        provider,
+        owner,
+        repo,
+        prNumber,
+        action: 'merged',
+        htmlUrl: meta.htmlUrl,
+        cloneUrl: meta.cloneUrl,
+        ref: meta.baseRef,
+        isIncrementalUpdate: true,
+      });
+
+      return {
+        success: true,
+        status: 'queued',
+        message: 'Incremental context build triggered for merged PR',
+      } as IngestPREventResponse;
+    }
+
+    if (
+      action === 'opened' ||
+      action === 'synchronize' ||
+      action === 'reopened' ||
+      action === 'review_requested' ||
+      action === 'manual_trigger'
+    ) {
+      // Check if baseline context exists in Firestore
+      const baselineContext = await this.contextRepository.getContext(baselineKey);
+
+      if (baselineContext) {
+        logger?.info(`[Core] Baseline context found for ${baselineKey}. Triggering review directly.`);
+        await this.prRepository.updatePRStatus(prKey, {
+          provider,
+          owner,
+          repo,
+          prNumber,
+          status: 'reviewing',
+          diff: req.diff,
+          changedFiles: req.changedFiles,
+        });
+
+        await this.publishReviewCode({
+          prMeta: {
+            provider,
+            owner,
+            repo,
+            number: prNumber,
+            title: meta.title,
+            author: meta.author,
+            branch: meta.branch,
+            body: meta.body,
+          },
+          diff: req.diff,
+          changedFiles: req.changedFiles.join('\n'),
+          baselineContext: baselineContext.summary,
+        });
+
+        return {
+          success: true,
+          status: 'reviewing',
+          message: 'Review triggered directly with existing baseline context',
+        } as IngestPREventResponse;
+      }
+
+      // No baseline context found. Save pending PR info and trigger full context build
+      logger?.info(`[Core] No baseline context found for ${baselineKey}. Queuing PR and building context.`);
+      await this.prRepository.updatePRStatus(prKey, {
+        provider,
+        owner,
+        repo,
+        prNumber,
+        status: 'queued',
+        diff: req.diff,
+        changedFiles: req.changedFiles,
+        prMeta: {
+          title: meta.title,
+          author: meta.author,
+          branch: meta.branch,
+          body: meta.body,
+        },
+      });
+
+      await this.publishContextBuild({
+        provider,
+        owner,
+        repo,
+        prNumber,
+        action,
+        htmlUrl: meta.htmlUrl,
+        cloneUrl: meta.cloneUrl || `https://github.com/${owner}/${repo}.git`,
+        ref: meta.baseRef || 'main',
+        isIncrementalUpdate: false,
+      });
+
+      return {
+        success: true,
+        status: 'queued',
+        message: 'Context build triggered',
+      } as IngestPREventResponse;
+    }
+
+    return {
+      success: true,
+      status: 'ignored',
+      message: `Ignored action: ${action}`,
+    } as IngestPREventResponse;
+  }
+
+  async handleContextReady(
+    payload: ContextReadyPayload,
+    logger?: FastifyBaseLogger,
+  ): Promise<void> {
+    const { provider, owner, repo, prNumber, summary } = payload;
+    const baselineKey = `${provider}:${owner}:${repo}:0`;
+
+    logger?.info(`[Core] Context is ready. Saving to baseline: ${baselineKey}`);
+    await this.contextRepository.saveContext(baselineKey, { summary });
+
+    if (prNumber === 0) {
+      logger?.info(`[Core] Baseline context updated for repo: ${baselineKey}`);
+      return;
+    }
+
+    // Context is ready for pending PR! Now trigger the review!
+    const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
+    const pendingPR = await this.prRepository.getPRStatus(prKey);
+
+    logger?.info(`[Core] Triggering code review for ${prKey}`);
+    await this.prRepository.updatePRStatus(prKey, { status: 'reviewing' });
+
+    await this.publishReviewCode({
+      prMeta: {
+        provider,
+        owner,
+        repo,
+        number: prNumber,
+        title: pendingPR?.prMeta?.['title'] || '',
+        author: pendingPR?.prMeta?.['author'] || '',
+        branch: pendingPR?.prMeta?.['branch'] || '',
+        body: pendingPR?.prMeta?.['body'] || '',
+      },
+      diff: pendingPR?.diff || '',
+      changedFiles: Array.isArray(pendingPR?.changedFiles)
+        ? pendingPR.changedFiles.join('\n')
+        : '',
+      baselineContext: summary,
+    });
+  }
+
+  async handleReviewResults(
+    payload: ReviewResultPayload,
+    logger?: FastifyBaseLogger,
+  ): Promise<void> {
+    const { provider, owner, repo, prNumber, summary, ticketCoverage, comments } = payload;
+    const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
+
+    logger?.info(`[Core] Handling review results for ${prKey}. Calling Gateway to post review.`);
+
+    try {
+      const reviewReq: PostReviewRequest = {
+        $typeName: 'gateway.v1.PostReviewRequest',
+        provider,
+        owner,
+        repo,
+        prNumber,
+        summary: summary || '',
+        ticketCoverage: ticketCoverage || '',
+        comments: (comments || []).map((c) => ({
+          $typeName: 'gateway.v1.ReviewComment',
+          path: c.path,
+          position: c.position,
+          body: c.body,
+        })),
+      };
+
+      const res = await this.gatewayClient.postReview(reviewReq);
+      logger?.info(`[Core] Gateway postReview responded: success=${res.success}, reviewId=${res.reviewId}`);
+
+      await this.prRepository.updatePRStatus(prKey, {
+        status: res.success ? 'completed' : 'failed',
+        summary,
+        error: res.success ? undefined : res.message,
+      });
+    } catch (error) {
+      logger?.error(`[Core] Failed to post review via Gateway: ${error}`);
+      await this.prRepository.updatePRStatus(prKey, {
+        status: 'failed',
+        error: String(error),
+      });
+      throw error;
+    }
+  }
+
+  private async publishContextBuild(data: Record<string, any>): Promise<void> {
+    const topicName = process.env['BUILD_CONTEXT_TOPIC'];
+    if (!topicName) {
+      throw new Error('BUILD_CONTEXT_TOPIC environment variable is required');
+    }
+    await this.pubsub.topic(topicName).publishMessage({
+      json: data,
+    });
+  }
+
+  private async publishReviewCode(data: Record<string, any>): Promise<void> {
+    const topicName = process.env['REVIEW_CODE_TOPIC'];
+    if (!topicName) {
+      throw new Error('REVIEW_CODE_TOPIC environment variable is required');
+    }
+    await this.pubsub.topic(topicName).publishMessage({
+      json: data,
+    });
+  }
+}
