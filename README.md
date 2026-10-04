@@ -168,6 +168,7 @@ version: '3.8'
 services:
   github-gateway:
     image: ghcr.io/<owner>/code-review-agent-github-gateway:latest
+    restart: always
     ports:
       - "80:8080"
     environment:
@@ -183,6 +184,7 @@ services:
 
   core:
     image: ghcr.io/<owner>/code-review-agent-core:latest
+    restart: always
     environment:
       - PORT=8080
       - HOST=0.0.0.0
@@ -201,6 +203,7 @@ services:
 
   agent-context-builder:
     image: ghcr.io/<owner>/code-review-agent-context-builder:latest
+    restart: always
     environment:
       - PORT=8080
       - CORE_URL=http://core:8080
@@ -211,6 +214,7 @@ services:
 
   agent-code-reviewer:
     image: ghcr.io/<owner>/code-review-agent-code-reviewer:latest
+    restart: always
     environment:
       - PORT=8080
       - CORE_URL=http://core:8080
@@ -262,6 +266,34 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --set-env-vars "PORT=8080,HOST=0.0.0.0,CORE_URL=${{ vars.CORE_URL }},GIT_ADAPTER_WEBHOOK_SECRET=${{ secrets.GIT_ADAPTER_WEBHOOK_SECRET }},GIT_ADAPTER_TOKEN=${{ secrets.GIT_ADAPTER_TOKEN }},PUBSUB_SECRET_TOKEN=${{ secrets.PUBSUB_SECRET_TOKEN }}"
+```
+
+#### Example 3: Deploying via SSH / Docker Compose in Private Repo
+
+```yaml
+name: Deploy via SSH
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Remote Host via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: GEMINI_API_KEY,GIT_ADAPTER_TOKEN,GIT_ADAPTER_WEBHOOK_SECRET,PUBSUB_SECRET_TOKEN
+          script: |
+            cd /opt/code-review-agent-deploy
+            git pull origin main
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
 ```
 
 ---
