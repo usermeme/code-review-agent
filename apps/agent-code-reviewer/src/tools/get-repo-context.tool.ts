@@ -23,14 +23,18 @@ export function createGetRepoContextTool(coreUrl: string) {
     }),
     execute: async (args, toolContext) => {
       const target = (args || {}) as Partial<RepoContextTarget>;
-      const meta = toolContext.state.get<Partial<RepoContextTarget>>(STATE.prMeta);
+      const meta = toolContext.state.get<Partial<RepoContextTarget>>(
+        STATE.prMeta,
+      );
 
       const provider = target.provider || meta?.provider || 'github';
       const owner = target.owner || meta?.owner || '';
       const repo = target.repo || meta?.repo || '';
 
       if (!owner || !repo) {
-        throw new Error('Owner and repository name are required to fetch repository context.');
+        throw new Error(
+          'Owner and repository name are required to fetch repository context.',
+        );
       }
 
       // We always fetch the baseline repository context (prNumber = 0)
@@ -48,15 +52,12 @@ export function createGetRepoContextTool(coreUrl: string) {
         }
       } else {
         // Fallback: fetch from Core HTTP API
-        const response = await fetch(
-          `${coreUrl}/api/v1/context/${prKey}`,
-          {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+        const response = await fetch(`${coreUrl}/api/v1/context/${prKey}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
           },
-        );
+        });
 
         if (!response.ok) {
           throw new Error(

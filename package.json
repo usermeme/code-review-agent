@@ -4,6 +4,8 @@
   "license": "MIT",
   "scripts": {
     "lint": "nx run-many -t lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "nx run-many -t typecheck",
     "test": "nx run-many -t test",
     "e2e": "nx run-many -t e2e",

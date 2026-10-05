@@ -1,15 +1,17 @@
 import { Interceptor, ConnectError, Code } from '@connectrpc/connect';
 
 export interface AuthInterceptorOptions {
-  token?: string;
+  token: string;
 }
 
-export function createAuthInterceptor(options: AuthInterceptorOptions): Interceptor {
+export function createAuthInterceptor(
+  options: AuthInterceptorOptions,
+): Interceptor {
   return (next) => async (req) => {
-    const expectedToken = options.token ?? process.env['PUBSUB_SECRET_TOKEN'];
+    const expectedToken = options.token;
     if (!expectedToken) {
       throw new ConnectError(
-        'Server misconfiguration: PUBSUB_SECRET_TOKEN is required for internal auth',
+        'Server misconfiguration: INTERNAL_AUTH_TOKEN is required for internal auth',
         Code.Internal,
       );
     }
@@ -24,12 +26,14 @@ export function createAuthInterceptor(options: AuthInterceptorOptions): Intercep
   };
 }
 
-export function createAuthClientInterceptor(options: AuthInterceptorOptions): Interceptor {
+export function createAuthClientInterceptor(
+  options: AuthInterceptorOptions,
+): Interceptor {
   return (next) => async (req) => {
-    const token = options.token ?? process.env['PUBSUB_SECRET_TOKEN'];
+    const token = options.token;
     if (!token) {
       throw new ConnectError(
-        'Client misconfiguration: PUBSUB_SECRET_TOKEN is required for internal client auth',
+        'Client misconfiguration: INTERNAL_AUTH_TOKEN is required for internal client auth',
         Code.FailedPrecondition,
       );
     }

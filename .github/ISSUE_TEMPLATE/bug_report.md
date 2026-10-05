@@ -1,9 +1,9 @@
 ---
 name: Bug Report
 about: Create a report to help us improve the AI Code Review Agent
-title: "[BUG] "
-labels: ["bug"]
-assignees: ""
+title: '[BUG] '
+labels: ['bug']
+assignees: ''
 ---
 
 ## 🐛 Bug Description
@@ -31,6 +31,7 @@ assignees: ""
 ## 📄 Logs / Error Output
 
 <!-- Paste any terminal logs or stack traces here. -->
+
 ```
 <insert logs here>
 ```

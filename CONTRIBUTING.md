@@ -35,12 +35,14 @@ Before you begin, ensure you have the following installed on your machine:
 ## 🚀 Getting Started
 
 1. **Fork and Clone the Repository**:
+
    ```bash
    git clone https://github.com/<your-username>/code-review-agent.git
    cd code-review-agent
    ```
 
 2. **Enable Corepack and Install Dependencies**:
+
    ```bash
    corepack enable
    pnpm install --frozen-lockfile
@@ -63,13 +65,13 @@ Before you begin, ensure you have the following installed on your machine:
 
 We prefer using Nx commands via `pnpm`:
 
-| Command | Description |
-|---|---|
-| `pnpm run typecheck` | Run TypeScript compiler typecheck across all 5 projects |
-| `pnpm run lint` | Run ESLint across all projects |
-| `pnpm run test` | Run Vitest unit tests for both agents |
-| `pnpm run e2e` | Run Cucumber BDD end-to-end tests for Gateway |
-| `pnpm run build` | Build production bundles for all 3 apps via `@nx/esbuild` |
+| Command              | Description                                               |
+| -------------------- | --------------------------------------------------------- |
+| `pnpm run typecheck` | Run TypeScript compiler typecheck across all 5 projects   |
+| `pnpm run lint`      | Run ESLint across all projects                            |
+| `pnpm run test`      | Run Vitest unit tests for both agents                     |
+| `pnpm run e2e`       | Run Cucumber BDD end-to-end tests for Gateway             |
+| `pnpm run build`     | Build production bundles for all 3 apps via `@nx/esbuild` |
 
 ### Running a Specific App or Library
 
@@ -91,6 +93,7 @@ pnpm nx build agent-context-builder --prod
 We enforce high test coverage and regression testing across the monorepo:
 
 ### 1. BDD E2E Testing (`gateway-e2e`)
+
 All gateway routing, webhook signature verification, Firestore tracking, Pub/Sub ingestion, and Git adapter behavior are tested with **Cucumber** and Gherkin features located in `apps/gateway-e2e/src/features/`.
 
 - When adding or changing gateway endpoints, write a `.feature` scenario first.
@@ -98,7 +101,9 @@ All gateway routing, webhook signature verification, Firestore tracking, Pub/Sub
 - Test doubles (in-memory database, mock Octokit, mock Pub/Sub) reside in `apps/gateway-e2e/src/support/doubles/`.
 
 ### 2. Unit Testing (`vitest`)
+
 Agent tools and services are tested using **Vitest**:
+
 - Unit test files are colocated with source code using the `.spec.ts` naming convention.
 - Ensure all mocked calls clean up properly (`vi.restoreAllMocks()`).
 
@@ -117,6 +122,7 @@ docker compose up --build
 ```
 
 The stack exposes:
+
 - **Gateway**: `http://localhost:3000` (`/healthz` health check)
 - **Agent Context Builder**: `http://localhost:8001`
 - **Agent Code Reviewer**: `http://localhost:8002`

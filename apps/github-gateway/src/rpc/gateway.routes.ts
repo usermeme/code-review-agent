@@ -4,15 +4,17 @@ import { ConnectRouter } from '@connectrpc/connect';
 import { GatewayService, createAuthInterceptor } from 'contracts';
 import { GithubService } from '../modules/github/github.service.js';
 
+import type { GatewayEnvService } from '../env.js';
+
 export interface GatewayRpcPluginOptions {
   githubService: GithubService;
+  envService: GatewayEnvService;
 }
 
-export const gatewayRpcRoutes: FastifyPluginAsync<GatewayRpcPluginOptions> = async (
-  fastify,
-  options,
-) => {
-  const { githubService } = options;
+export const gatewayRpcRoutes: FastifyPluginAsync<
+  GatewayRpcPluginOptions
+> = async (fastify, options) => {
+  const { githubService, envService } = options;
 
   await fastify.register(fastifyConnectPlugin, {
     routes(router: ConnectRouter) {
@@ -40,6 +42,8 @@ export const gatewayRpcRoutes: FastifyPluginAsync<GatewayRpcPluginOptions> = asy
         },
       });
     },
-    interceptors: [createAuthInterceptor({})],
+    interceptors: [
+      createAuthInterceptor({ token: envService.get('INTERNAL_AUTH_TOKEN') }),
+    ],
   });
 };

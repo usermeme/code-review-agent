@@ -2,24 +2,21 @@ import { Given, When, Then, DataTable } from '@cucumber/cucumber';
 import assert from 'node:assert/strict';
 import { CoreWorld } from '../support/world.js';
 
-Given(
-  'PR {string} is queued',
-  async function (this: CoreWorld, prKey: string) {
-    const parts = prKey.split(':');
-    const provider = parts[0];
-    const owner = parts[1];
-    const repo = parts[2];
-    const prNumber = parseInt(parts[3], 10);
+Given('PR {string} is queued', async function (this: CoreWorld, prKey: string) {
+  const parts = prKey.split(':');
+  const provider = parts[0];
+  const owner = parts[1];
+  const repo = parts[2];
+  const prNumber = parseInt(parts[3], 10);
 
-    await this.prRepository.updatePRStatus(prKey, {
-      provider,
-      owner,
-      repo,
-      prNumber,
-      status: 'queued',
-    });
-  },
-);
+  await this.prRepository.updatePRStatus(prKey, {
+    provider,
+    owner,
+    repo,
+    prNumber,
+    status: 'queued',
+  });
+});
 
 When(
   'a PubSub push message arrives at {string} with token {string} containing:',

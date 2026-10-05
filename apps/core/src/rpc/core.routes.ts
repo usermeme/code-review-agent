@@ -4,15 +4,18 @@ import { ConnectRouter } from '@connectrpc/connect';
 import { CoreService, createAuthInterceptor } from 'contracts';
 import { EventOrchestratorService } from '../services/event-orchestrator.service.js';
 
+import type { CoreEnvService } from '../env.js';
+
 export interface CoreRpcPluginOptions {
   orchestrator: EventOrchestratorService;
+  envService: CoreEnvService;
 }
 
 export const coreRpcRoutes: FastifyPluginAsync<CoreRpcPluginOptions> = async (
   fastify,
   options,
 ) => {
-  const { orchestrator } = options;
+  const { orchestrator, envService } = options;
 
   await fastify.register(fastifyConnectPlugin, {
     routes(router: ConnectRouter) {
@@ -22,6 +25,8 @@ export const coreRpcRoutes: FastifyPluginAsync<CoreRpcPluginOptions> = async (
         },
       });
     },
-    interceptors: [createAuthInterceptor({})],
+    interceptors: [
+      createAuthInterceptor({ token: envService.get('INTERNAL_AUTH_TOKEN') }),
+    ],
   });
 };

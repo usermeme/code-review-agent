@@ -56,7 +56,9 @@ export class EventOrchestratorService {
 
     // If PR is merged, trigger incremental context update
     if (action === 'closed' && meta.isIncrementalUpdate) {
-      logger?.info(`[Core] PR merged event for ${prKey}. Triggering incremental context build.`);
+      logger?.info(
+        `[Core] PR merged event for ${prKey}. Triggering incremental context build.`,
+      );
       await this.publishContextBuild({
         provider,
         owner,
@@ -84,10 +86,13 @@ export class EventOrchestratorService {
       action === 'manual_trigger'
     ) {
       // Check if baseline context exists in Firestore
-      const baselineContext = await this.contextRepository.getContext(baselineKey);
+      const baselineContext =
+        await this.contextRepository.getContext(baselineKey);
 
       if (baselineContext) {
-        logger?.info(`[Core] Baseline context found for ${baselineKey}. Triggering review directly.`);
+        logger?.info(
+          `[Core] Baseline context found for ${baselineKey}. Triggering review directly.`,
+        );
         await this.prRepository.updatePRStatus(prKey, {
           provider,
           owner,
@@ -122,7 +127,9 @@ export class EventOrchestratorService {
       }
 
       // No baseline context found. Save pending PR info and trigger full context build
-      logger?.info(`[Core] No baseline context found for ${baselineKey}. Queuing PR and building context.`);
+      logger?.info(
+        `[Core] No baseline context found for ${baselineKey}. Queuing PR and building context.`,
+      );
       await this.prRepository.updatePRStatus(prKey, {
         provider,
         owner,
@@ -210,10 +217,20 @@ export class EventOrchestratorService {
     payload: ReviewResultPayload,
     logger?: FastifyBaseLogger,
   ): Promise<void> {
-    const { provider, owner, repo, prNumber, summary, ticketCoverage, comments } = payload;
+    const {
+      provider,
+      owner,
+      repo,
+      prNumber,
+      summary,
+      ticketCoverage,
+      comments,
+    } = payload;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
 
-    logger?.info(`[Core] Handling review results for ${prKey}. Calling Gateway to post review.`);
+    logger?.info(
+      `[Core] Handling review results for ${prKey}. Calling Gateway to post review.`,
+    );
 
     try {
       const reviewReq: PostReviewRequest = {
@@ -233,7 +250,9 @@ export class EventOrchestratorService {
       };
 
       const res = await this.gatewayClient.postReview(reviewReq);
-      logger?.info(`[Core] Gateway postReview responded: success=${res.success}, reviewId=${res.reviewId}`);
+      logger?.info(
+        `[Core] Gateway postReview responded: success=${res.success}, reviewId=${res.reviewId}`,
+      );
 
       await this.prRepository.updatePRStatus(prKey, {
         status: res.success ? 'completed' : 'failed',

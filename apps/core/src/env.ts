@@ -5,7 +5,7 @@ export const coreEnvSchema = z.object({
   HOST: z.string().min(1),
   PORT: z.string().transform(Number),
   GATEWAY_URL: z.string().min(1),
-  PUBSUB_SECRET_TOKEN: z.string().min(1),
+  INTERNAL_AUTH_TOKEN: z.string().min(1),
   BUILD_CONTEXT_TOPIC: z.string().min(1),
   REVIEW_CODE_TOPIC: z.string().min(1),
   CONTEXT_READY_TOPIC: z.string().optional(),

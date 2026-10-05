@@ -29,11 +29,14 @@ export async function buildCoreServer(
 ): Promise<FastifyInstance> {
   const server = Fastify(options.fastifyOptions ?? { logger: true });
 
-  const databaseService = options.databaseService ?? new FirestoreDatabaseService();
+  const databaseService =
+    options.databaseService ?? new FirestoreDatabaseService();
   await databaseService.connect(server.log);
 
-  const prRepository = options.prRepository ?? new PrRepository(databaseService);
-  const contextRepository = options.contextRepository ?? new ContextRepository(databaseService);
+  const prRepository =
+    options.prRepository ?? new PrRepository(databaseService);
+  const contextRepository =
+    options.contextRepository ?? new ContextRepository(databaseService);
 
   let gatewayClient = options.gatewayClient;
   if (!gatewayClient) {
@@ -41,7 +44,11 @@ export async function buildCoreServer(
     const transport = createConnectTransport({
       baseUrl: gatewayUrl,
       httpVersion: '1.1',
-      interceptors: [createAuthClientInterceptor({})],
+      interceptors: [
+        createAuthClientInterceptor({
+          token: options.envService.get('INTERNAL_AUTH_TOKEN'),
+        }),
+      ],
     });
     gatewayClient = createClient(GatewayService, transport);
   }
@@ -59,13 +66,15 @@ export async function buildCoreServer(
   await server.register(healthModule);
 
   // 2. ConnectRPC service module
-  await server.register(coreRpcRoutes, { orchestrator });
+  await server.register(coreRpcRoutes, {
+    orchestrator,
+    envService: options.envService,
+  });
 
   // 3. Internal PubSub callbacks module
   await server.register(internalModule, {
     prefix: '/api/v1/internal',
     orchestrator,
-    contextRepository,
     envService: options.envService,
   });
 

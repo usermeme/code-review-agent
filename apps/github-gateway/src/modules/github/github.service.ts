@@ -27,8 +27,9 @@ export class GithubService {
   constructor(deps: GithubServiceDependencies) {
     this.coreClient = deps.coreClient;
 
-    const webhookSecret = deps.webhookSecret ?? deps.envService.get('GIT_ADAPTER_WEBHOOK_SECRET');
-    const token = deps.token ?? deps.envService.get('GIT_ADAPTER_TOKEN');
+    const webhookSecret =
+      deps.webhookSecret ?? deps.envService.get('GITHUB_WEBHOOK_SECRET');
+    const token = deps.token ?? deps.envService.get('GITHUB_TOKEN');
 
     this.webhooks = new Webhooks({ secret: webhookSecret });
     this.octokit = deps.octokit ?? new Octokit({ auth: token });
@@ -111,7 +112,9 @@ export class GithubService {
     }
 
     if (action === 'closed' && payload.pull_request?.merged) {
-      logger.info(`Received GitHub PR merged event: ${payload.pull_request.html_url}`);
+      logger.info(
+        `Received GitHub PR merged event: ${payload.pull_request.html_url}`,
+      );
 
       const req: IngestPREventRequest = {
         $typeName: 'core.v1.IngestPREventRequest',
@@ -147,7 +150,9 @@ export class GithubService {
       action === 'reopened' ||
       action === 'review_requested'
     ) {
-      logger.info(`Received GitHub PR event: ${action} for ${payload.pull_request?.html_url}`);
+      logger.info(
+        `Received GitHub PR event: ${action} for ${payload.pull_request?.html_url}`,
+      );
 
       const diff = await this.fetchPRDiff(owner, repo, prNumber);
       const changedFiles = await this.fetchChangedFiles(owner, repo, prNumber);
@@ -191,7 +196,9 @@ export class GithubService {
     if (action === 'created' && payload.issue?.pull_request) {
       const commentBody = payload.comment?.body || '';
       if (commentBody.includes('/review')) {
-        logger.info(`Received GitHub manual /review trigger on ${payload.issue.html_url}`);
+        logger.info(
+          `Received GitHub manual /review trigger on ${payload.issue.html_url}`,
+        );
 
         const owner = payload.repository?.owner?.login || '';
         const repo = payload.repository?.name || '';
@@ -204,7 +211,11 @@ export class GithubService {
         });
 
         const diff = await this.fetchPRDiff(owner, repo, prNumber);
-        const changedFiles = await this.fetchChangedFiles(owner, repo, prNumber);
+        const changedFiles = await this.fetchChangedFiles(
+          owner,
+          repo,
+          prNumber,
+        );
 
         const req: IngestPREventRequest = {
           $typeName: 'core.v1.IngestPREventRequest',
@@ -220,7 +231,9 @@ export class GithubService {
             body: prData.data.body || '',
             htmlUrl: prData.data.html_url,
             action: 'manual_trigger',
-            cloneUrl: prData.data.base?.repo?.clone_url || `https://github.com/${owner}/${repo}.git`,
+            cloneUrl:
+              prData.data.base?.repo?.clone_url ||
+              `https://github.com/${owner}/${repo}.git`,
             baseRef: prData.data.base?.ref || 'main',
             isIncrementalUpdate: false,
           },
@@ -236,9 +249,12 @@ export class GithubService {
   }
 
   async postReview(options: PostReviewOptions): Promise<PostReviewResult> {
-    const { owner, repo, prNumber, summary, ticketCoverage, comments } = options;
+    const { owner, repo, prNumber, summary, ticketCoverage, comments } =
+      options;
 
-    console.log(`[GithubService] Posting top-level review summary to ${owner}/${repo}#${prNumber}`);
+    console.log(
+      `[GithubService] Posting top-level review summary to ${owner}/${repo}#${prNumber}`,
+    );
 
     let body = `## 🤖 AI Code Review Summary\n\n${summary}`;
     if (ticketCoverage) {

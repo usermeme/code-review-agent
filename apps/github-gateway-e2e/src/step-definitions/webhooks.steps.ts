@@ -171,7 +171,10 @@ Then(
     repo: string,
     prNumber: number,
   ) {
-    assert(this.ingestedEvents.length > 0, 'No IngestPREvent RPC calls received by Core');
+    assert(
+      this.ingestedEvents.length > 0,
+      'No IngestPREvent RPC calls received by Core',
+    );
     const event = this.ingestedEvents.find(
       (e) =>
         e.prMeta?.action === action &&
@@ -193,16 +196,24 @@ Then(
     const lastEvent = this.ingestedEvents[this.ingestedEvents.length - 1];
     assert(lastEvent, 'No IngestPREvent found');
     assert(lastEvent.diff.length > 0, 'Forwarded event missing diff');
-    assert(lastEvent.changedFiles.length > 0, 'Forwarded event missing changed files');
+    assert(
+      lastEvent.changedFiles.length > 0,
+      'Forwarded event missing changed files',
+    );
   },
 );
 
 Then(
   'Core receives an IngestPREvent RPC with isIncrementalUpdate true and prNumber {int}',
   function (this: GithubGatewayWorld, prNumber: number) {
-    assert(this.ingestedEvents.length > 0, 'No IngestPREvent RPC calls received');
+    assert(
+      this.ingestedEvents.length > 0,
+      'No IngestPREvent RPC calls received',
+    );
     const event = this.ingestedEvents.find(
-      (e) => e.prMeta?.prNumber === prNumber && e.prMeta?.isIncrementalUpdate === true,
+      (e) =>
+        e.prMeta?.prNumber === prNumber &&
+        e.prMeta?.isIncrementalUpdate === true,
     );
     assert(event, `Expected incremental update event for PR #${prNumber}`);
   },
@@ -211,11 +222,17 @@ Then(
 Then(
   'Core receives an IngestPREvent RPC with action {string} and prNumber {int}',
   function (this: GithubGatewayWorld, action: string, prNumber: number) {
-    assert(this.ingestedEvents.length > 0, 'No IngestPREvent RPC calls received');
+    assert(
+      this.ingestedEvents.length > 0,
+      'No IngestPREvent RPC calls received',
+    );
     const event = this.ingestedEvents.find(
       (e) => e.prMeta?.action === action && e.prMeta?.prNumber === prNumber,
     );
-    assert(event, `Expected IngestPREvent with action=${action} on PR #${prNumber}`);
+    assert(
+      event,
+      `Expected IngestPREvent with action=${action} on PR #${prNumber}`,
+    );
   },
 );
 

@@ -6,7 +6,11 @@ import { MockPubSub } from './doubles/mock-pubsub.js';
 import { PrRepository } from '../../../core/src/modules/database/repositories/pr.repository.js';
 import { ContextRepository } from '../../../core/src/modules/database/repositories/context.repository.js';
 import { EventOrchestratorService } from '../../../core/src/services/event-orchestrator.service.js';
-import { createClient, createRouterTransport, Client } from '@connectrpc/connect';
+import {
+  createClient,
+  createRouterTransport,
+  Client,
+} from '@connectrpc/connect';
 import {
   CoreService,
   GatewayService,
@@ -27,7 +31,7 @@ export class CoreWorld extends World {
   public envService!: CoreEnvService;
   public postedReviews: PostReviewRequest[] = [];
   public coreRpcClient!: Client<typeof CoreService>;
-  public pubsubSecretToken = 'secure-pubsub-token';
+  public internalAuthToken = 'secure-pubsub-token';
   public lastResponse?: LightMyRequestResponse;
 
   constructor(options: IWorldOptions) {
@@ -43,7 +47,7 @@ export class CoreWorld extends World {
       HOST: '0.0.0.0',
       PORT: '8080',
       GATEWAY_URL: 'http://localhost:8080',
-      PUBSUB_SECRET_TOKEN: this.pubsubSecretToken,
+      INTERNAL_AUTH_TOKEN: this.internalAuthToken,
       BUILD_CONTEXT_TOPIC: 'build-context-topic',
       REVIEW_CODE_TOPIC: 'review-code-topic',
     });
@@ -51,7 +55,9 @@ export class CoreWorld extends World {
     // 1. Mock in-process GatewayService transport
     const gatewayTransport = createRouterTransport((router) => {
       router.service(GatewayService, {
-        postReview: async (req: PostReviewRequest): Promise<PostReviewResponse> => {
+        postReview: async (
+          req: PostReviewRequest,
+        ): Promise<PostReviewResponse> => {
           this.postedReviews.push(req);
           return {
             $typeName: 'gateway.v1.PostReviewResponse',
