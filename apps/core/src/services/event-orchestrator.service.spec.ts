@@ -17,16 +17,18 @@ describe('EventOrchestratorService', () => {
       HOST: '0.0.0.0',
       PORT: '8080',
       GATEWAY_URL: 'http://localhost:8080',
-      PUBSUB_SECRET_TOKEN: 'test-token',
+      INTERNAL_AUTH_TOKEN: 'test-token',
       BUILD_CONTEXT_TOPIC: 'build-context-topic',
       REVIEW_CODE_TOPIC: 'review-code-topic',
     });
     publishedMessages = [];
     mockPubSub = {
       topic: vi.fn().mockImplementation((topicName: string) => ({
-        publishMessage: vi.fn().mockImplementation(async ({ json }: { json: any }) => {
-          publishedMessages.push({ topic: topicName, data: json });
-        }),
+        publishMessage: vi
+          .fn()
+          .mockImplementation(async ({ json }: { json: any }) => {
+            publishedMessages.push({ topic: topicName, data: json });
+          }),
       })),
     };
 
@@ -136,7 +138,9 @@ describe('EventOrchestratorService', () => {
     );
     expect(publishedMessages).toHaveLength(1);
     expect(publishedMessages[0].topic).toBe('review-code-topic');
-    expect(publishedMessages[0].data.baselineContext).toContain('microservices');
+    expect(publishedMessages[0].data.baselineContext).toContain(
+      'microservices',
+    );
   });
 
   it('posts review to gateway via ConnectRPC when review results arrive', async () => {

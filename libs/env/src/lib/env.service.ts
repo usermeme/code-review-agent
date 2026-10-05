@@ -11,7 +11,9 @@ export class EnvService<T extends ZodType<any, any, any>> {
     const result = schema.safeParse(source);
     if (!result.success) {
       const issues = result.error.issues
-        .map((issue) => `  - ${issue.path.join('.') || 'root'}: ${issue.message}`)
+        .map(
+          (issue) => `  - ${issue.path.join('.') || 'root'}: ${issue.message}`,
+        )
         .join('\n');
       throw new Error(`Environment validation failed:\n${issues}`);
     }

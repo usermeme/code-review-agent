@@ -4,12 +4,16 @@ import { parseRepoCoordinates } from './archive.service.js';
 describe('archive.service', () => {
   describe('parseRepoCoordinates', () => {
     it('parses owner and repo from standard https clone url', () => {
-      const coords = parseRepoCoordinates('https://github.com/my-org/my-repo.git');
+      const coords = parseRepoCoordinates(
+        'https://github.com/my-org/my-repo.git',
+      );
       expect(coords).toEqual({ owner: 'my-org', repo: 'my-repo' });
     });
 
     it('parses owner and repo without .git suffix', () => {
-      const coords = parseRepoCoordinates('https://github.com/usermeme/code-review-agent');
+      const coords = parseRepoCoordinates(
+        'https://github.com/usermeme/code-review-agent',
+      );
       expect(coords).toEqual({ owner: 'usermeme', repo: 'code-review-agent' });
     });
 

@@ -93,12 +93,12 @@ code-review-agent/
 
 Every merge to `main` and version tag (`v*.*.*`) automatically publishes multi-architecture (`linux/amd64`, `linux/arm64`) images to GitHub Container Registry (GHCR):
 
-| Service | Container Image | Description |
-| :--- | :--- | :--- |
-| **GitHub Gateway** | `ghcr.io/<owner>/code-review-agent-github-gateway:latest` | Stateless webhook receiver & ConnectRPC GitHub egress |
-| **Core Service** | `ghcr.io/<owner>/code-review-agent-core:latest` | Firestore database state, workflow orchestration, ConnectRPC |
-| **Context Builder** | `ghcr.io/<owner>/code-review-agent-context-builder:latest` | ADK agent for repo indexing & baseline context |
-| **Code Reviewer** | `ghcr.io/<owner>/code-review-agent-code-reviewer:latest` | ADK agent for diff analysis & inline suggestions |
+| Service             | Container Image                                            | Description                                                  |
+| :------------------ | :--------------------------------------------------------- | :----------------------------------------------------------- |
+| **GitHub Gateway**  | `ghcr.io/<owner>/code-review-agent-github-gateway:latest`  | Stateless webhook receiver & ConnectRPC GitHub egress        |
+| **Core Service**    | `ghcr.io/<owner>/code-review-agent-core:latest`            | Firestore database state, workflow orchestration, ConnectRPC |
+| **Context Builder** | `ghcr.io/<owner>/code-review-agent-context-builder:latest` | ADK agent for repo indexing & baseline context               |
+| **Code Reviewer**   | `ghcr.io/<owner>/code-review-agent-code-reviewer:latest`   | ADK agent for diff analysis & inline suggestions             |
 
 ---
 
@@ -116,14 +116,15 @@ cp .env.example .env
 
 # Edit .env with your Google Gemini API key and GitHub credentials:
 # - GEMINI_API_KEY
-# - GIT_ADAPTER_TOKEN
-# - GIT_ADAPTER_WEBHOOK_SECRET
+# - GITHUB_TOKEN
+# - GITHUB_WEBHOOK_SECRET
 
 # 3. Start the entire stack
 docker compose up --build
 ```
 
 The services will be available locally:
+
 - **GitHub Gateway**: `http://localhost:3000` (Healthcheck: `http://localhost:3000/healthz`)
 - **Core Service**: `http://localhost:3001` (Healthcheck: `http://localhost:3001/healthz`)
 - **Firestore Emulator**: `localhost:8081`
@@ -138,6 +139,7 @@ The services will be available locally:
 This codebase is intentionally designed as an open-source / application repository that publishes versioned container images. We strongly recommend deploying via a **separate private repository** (e.g. `code-review-agent-deploy` or internal GitOps / infrastructure repo).
 
 This approach provides:
+
 1. **Security & Credential Isolation**: Keep cloud infrastructure credentials, service account keys, GitHub tokens, and `.env` secrets private.
 2. **Infrastructure Independence**: Deploy to Google Cloud Run, GKE / Kubernetes (Helm / ArgoCD), AWS ECS, or self-hosted Docker Compose without modifying application code.
 3. **Immutable Releases**: Pin deployments to specific immutable semantic tags (e.g. `:v1.2.0` or `:sha-<commit>`) published by this repository.
@@ -220,7 +222,7 @@ jobs:
             --platform managed \
             --no-allow-unauthenticated \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,BUILD_CONTEXT_TOPIC=build-context-topic,CONTEXT_READY_TOPIC=context-ready-topic,REVIEW_CODE_TOPIC=review-code-topic,REVIEW_RESULT_TOPIC=review-result-topic,PUBSUB_SECRET_TOKEN=${{ secrets.PUBSUB_SECRET_TOKEN }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,BUILD_CONTEXT_TOPIC=build-context-topic,CONTEXT_READY_TOPIC=context-ready-topic,REVIEW_CODE_TOPIC=review-code-topic,REVIEW_RESULT_TOPIC=review-result-topic,INTERNAL_AUTH_TOKEN=${{ secrets.INTERNAL_AUTH_TOKEN }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
           CORE_URL=$(gcloud run services describe core-service --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
           echo "CORE_URL=${CORE_URL}" >> $GITHUB_ENV
@@ -237,7 +239,7 @@ jobs:
             --cpu 2 \
             --timeout 600s \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},CONTEXT_READY_TOPIC=context-ready-topic,GIT_ADAPTER_TOKEN=${{ secrets.GIT_ADAPTER_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},CONTEXT_READY_TOPIC=context-ready-topic,GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
           CONTEXT_BUILDER_URL=$(gcloud run services describe agent-context-builder --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
           echo "CONTEXT_BUILDER_URL=${CONTEXT_BUILDER_URL}" >> $GITHUB_ENV
@@ -254,7 +256,7 @@ jobs:
             --cpu 2 \
             --timeout 600s \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},REVIEW_RESULT_TOPIC=review-result-topic,PUBSUB_SECRET_TOKEN=${{ secrets.PUBSUB_SECRET_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},REVIEW_RESULT_TOPIC=review-result-topic,INTERNAL_AUTH_TOKEN=${{ secrets.INTERNAL_AUTH_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
           CODE_REVIEWER_URL=$(gcloud run services describe agent-code-reviewer --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
           echo "CODE_REVIEWER_URL=${CODE_REVIEWER_URL}" >> $GITHUB_ENV
@@ -268,7 +270,7 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,CORE_URL=${{ env.CORE_URL }},GIT_ADAPTER_WEBHOOK_SECRET=${{ secrets.GIT_ADAPTER_WEBHOOK_SECRET }},GIT_ADAPTER_TOKEN=${{ secrets.GIT_ADAPTER_TOKEN }},PUBSUB_SECRET_TOKEN=${{ secrets.PUBSUB_SECRET_TOKEN }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,CORE_URL=${{ env.CORE_URL }},GITHUB_WEBHOOK_SECRET=${{ secrets.GITHUB_WEBHOOK_SECRET }},GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},INTERNAL_AUTH_TOKEN=${{ secrets.INTERNAL_AUTH_TOKEN }}"
 
           GATEWAY_URL=$(gcloud run services describe github-gateway --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
           echo "GATEWAY_URL=${GATEWAY_URL}" >> $GITHUB_ENV
@@ -297,11 +299,11 @@ jobs:
           # Subscription 2: context-ready-topic -> core
           gcloud pubsub subscriptions create context-ready-sub \
             --topic=context-ready-topic \
-            --push-endpoint="${{ env.CORE_URL }}/api/v1/internal/pubsub?token=${{ secrets.PUBSUB_SECRET_TOKEN }}" \
+            --push-endpoint="${{ env.CORE_URL }}/api/v1/internal/pubsub?token=${{ secrets.INTERNAL_AUTH_TOKEN }}" \
             --push-auth-service-account="${SA_EMAIL}" \
             --ack-deadline=60 || \
           gcloud pubsub subscriptions update context-ready-sub \
-            --push-endpoint="${{ env.CORE_URL }}/api/v1/internal/pubsub?token=${{ secrets.PUBSUB_SECRET_TOKEN }}"
+            --push-endpoint="${{ env.CORE_URL }}/api/v1/internal/pubsub?token=${{ secrets.INTERNAL_AUTH_TOKEN }}"
 
           # Subscription 3: review-code-topic -> agent-code-reviewer
           gcloud pubsub subscriptions create review-code-sub \
@@ -315,11 +317,11 @@ jobs:
           # Subscription 4: review-result-topic -> core
           gcloud pubsub subscriptions create review-result-sub \
             --topic=review-result-topic \
-            --push-endpoint="${{ env.CORE_URL }}/api/v1/review/results?token=${{ secrets.PUBSUB_SECRET_TOKEN }}" \
+            --push-endpoint="${{ env.CORE_URL }}/api/v1/review/results?token=${{ secrets.INTERNAL_AUTH_TOKEN }}" \
             --push-auth-service-account="${SA_EMAIL}" \
             --ack-deadline=60 || \
           gcloud pubsub subscriptions update review-result-sub \
-            --push-endpoint="${{ env.CORE_URL }}/api/v1/review/results?token=${{ secrets.PUBSUB_SECRET_TOKEN }}"
+            --push-endpoint="${{ env.CORE_URL }}/api/v1/review/results?token=${{ secrets.INTERNAL_AUTH_TOKEN }}"
 ```
 
 ---
@@ -505,14 +507,14 @@ services:
     image: ghcr.io/<owner>/code-review-agent-github-gateway:latest
     restart: always
     ports:
-      - "80:8080"
+      - '80:8080'
     environment:
       - PORT=8080
       - HOST=0.0.0.0
       - CORE_URL=http://core:8080
-      - GIT_ADAPTER_WEBHOOK_SECRET=${GIT_ADAPTER_WEBHOOK_SECRET}
-      - GIT_ADAPTER_TOKEN=${GIT_ADAPTER_TOKEN}
-      - PUBSUB_SECRET_TOKEN=${PUBSUB_SECRET_TOKEN}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
     depends_on:
       - core
 
@@ -523,7 +525,7 @@ services:
       - PORT=8080
       - HOST=0.0.0.0
       - GATEWAY_URL=http://github-gateway:8080
-      - PUBSUB_SECRET_TOKEN=${PUBSUB_SECRET_TOKEN}
+      - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
       - BUILD_CONTEXT_TOPIC=build-context-topic
       - CONTEXT_READY_TOPIC=context-ready-topic
       - REVIEW_CODE_TOPIC=review-code-topic
@@ -544,7 +546,7 @@ services:
       - REVIEW_MODEL=gemini-2.5-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - CONTEXT_READY_TOPIC=context-ready-topic
-      - GIT_ADAPTER_TOKEN=${GIT_ADAPTER_TOKEN}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
 
   agent-code-reviewer:
@@ -556,7 +558,7 @@ services:
       - REVIEW_MODEL=gemini-2.5-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - REVIEW_RESULT_TOPIC=review-result-topic
-      - PUBSUB_SECRET_TOKEN=${PUBSUB_SECRET_TOKEN}
+      - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
 ```
 
@@ -566,10 +568,11 @@ services:
 
 If you want an AI agent (such as Antigravity, Claude, Cursor, or Devin) to build and populate your private deployment repository from scratch, copy and paste this prompt:
 
-````markdown
+```markdown
 Please create a new private GitOps deployment repository named `code-review-agent-deploy` for the `code-review-agent` system.
 
 The application publishes 4 multi-arch container images to GitHub Container Registry (GHCR):
+
 - `ghcr.io/<owner>/code-review-agent-github-gateway:latest`
 - `ghcr.io/<owner>/code-review-agent-core:latest`
 - `ghcr.io/<owner>/code-review-agent-context-builder:latest`
@@ -582,9 +585,9 @@ Please generate the complete, production-ready repository with the following fil
    - Updates Core with the deployed Gateway URL.
    - Configures the 4 Pub/Sub push subscriptions with OIDC authentication using service account `code-review-agent-sa@<project>.iam.gserviceaccount.com`:
      - `build-context-sub` -> Agent Context Builder root (`/`)
-     - `context-ready-sub` -> Core endpoint (`/api/v1/internal/pubsub?token=${PUBSUB_SECRET_TOKEN}`)
+     - `context-ready-sub` -> Core endpoint (`/api/v1/internal/pubsub?token=${INTERNAL_AUTH_TOKEN}`)
      - `review-code-sub` -> Agent Code Reviewer root (`/`)
-     - `review-result-sub` -> Core endpoint (`/api/v1/review/results?token=${PUBSUB_SECRET_TOKEN}`)
+     - `review-result-sub` -> Core endpoint (`/api/v1/review/results?token=${INTERNAL_AUTH_TOKEN}`)
 
 2. `scripts/setup-gcp-infra.sh`:
    - Idempotent bash script to enable GCP APIs (`run`, `pubsub`, `firestore`, `iam`).
@@ -600,11 +603,11 @@ Please generate the complete, production-ready repository with the following fil
    - Production Docker Compose setup running all 4 services referencing the GHCR images.
 
 5. `.env.example`:
-   - Complete template documenting all required secrets: `GIT_ADAPTER_WEBHOOK_SECRET`, `GIT_ADAPTER_TOKEN`, `PUBSUB_SECRET_TOKEN`, `GEMINI_API_KEY`, `GCP_PROJECT_ID`, and `GCP_REGION`.
+   - Complete template documenting all required secrets: `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`, `INTERNAL_AUTH_TOKEN`, `GEMINI_API_KEY`, `GCP_PROJECT_ID`, and `GCP_REGION`.
 
 6. `README.md`:
    - Step-by-step instructions on setting GitHub repository secrets/variables, running the infra setup, and triggering the deployment workflow.
-````
+```
 
 ## ⚙️ Environment Variables Reference
 
@@ -612,63 +615,64 @@ Each service strictly validates required variables and fails fast at startup if 
 
 ### GitHub Gateway (`apps/github-gateway`)
 
-| Variable | Required | Description |
-| :--- | :---: | :--- |
-| `PORT` | Yes | Port to listen on (e.g. `8080`) |
-| `HOST` | Yes | Host interface to bind to (e.g. `0.0.0.0`) |
-| `CORE_URL` | Yes | HTTP base URL of the Core microservice for ConnectRPC communication |
-| `GIT_ADAPTER_WEBHOOK_SECRET` | Yes | Secret string used to verify incoming GitHub webhook HMAC signatures |
-| `GIT_ADAPTER_TOKEN` | Yes | GitHub Personal Access Token (classic with `repo` scope) for PR diffs & comments |
-| `PUBSUB_SECRET_TOKEN` | Yes | Shared secret token for authenticating ConnectRPC requests from Core |
+| Variable                | Required | Description                                                                      |
+| :---------------------- | :------: | :------------------------------------------------------------------------------- |
+| `PORT`                  |   Yes    | Port to listen on (e.g. `8080`)                                                  |
+| `HOST`                  |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                       |
+| `CORE_URL`              |   Yes    | HTTP base URL of the Core microservice for ConnectRPC communication              |
+| `GITHUB_WEBHOOK_SECRET` |   Yes    | Secret string used to verify incoming GitHub webhook HMAC signatures             |
+| `GITHUB_TOKEN`          |   Yes    | GitHub Personal Access Token (classic with `repo` scope) for PR diffs & comments |
+| `INTERNAL_AUTH_TOKEN`   |   Yes    | Shared secret token for authenticating ConnectRPC requests                       |
 
 ### Core Service (`apps/core`)
 
-| Variable | Required | Description |
-| :--- | :---: | :--- |
-| `PORT` | Yes | Port to listen on (e.g. `8080`) |
-| `HOST` | Yes | Host interface to bind to (e.g. `0.0.0.0`) |
-| `GATEWAY_URL` | Yes | HTTP base URL of the Gateway microservice for ConnectRPC review posting |
-| `PUBSUB_SECRET_TOKEN` | Yes | Shared secret token for authenticating ConnectRPC and internal push endpoints |
-| `BUILD_CONTEXT_TOPIC` | Yes | Google Cloud Pub/Sub topic to publish context build requests to |
-| `REVIEW_CODE_TOPIC` | Yes | Google Cloud Pub/Sub topic to publish code review tasks to |
-| `CONTEXT_READY_TOPIC` | Optional | Google Cloud Pub/Sub topic for context ready notifications |
-| `REVIEW_RESULT_TOPIC` | Optional | Google Cloud Pub/Sub topic for review result events |
-| `GOOGLE_CLOUD_PROJECT` | Optional | GCP Project ID (auto-detected when running in GCP) |
-| `FIRESTORE_EMULATOR_HOST`| Optional | Host of local Firestore emulator for dev/testing (e.g. `localhost:8081`) |
-| `PUBSUB_EMULATOR_HOST` | Optional | Host of local Pub/Sub emulator for dev/testing (e.g. `localhost:8085`) |
+| Variable                  | Required | Description                                                                   |
+| :------------------------ | :------: | :---------------------------------------------------------------------------- |
+| `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                               |
+| `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                    |
+| `GATEWAY_URL`             |   Yes    | HTTP base URL of the Gateway microservice for ConnectRPC review posting       |
+| `INTERNAL_AUTH_TOKEN`     |   Yes    | Shared secret token for authenticating ConnectRPC and internal push endpoints |
+| `BUILD_CONTEXT_TOPIC`     |   Yes    | Google Cloud Pub/Sub topic to publish context build requests to               |
+| `REVIEW_CODE_TOPIC`       |   Yes    | Google Cloud Pub/Sub topic to publish code review tasks to                    |
+| `CONTEXT_READY_TOPIC`     | Optional | Google Cloud Pub/Sub topic for context ready notifications                    |
+| `REVIEW_RESULT_TOPIC`     | Optional | Google Cloud Pub/Sub topic for review result events                           |
+| `GOOGLE_CLOUD_PROJECT`    | Optional | GCP Project ID (auto-detected when running in GCP)                            |
+| `FIRESTORE_EMULATOR_HOST` | Optional | Host of local Firestore emulator for dev/testing (e.g. `localhost:8081`)      |
+| `PUBSUB_EMULATOR_HOST`    | Optional | Host of local Pub/Sub emulator for dev/testing (e.g. `localhost:8085`)        |
 
 ### Context Builder Agent (`apps/agent-context-builder`)
 
-| Variable | Required | Description |
-| :--- | :---: | :--- |
-| `PORT` | Yes | Port to listen on (e.g. `8080`) |
-| `CORE_URL` | Yes | HTTP base URL of the Core microservice for fetching/saving context |
-| `REVIEW_MODEL` | Yes | Gemini model identifier (e.g. `gemini-2.5-flash`) |
-| `CONTEXT_READY_TOPIC` | Yes | Google Cloud Pub/Sub topic to publish completion event to |
-| `GIT_ADAPTER_TOKEN` | Optional | GitHub Personal Access Token (classic with `repo` scope) to clone private repositories or fetch PR diffs |
-| `GEMINI_API_KEY` | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI) |
-| `GOOGLE_GENAI_USE_VERTEXAI` | Optional | Set to `1` to authenticate via Google Cloud Vertex AI ADC |
+| Variable                    | Required | Description                                                                                              |
+| :-------------------------- | :------: | :------------------------------------------------------------------------------------------------------- |
+| `PORT`                      |   Yes    | Port to listen on (e.g. `8080`)                                                                          |
+| `CORE_URL`                  |   Yes    | HTTP base URL of the Core microservice for fetching/saving context                                       |
+| `REVIEW_MODEL`              |   Yes    | Gemini model identifier (e.g. `gemini-2.5-flash`)                                                        |
+| `CONTEXT_READY_TOPIC`       |   Yes    | Google Cloud Pub/Sub topic to publish completion event to                                                |
+| `GITHUB_TOKEN`              | Optional | GitHub Personal Access Token (classic with `repo` scope) to clone private repositories or fetch PR diffs |
+| `GEMINI_API_KEY`            | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)                               |
+| `GOOGLE_GENAI_USE_VERTEXAI` | Optional | Set to `1` to authenticate via Google Cloud Vertex AI ADC                                                |
 
 ### Code Reviewer Agent (`apps/agent-code-reviewer`)
 
-| Variable | Required | Description |
-| :--- | :---: | :--- |
-| `PORT` | Yes | Port to listen on (e.g. `8080`) |
-| `CORE_URL` | Yes | HTTP base URL of the Core microservice |
-| `REVIEW_MODEL` | Yes | Gemini model identifier (e.g. `gemini-2.5-flash`) |
-| `REVIEW_RESULT_TOPIC` | Yes | Google Cloud Pub/Sub topic to publish review findings to |
-| `PUBSUB_SECRET_TOKEN` | Yes | Shared secret token for authenticating direct HTTP fallback to Core |
-| `GEMINI_API_KEY` | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI) |
-| `GOOGLE_GENAI_USE_VERTEXAI` | Optional | Set to `1` to authenticate via Google Cloud Vertex AI ADC |
+| Variable                    | Required | Description                                                                |
+| :-------------------------- | :------: | :------------------------------------------------------------------------- |
+| `PORT`                      |   Yes    | Port to listen on (e.g. `8080`)                                            |
+| `CORE_URL`                  |   Yes    | HTTP base URL of the Core microservice                                     |
+| `REVIEW_MODEL`              |   Yes    | Gemini model identifier (e.g. `gemini-2.5-flash`)                          |
+| `REVIEW_RESULT_TOPIC`       |   Yes    | Google Cloud Pub/Sub topic to publish review findings to                   |
+| `INTERNAL_AUTH_TOKEN`       |   Yes    | Shared secret token for authenticating direct HTTP fallback to Core        |
+| `GEMINI_API_KEY`            | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI) |
+| `GOOGLE_GENAI_USE_VERTEXAI` | Optional | Set to `1` to authenticate via Google Cloud Vertex AI ADC                  |
 
 ---
 
 ## 🔗 GitHub Webhook Configuration
 
 In your GitHub repository (or organization) settings under **Webhooks** → **Add webhook**:
+
 1. **Payload URL**: `https://<YOUR_GATEWAY_URL>/api/v1/webhooks`
 2. **Content type**: `application/json`
-3. **Secret**: Value matching `GIT_ADAPTER_WEBHOOK_SECRET`
+3. **Secret**: Value matching `GITHUB_WEBHOOK_SECRET`
 4. **Events to trigger**:
    - `Pull requests`
    - `Issue comments`
@@ -683,6 +687,12 @@ pnpm install
 
 # Run linting across all projects
 pnpm run lint
+
+# Check code formatting with Prettier
+pnpm run format:check
+
+# Automatically format all files with Prettier
+pnpm run format
 
 # Run TypeScript typechecks across all projects
 pnpm run typecheck

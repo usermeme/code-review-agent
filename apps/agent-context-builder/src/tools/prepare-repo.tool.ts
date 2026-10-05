@@ -47,7 +47,7 @@ export function createPrepareRepoTool(deps: PrepareRepoToolDependencies) {
         input.prNumber
       ) {
         // INCREMENTAL MODE: Fetch only changed files using GitHub API
-        const token = deps.envService.get('GIT_ADAPTER_TOKEN');
+        const token = deps.envService.get('GITHUB_TOKEN');
         const headers: Record<string, string> = token
           ? { Authorization: `Bearer ${token}` }
           : {};
@@ -91,7 +91,7 @@ export function createPrepareRepoTool(deps: PrepareRepoToolDependencies) {
         return `Incremental update prepared successfully. Found ${chunks.length} chunks of changed files.`;
       } else {
         // BASELINE MODE: Download repository archive via Git provider API
-        const token = deps.envService.get('GIT_ADAPTER_TOKEN');
+        const token = deps.envService.get('GITHUB_TOKEN');
         const ref = input.ref || 'main';
 
         const snapshot = await downloadRepoArchive({

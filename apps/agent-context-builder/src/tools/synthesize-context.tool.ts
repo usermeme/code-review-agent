@@ -23,8 +23,7 @@ export function createSynthesizeContextTool({
       const overflow = ctx.state[STATE.overflowPaths] as string[] | undefined;
       const agentDocs = ctx.state[STATE.agentDocs] as string | undefined;
       const existingContext = ctx.state[STATE.existingContext] as
-        | Record<string, string>
-        | undefined;
+        Record<string, string> | undefined;
 
       if (!summaries || summaries.length === 0) {
         if (existingContext) {

@@ -44,7 +44,9 @@ Then(
     if (typeof summaryObj === 'object' && summaryObj !== null) {
       assert.equal(summaryObj.architecture, architecture);
     } else {
-      assert.fail(`Summary is neither object nor parseable JSON: ${json.summary}`);
+      assert.fail(
+        `Summary is neither object nor parseable JSON: ${json.summary}`,
+      );
     }
   },
 );

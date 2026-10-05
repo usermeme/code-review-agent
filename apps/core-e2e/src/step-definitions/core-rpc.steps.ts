@@ -16,11 +16,7 @@ Given(
 
 Given(
   'repository {string} has a baseline context with architecture {string}',
-  async function (
-    this: CoreWorld,
-    repoFullName: string,
-    architecture: string,
-  ) {
+  async function (this: CoreWorld, repoFullName: string, architecture: string) {
     const key = `github:${repoFullName.replace('/', ':')}:0`;
     await this.contextRepository.saveContext(key, {
       summary: JSON.stringify({ architecture }),
@@ -61,11 +57,7 @@ When(
 
 When(
   'Gateway calls IngestPREvent for merged PR {string} PR #{int}',
-  async function (
-    this: CoreWorld,
-    repoFullName: string,
-    prNumber: number,
-  ) {
+  async function (this: CoreWorld, repoFullName: string, prNumber: number) {
     const [owner, repo] = repoFullName.split('/');
     lastRpcResponse = await this.coreRpcClient.ingestPREvent({
       diff: '',
@@ -91,11 +83,7 @@ When(
 
 When(
   'Gateway calls IngestPREvent for manual review on {string} PR #{int}',
-  async function (
-    this: CoreWorld,
-    repoFullName: string,
-    prNumber: number,
-  ) {
+  async function (this: CoreWorld, repoFullName: string, prNumber: number) {
     const [owner, repo] = repoFullName.split('/');
     lastRpcResponse = await this.coreRpcClient.ingestPREvent({
       diff: 'const y = 2;',
@@ -123,7 +111,8 @@ Then('the IngestPREvent RPC response is accepted', function () {
   assert(lastRpcResponse, 'No RPC response received');
   assert.equal(lastRpcResponse.success, true);
   assert(
-    lastRpcResponse.status === 'queued' || lastRpcResponse.status === 'reviewing',
+    lastRpcResponse.status === 'queued' ||
+      lastRpcResponse.status === 'reviewing',
     `Expected status to be queued or reviewing, got ${lastRpcResponse.status}`,
   );
 });

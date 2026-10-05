@@ -13,8 +13,9 @@ describe('GithubService', () => {
       HOST: '0.0.0.0',
       PORT: '8080',
       CORE_URL: 'http://localhost:8080',
-      GIT_ADAPTER_WEBHOOK_SECRET: 'test-secret',
-      GIT_ADAPTER_TOKEN: 'test-token',
+      GITHUB_WEBHOOK_SECRET: 'test-secret',
+      GITHUB_TOKEN: 'test-token',
+      INTERNAL_AUTH_TOKEN: 'test-internal-token',
     });
     mockCoreClient = {
       ingestPREvent: vi.fn().mockResolvedValue({

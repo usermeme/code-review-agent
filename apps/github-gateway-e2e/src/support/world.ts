@@ -4,7 +4,11 @@ import crypto from 'node:crypto';
 import { buildServer as buildGatewayServer } from '../../../github-gateway/src/app.js';
 import { MockOctokit } from './doubles/mock-octokit.js';
 import { GithubService } from '../../../github-gateway/src/modules/github/github.service.js';
-import { createClient, createRouterTransport, Client } from '@connectrpc/connect';
+import {
+  createClient,
+  createRouterTransport,
+  Client,
+} from '@connectrpc/connect';
 import {
   CoreService,
   GatewayService,
@@ -13,7 +17,10 @@ import {
 } from 'contracts';
 import { Octokit } from '@octokit/rest';
 import { EnvService } from 'env';
-import { gatewayEnvSchema, GatewayEnvService } from '../../../github-gateway/src/env.js';
+import {
+  gatewayEnvSchema,
+  GatewayEnvService,
+} from '../../../github-gateway/src/env.js';
 
 export class GithubGatewayWorld extends World {
   public app!: FastifyInstance;
@@ -36,15 +43,17 @@ export class GithubGatewayWorld extends World {
       HOST: '0.0.0.0',
       PORT: '8080',
       CORE_URL: 'http://localhost:8080',
-      GIT_ADAPTER_WEBHOOK_SECRET: this.webhookSecret,
-      GIT_ADAPTER_TOKEN: 'test-github-token',
-      PUBSUB_SECRET_TOKEN: this.internalToken,
+      GITHUB_WEBHOOK_SECRET: this.webhookSecret,
+      GITHUB_TOKEN: 'test-github-token',
+      INTERNAL_AUTH_TOKEN: this.internalToken,
     });
 
     // 1. Mock in-process ConnectRPC transport for CoreService
     const coreTransport = createRouterTransport((router) => {
       router.service(CoreService, {
-        ingestPREvent: async (req: IngestPREventRequest): Promise<IngestPREventResponse> => {
+        ingestPREvent: async (
+          req: IngestPREventRequest,
+        ): Promise<IngestPREventResponse> => {
           this.ingestedEvents.push(req);
           return {
             $typeName: 'core.v1.IngestPREventResponse',
@@ -98,10 +107,7 @@ export class GithubGatewayWorld extends World {
       });
     });
 
-    this.gatewayRpcClient = createClient(
-      GatewayService,
-      gatewayTransport,
-    );
+    this.gatewayRpcClient = createClient(GatewayService, gatewayTransport);
   }
 
   createHmacSignature(payload: string, secret = this.webhookSecret): string {

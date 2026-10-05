@@ -13,7 +13,7 @@ describe('publishReviewResultsTool', () => {
       CORE_URL: 'http://localhost:8080',
       REVIEW_MODEL: 'gemini-2.5-pro',
       REVIEW_RESULT_TOPIC: 'review-result-topic',
-      PUBSUB_SECRET_TOKEN: 'test-token',
+      INTERNAL_AUTH_TOKEN: 'test-token',
     });
     vi.restoreAllMocks();
   });
@@ -61,7 +61,8 @@ describe('publishReviewResultsTool', () => {
     const result = await (tool as any).execute(
       {
         summary: 'Critical security issue detected',
-        ticketCoverage: 'All acceptance criteria met except input sanitization.',
+        ticketCoverage:
+          'All acceptance criteria met except input sanitization.',
         findings: [
           {
             title: 'SQL Injection Vulnerability',
@@ -77,7 +78,9 @@ describe('publishReviewResultsTool', () => {
       mockCtx,
     );
 
-    expect(result).toContain('Successfully sent 1 review findings and summary directly to gateway');
+    expect(result).toContain(
+      'Successfully sent 1 review findings and summary directly to gateway',
+    );
     expect(capturedBody).toBeDefined();
 
     const decoded = JSON.parse(
@@ -95,7 +98,9 @@ describe('publishReviewResultsTool', () => {
     expect(decoded.comments).toHaveLength(1);
     expect(decoded.comments[0].path).toBe('src/db.ts');
     expect(decoded.comments[0].position).toBe(12);
-    expect(decoded.comments[0].body).toContain('### [CRITICAL] SQL Injection Vulnerability');
+    expect(decoded.comments[0].body).toContain(
+      '### [CRITICAL] SQL Injection Vulnerability',
+    );
     expect(decoded.comments[0].body).toContain('```suggestion');
   });
 });

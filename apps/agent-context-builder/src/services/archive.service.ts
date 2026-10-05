@@ -11,7 +11,10 @@ export interface RepoSnapshot {
   cleanup: () => Promise<void>;
 }
 
-export function parseRepoCoordinates(cloneUrl?: string): { owner?: string; repo?: string } {
+export function parseRepoCoordinates(cloneUrl?: string): {
+  owner?: string;
+  repo?: string;
+} {
   if (!cloneUrl) return {};
   const match = cloneUrl.match(/github\.com[:/]([^/]+)\/([^/.]+?)(?:\.git)?$/);
   if (match) {
@@ -39,7 +42,9 @@ export async function downloadRepoArchive(params: {
   }
 
   if (!owner || !repo) {
-    throw new Error('Owner and repository name are required to fetch repository archive.');
+    throw new Error(
+      'Owner and repository name are required to fetch repository archive.',
+    );
   }
 
   const ref = params.ref || 'main';
@@ -71,7 +76,9 @@ export async function downloadRepoArchive(params: {
     }
 
     if (!response.body) {
-      throw new Error(`Repository archive response body from ${tarballUrl} was empty.`);
+      throw new Error(
+        `Repository archive response body from ${tarballUrl} was empty.`,
+      );
     }
 
     // Extract the tar.gz stream directly into dir, stripping the top-level GitHub directory prefix

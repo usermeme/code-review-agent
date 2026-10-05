@@ -1,9 +1,9 @@
 ---
 name: Feature Request
 about: Suggest an idea or new capability for the AI Code Review Agent
-title: "[FEAT] "
-labels: ["enhancement"]
-assignees: ""
+title: '[FEAT] '
+labels: ['enhancement']
+assignees: ''
 ---
 
 ## 🚀 Feature Description

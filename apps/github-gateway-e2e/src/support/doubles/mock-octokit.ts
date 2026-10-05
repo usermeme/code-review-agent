@@ -28,7 +28,8 @@ export class MockOctokit {
   public postedComments: PostedComment[] = [];
   public postedReviews: PostedReview[] = [];
   public postedIssueComments: PostedIssueComment[] = [];
-  public diff = 'diff --git a/src/index.ts b/src/index.ts\n--- a/src/index.ts\n+++ b/src/index.ts\n@@ -1,3 +1,4 @@\n+const x = 1;';
+  public diff =
+    'diff --git a/src/index.ts b/src/index.ts\n--- a/src/index.ts\n+++ b/src/index.ts\n@@ -1,3 +1,4 @@\n+const x = 1;';
   public changedFiles = ['src/index.ts'];
   public headSha = 'mock-head-sha-12345';
 
@@ -49,11 +50,20 @@ export class MockOctokit {
             body: 'Mock PR description',
             user: { login: 'testuser' },
             head: { sha: this.headSha, ref: 'feature-branch' },
-            base: { ref: 'main', repo: { clone_url: `https://github.com/${params.owner}/${params.repo}.git` } },
+            base: {
+              ref: 'main',
+              repo: {
+                clone_url: `https://github.com/${params.owner}/${params.repo}.git`,
+              },
+            },
           },
         };
       },
-      listFiles: async (_params: { owner: string; repo: string; pull_number: number }) => {
+      listFiles: async (_params: {
+        owner: string;
+        repo: string;
+        pull_number: number;
+      }) => {
         void _params;
         return {
           data: this.changedFiles.map((filename) => ({ filename })),

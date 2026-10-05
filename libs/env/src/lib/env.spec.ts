@@ -58,8 +58,12 @@ describe('EnvService', () => {
     });
 
     const envService = new EnvService(schema);
-    expect(envService.get('TEST_DEFAULT_ENV_VAR')).toBe('hello-from-process-env');
-    expect(envService.getOrThrow('TEST_DEFAULT_ENV_VAR')).toBe('hello-from-process-env');
+    expect(envService.get('TEST_DEFAULT_ENV_VAR')).toBe(
+      'hello-from-process-env',
+    );
+    expect(envService.getOrThrow('TEST_DEFAULT_ENV_VAR')).toBe(
+      'hello-from-process-env',
+    );
 
     delete process.env['TEST_DEFAULT_ENV_VAR'];
   });
