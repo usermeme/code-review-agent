@@ -5,10 +5,11 @@ import type { ContextBuilderEnvService } from '../env.js';
 
 export interface StoreContextToolDependencies {
   envService: ContextBuilderEnvService;
+  pubsub?: PubSub;
 }
 
 export function createStoreContextTool(deps: StoreContextToolDependencies) {
-  const pubsub = new PubSub();
+  const pubsub = deps.pubsub ?? new PubSub();
   const topicName = deps.envService.get('CONTEXT_READY_TOPIC');
 
   return new FunctionTool({

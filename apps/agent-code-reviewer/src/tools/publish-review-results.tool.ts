@@ -22,13 +22,14 @@ export const findingItemSchema = z.object({
 
 export interface PublishReviewResultsToolDependencies {
   envService: CodeReviewerEnvService;
+  pubsub?: PubSub;
 }
 
 export function createPublishReviewResultsTool(
   coreUrl: string,
   deps: PublishReviewResultsToolDependencies,
 ) {
-  const pubsub = new PubSub();
+  const pubsub = deps.pubsub ?? new PubSub();
   const topicName = deps.envService.get('REVIEW_RESULT_TOPIC');
   const token = deps.envService.get('INTERNAL_AUTH_TOKEN');
 

@@ -31,6 +31,7 @@ describe('publishReviewResultsTool', () => {
   });
 
   it('formats findings into inline comments and sends to gateway via HTTP fallback', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     let capturedBody: any;
     global.fetch = vi.fn().mockImplementation(async (_url, options) => {
       capturedBody = JSON.parse(options.body);
@@ -41,8 +42,17 @@ describe('publishReviewResultsTool', () => {
       };
     }) as any;
 
+    const mockPubSub = {
+      topic: vi.fn().mockReturnValue({
+        publishMessage: vi
+          .fn()
+          .mockRejectedValue(new Error('PubSub unavailable')),
+      }),
+    } as any;
+
     const tool = createPublishReviewResultsTool('http://mock-gateway:8080', {
       envService: testEnvService,
+      pubsub: mockPubSub,
     });
     const mockCtx = {
       state: new Map([
@@ -102,5 +112,54 @@ describe('publishReviewResultsTool', () => {
       '### [CRITICAL] SQL Injection Vulnerability',
     );
     expect(decoded.comments[0].body).toContain('```suggestion');
+  });
+
+  it('publishes findings to Pub/Sub when available', async () => {
+    const mockPublishMessage = vi.fn().mockResolvedValue('msg-id-123');
+    const mockPubSub = {
+      topic: vi.fn().mockReturnValue({
+        publishMessage: mockPublishMessage,
+      }),
+    } as any;
+
+    const tool = createPublishReviewResultsTool('http://mock-gateway:8080', {
+      envService: testEnvService,
+      pubsub: mockPubSub,
+    });
+    const mockCtx = {
+      state: new Map([
+        [
+          STATE.prMeta,
+          {
+            provider: 'github',
+            owner: 'test-owner',
+            repo: 'test-repo',
+            number: 42,
+          },
+        ],
+      ]),
+    } as any;
+
+    const result = await (tool as any).execute(
+      {
+        summary: 'All checks passed',
+        findings: [],
+      },
+      mockCtx,
+    );
+
+    expect(result).toContain(
+      'Successfully published 0 review findings and summary to Pub/Sub topic "review-result-topic".',
+    );
+    expect(mockPubSub.topic).toHaveBeenCalledWith('review-result-topic');
+    expect(mockPublishMessage).toHaveBeenCalledWith({
+      json: expect.objectContaining({
+        owner: 'test-owner',
+        repo: 'test-repo',
+        prNumber: 42,
+        summary: 'All checks passed',
+        comments: [],
+      }),
+    });
   });
 });
