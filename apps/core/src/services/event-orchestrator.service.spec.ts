@@ -8,7 +8,6 @@ describe('EventOrchestratorService', () => {
   let mockPubSub: any;
   let mockPrRepo: any;
   let mockContextRepo: any;
-  let mockGatewayClient: any;
   let testEnvService: CoreEnvService;
   let publishedMessages: { topic: string; data: any }[];
 
@@ -16,8 +15,8 @@ describe('EventOrchestratorService', () => {
     testEnvService = new EnvService(coreEnvSchema, {
       HOST: '0.0.0.0',
       PORT: '8080',
-      GATEWAY_URL: 'http://localhost:8080',
-      INTERNAL_AUTH_TOKEN: 'test-token',
+      PR_EVENTS_SUBSCRIPTION: 'test-pr-events-sub',
+      REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
       BUILD_CONTEXT_TOPIC: 'build-context-topic',
       REVIEW_CODE_TOPIC: 'review-code-topic',
     });
@@ -41,10 +40,6 @@ describe('EventOrchestratorService', () => {
       getContext: vi.fn().mockResolvedValue(null),
       saveContext: vi.fn().mockResolvedValue(undefined),
     };
-
-    mockGatewayClient = {
-      postReview: vi.fn().mockResolvedValue({ success: true, reviewId: '123' }),
-    };
   });
 
   it('triggers context build when baseline context is missing', async () => {
@@ -52,7 +47,6 @@ describe('EventOrchestratorService', () => {
       pubsub: mockPubSub,
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
-      gatewayClient: mockGatewayClient,
       envService: testEnvService,
     });
 
@@ -102,7 +96,6 @@ describe('EventOrchestratorService', () => {
       pubsub: mockPubSub,
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
-      gatewayClient: mockGatewayClient,
       envService: testEnvService,
     });
 
@@ -143,12 +136,11 @@ describe('EventOrchestratorService', () => {
     );
   });
 
-  it('posts review to gateway via ConnectRPC when review results arrive', async () => {
+  it('publishes review results to REVIEW_RESULTS_TOPIC when review results arrive', async () => {
     const orchestrator = new EventOrchestratorService({
       pubsub: mockPubSub,
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
-      gatewayClient: mockGatewayClient,
       envService: testEnvService,
     });
 
@@ -168,17 +160,21 @@ describe('EventOrchestratorService', () => {
       ],
     });
 
-    expect(mockGatewayClient.postReview).toHaveBeenCalledWith(
+    expect(publishedMessages).toHaveLength(1);
+    expect(publishedMessages[0].topic).toBe('test-review-results-topic');
+    expect(publishedMessages[0].data).toEqual(
       expect.objectContaining({
         provider: 'github',
         owner: 'test-org',
         repo: 'test-repo',
         prNumber: 42,
         summary: 'Looks great!',
+        ticketCoverage: 'All acceptance criteria met.',
         comments: expect.arrayContaining([
           expect.objectContaining({
             path: 'src/file.ts',
             position: 10,
+            body: 'Consider refactoring this helper',
           }),
         ]),
       }),

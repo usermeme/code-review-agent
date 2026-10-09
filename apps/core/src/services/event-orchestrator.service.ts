@@ -2,21 +2,18 @@ import { PubSub } from '@google-cloud/pubsub';
 import { FastifyBaseLogger } from 'fastify';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
+import { IngestPREventRequest, IngestPREventResponse } from 'contracts';
 import {
-  IngestPREventRequest,
-  IngestPREventResponse,
-  GatewayService,
-  PostReviewRequest,
-} from 'contracts';
-import { ContextReadyPayload, ReviewResultPayload } from 'shared-types';
-import { Client } from '@connectrpc/connect';
+  ContextReadyPayload,
+  ReviewResultPayload,
+  PREventPayload,
+} from 'shared-types';
 import type { CoreEnvService } from '../env.js';
 
 export interface EventOrchestratorDependencies {
   envService: CoreEnvService;
   prRepository: PrRepository;
   contextRepository: ContextRepository;
-  gatewayClient: Client<typeof GatewayService>;
   pubsub?: PubSub;
 }
 
@@ -24,19 +21,17 @@ export class EventOrchestratorService {
   private pubsub: PubSub;
   private prRepository: PrRepository;
   private contextRepository: ContextRepository;
-  private gatewayClient: Client<typeof GatewayService>;
   private envService: CoreEnvService;
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub ?? new PubSub();
     this.prRepository = deps.prRepository;
     this.contextRepository = deps.contextRepository;
-    this.gatewayClient = deps.gatewayClient;
     this.envService = deps.envService;
   }
 
   async ingestPREvent(
-    req: IngestPREventRequest,
+    req: IngestPREventRequest | PREventPayload,
     logger?: FastifyBaseLogger,
   ): Promise<IngestPREventResponse> {
     const meta = req.prMeta;
@@ -217,56 +212,36 @@ export class EventOrchestratorService {
     payload: ReviewResultPayload,
     logger?: FastifyBaseLogger,
   ): Promise<void> {
-    const {
-      provider,
-      owner,
-      repo,
-      prNumber,
-      summary,
-      ticketCoverage,
-      comments,
-    } = payload;
+    const { provider, owner, repo, prNumber, summary } = payload;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
 
     logger?.info(
-      `[Core] Handling review results for ${prKey}. Calling Gateway to post review.`,
+      `[Core] Handling review results for ${prKey}. Publishing to Review Results topic.`,
     );
 
     try {
-      const reviewReq: PostReviewRequest = {
-        $typeName: 'gateway.v1.PostReviewRequest',
-        provider,
-        owner,
-        repo,
-        prNumber,
-        summary: summary || '',
-        ticketCoverage: ticketCoverage || '',
-        comments: (comments || []).map((c) => ({
-          $typeName: 'gateway.v1.ReviewComment',
-          path: c.path,
-          position: c.position,
-          body: c.body,
-        })),
-      };
-
-      const res = await this.gatewayClient.postReview(reviewReq);
-      logger?.info(
-        `[Core] Gateway postReview responded: success=${res.success}, reviewId=${res.reviewId}`,
-      );
-
+      await this.publishReviewResults(payload);
       await this.prRepository.updatePRStatus(prKey, {
-        status: res.success ? 'completed' : 'failed',
+        status: 'completed',
         summary,
-        error: res.success ? undefined : res.message,
       });
     } catch (error) {
-      logger?.error(`[Core] Failed to post review via Gateway: ${error}`);
+      logger?.error(`[Core] Failed to publish review results: ${error}`);
       await this.prRepository.updatePRStatus(prKey, {
         status: 'failed',
         error: String(error),
       });
       throw error;
     }
+  }
+
+  private async publishReviewResults(
+    payload: ReviewResultPayload,
+  ): Promise<void> {
+    const topicName = this.envService.get('REVIEW_RESULTS_TOPIC');
+    await this.pubsub.topic(topicName).publishMessage({
+      json: payload,
+    });
   }
 
   private async publishContextBuild(data: Record<string, any>): Promise<void> {

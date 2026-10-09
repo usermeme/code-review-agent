@@ -182,7 +182,7 @@ Then(
         r.owner === owner &&
         r.repo === repo &&
         r.prNumber === prNumber &&
-        r.summary.includes(expectedSummary),
+        (r.summary?.includes(expectedSummary) ?? false),
     );
     assert(
       found,

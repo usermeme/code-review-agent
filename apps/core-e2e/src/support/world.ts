@@ -11,15 +11,11 @@ import {
   createRouterTransport,
   Client,
 } from '@connectrpc/connect';
-import {
-  CoreService,
-  GatewayService,
-  PostReviewRequest,
-  PostReviewResponse,
-} from 'contracts';
+import { CoreService } from 'contracts';
 import { PubSub } from '@google-cloud/pubsub';
 import { EnvService } from 'env';
 import { coreEnvSchema, CoreEnvService } from '../../../core/src/env.js';
+import { ReviewResultPayload } from 'shared-types';
 
 export class CoreWorld extends World {
   public app!: FastifyInstance;
@@ -29,7 +25,6 @@ export class CoreWorld extends World {
   public contextRepository: ContextRepository;
   public orchestrator!: EventOrchestratorService;
   public envService!: CoreEnvService;
-  public postedReviews: PostReviewRequest[] = [];
   public coreRpcClient!: Client<typeof CoreService>;
   public internalAuthToken = 'secure-pubsub-token';
   public lastResponse?: LightMyRequestResponse;
@@ -42,55 +37,45 @@ export class CoreWorld extends World {
     this.contextRepository = new ContextRepository(this.db);
   }
 
+  get postedReviews(): ReviewResultPayload[] {
+    const topic = this.envService.get('REVIEW_RESULTS_TOPIC');
+    return this.pubsub
+      .getMessagesByTopic(topic)
+      .map((m) => m.json as ReviewResultPayload);
+  }
+
   async initApp(): Promise<void> {
     this.envService = new EnvService(coreEnvSchema, {
       HOST: '0.0.0.0',
       PORT: '8080',
-      GATEWAY_URL: 'http://localhost:8080',
-      INTERNAL_AUTH_TOKEN: this.internalAuthToken,
+      PR_EVENTS_SUBSCRIPTION: 'test-pr-events-sub',
+      REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
       BUILD_CONTEXT_TOPIC: 'build-context-topic',
       REVIEW_CODE_TOPIC: 'review-code-topic',
+      INTERNAL_AUTH_TOKEN: this.internalAuthToken,
     });
 
-    // 1. Mock in-process GatewayService transport
-    const gatewayTransport = createRouterTransport((router) => {
-      router.service(GatewayService, {
-        postReview: async (
-          req: PostReviewRequest,
-        ): Promise<PostReviewResponse> => {
-          this.postedReviews.push(req);
-          return {
-            $typeName: 'gateway.v1.PostReviewResponse',
-            success: true,
-            message: 'Review accepted by mock gateway',
-            reviewId: `mock-review-${this.postedReviews.length}`,
-          };
-        },
-      });
-    });
-    const gatewayClient = createClient(GatewayService, gatewayTransport);
-
-    // 2. Initialize Orchestrator
+    // 1. Initialize Orchestrator
     this.orchestrator = new EventOrchestratorService({
       pubsub: this.pubsub as unknown as PubSub,
       prRepository: this.prRepository,
       contextRepository: this.contextRepository,
-      gatewayClient,
       envService: this.envService,
     });
 
-    // 3. Build Core Fastify application
+    // 2. Build Core Fastify application
     this.app = await buildCoreServer({
       databaseService: this.db,
       prRepository: this.prRepository,
       contextRepository: this.contextRepository,
-      gatewayClient,
       orchestrator: this.orchestrator,
+      pubsub: this.pubsub as unknown as PubSub,
+      startConsumer: false,
       envService: this.envService,
       fastifyOptions: { logger: false },
     });
 
-    // 4. In-process ConnectRPC client pointing to coreApp's orchestrator
+    // 3. In-process ConnectRPC client pointing to coreApp's orchestrator (for legacy step compatibility)
     const coreTransport = createRouterTransport((router) => {
       router.service(CoreService, {
         ingestPREvent: async (req) => {
@@ -107,7 +92,6 @@ export class CoreWorld extends World {
     }
     this.db.clear();
     this.pubsub.clear();
-    this.postedReviews = [];
   }
 }
 

@@ -1,18 +1,18 @@
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import fastifyRawBody from 'fastify-raw-body';
+import { PubSub } from '@google-cloud/pubsub';
 import { GithubService } from './modules/github/github.service.js';
 import { webhooksModule } from './modules/webhooks/webhooks.module.js';
 import { healthModule } from './modules/health/health.module.js';
-import { gatewayRpcRoutes } from './rpc/gateway.routes.js';
-import { createClient, Client } from '@connectrpc/connect';
-import { createConnectTransport } from '@connectrpc/connect-node';
+import { ReviewResultsConsumer } from './modules/pubsub/review-results.consumer.js';
 import type { GatewayEnvService } from './env.js';
-import { CoreService, createAuthClientInterceptor } from 'contracts';
 
 export interface BuildServerOptions {
   envService: GatewayEnvService;
-  coreClient?: Client<typeof CoreService>;
+  pubsub?: PubSub;
   githubService?: GithubService;
+  reviewResultsConsumer?: ReviewResultsConsumer;
+  startConsumer?: boolean;
   fastifyOptions?: FastifyServerOptions;
 }
 
@@ -28,24 +28,11 @@ export async function buildServer(
     runFirst: true,
   });
 
-  let coreClient = options.coreClient;
-  if (!coreClient) {
-    const coreUrl = options.envService.get('CORE_URL');
-    const transport = createConnectTransport({
-      baseUrl: coreUrl,
-      httpVersion: '1.1',
-      interceptors: [
-        createAuthClientInterceptor({
-          token: options.envService.get('INTERNAL_AUTH_TOKEN'),
-        }),
-      ],
-    });
-    coreClient = createClient(CoreService, transport);
-  }
+  const pubsub = options.pubsub ?? new PubSub();
 
   const githubService =
     options.githubService ??
-    new GithubService({ coreClient, envService: options.envService });
+    new GithubService({ pubsub, envService: options.envService });
 
   // 1. Health check module
   await server.register(healthModule);
@@ -56,11 +43,26 @@ export async function buildServer(
     githubService,
   });
 
-  // 3. ConnectRPC Egress module
-  await server.register(gatewayRpcRoutes, {
-    githubService,
-    envService: options.envService,
-  });
+  // 3. Pub/Sub Review Results Consumer
+  if (options.startConsumer !== false) {
+    const subscriptionName = options.envService.get(
+      'REVIEW_RESULTS_SUBSCRIPTION',
+    );
+    const consumer =
+      options.reviewResultsConsumer ??
+      new ReviewResultsConsumer({
+        pubsub,
+        subscriptionName,
+        githubService,
+        logger: server.log,
+      });
+
+    consumer.start();
+
+    server.addHook('onClose', async () => {
+      await consumer.stop();
+    });
+  }
 
   return server;
 }

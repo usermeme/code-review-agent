@@ -27,7 +27,7 @@ export const reviewRoutes: FastifyPluginAsync<ReviewRoutesOptions> = async (
     const query = request.query as { token?: string };
     const expectedToken = envService.get('INTERNAL_AUTH_TOKEN');
 
-    if (!expectedToken || query.token !== expectedToken) {
+    if (expectedToken && query.token !== expectedToken) {
       return reply.code(401).send({ error: 'Unauthorized' });
     }
 
