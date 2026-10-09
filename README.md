@@ -239,7 +239,7 @@ jobs:
             --cpu 2 \
             --timeout 600s \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},CONTEXT_READY_TOPIC=context-ready-topic,GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},CONTEXT_READY_TOPIC=context-ready-topic,GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
           CONTEXT_BUILDER_URL=$(gcloud run services describe agent-context-builder --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
           echo "CONTEXT_BUILDER_URL=${CONTEXT_BUILDER_URL}" >> $GITHUB_ENV
@@ -256,7 +256,7 @@ jobs:
             --cpu 2 \
             --timeout 600s \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},REVIEW_RESULT_TOPIC=review-result-topic,INTERNAL_AUTH_TOKEN=${{ secrets.INTERNAL_AUTH_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},REVIEW_RESULT_TOPIC=review-result-topic,INTERNAL_AUTH_TOKEN=${{ secrets.INTERNAL_AUTH_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
           CODE_REVIEWER_URL=$(gcloud run services describe agent-code-reviewer --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
           echo "CODE_REVIEWER_URL=${CODE_REVIEWER_URL}" >> $GITHUB_ENV

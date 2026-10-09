@@ -1,27 +1,45 @@
 import { envService } from './env.js';
-import { createContextOrchestrator } from './agents/orchestrator.agent.js';
-import { createPrepareRepoTool } from './tools/prepare-repo.tool.js';
-import { createStoreContextTool } from './tools/store-context.tool.js';
-import { createSummarizeRepoTool } from './tools/summarize-chunks.tool.js';
-import { createSynthesizeContextTool } from './tools/synthesize-context.tool.js';
-import { createFetchContextTool } from './tools/fetch-context.tool.js';
+import { createContextBuilderAgent } from './agent.js';
+import { buildContextBuilderServer } from './app.js';
 
-const coreUrl = envService.get('CORE_URL');
-const reviewModel = envService.get('REVIEW_MODEL');
-
-// 2. Setup the tools
-const tools = {
-  fetchContext: createFetchContextTool(coreUrl),
-  prepareRepo: createPrepareRepoTool({ envService }),
-  summarizeChunks: createSummarizeRepoTool({ model: reviewModel }),
-  synthesizeContext: createSynthesizeContextTool({ model: reviewModel }),
-  storeContext: createStoreContextTool({ envService }),
-};
-
-// 3. Export the Orchestrator LlmAgent instance.
-export const contextBuilderAgent = createContextOrchestrator({
-  model: reviewModel,
-  tools,
-});
+// Export agent instance for ADK CLI & local tooling compatibility
+export const contextBuilderAgent = createContextBuilderAgent(envService);
 export const rootAgent = contextBuilderAgent;
 export default contextBuilderAgent;
+
+async function start(): Promise<void> {
+  const host = envService.get('HOST');
+  const port = Number(envService.get('PORT'));
+
+  const server = await buildContextBuilderServer({
+    envService,
+    fastifyOptions: { logger: true },
+  });
+
+  try {
+    await server.listen({ port, host });
+    server.log.info(`[ Agent Context Builder ready ] http://${host}:${port}`);
+  } catch (err) {
+    server.log.error(err);
+    process.exit(1);
+  }
+
+  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+  for (const signal of signals) {
+    process.on(signal, () => {
+      void (async () => {
+        server.log.info(`Received ${signal}, shutting down gracefully...`);
+        try {
+          await server.close();
+          server.log.info('Server shutdown complete.');
+          process.exit(0);
+        } catch (err) {
+          server.log.error(err, 'Error during shutdown');
+          process.exit(1);
+        }
+      })();
+    });
+  }
+}
+
+void start();

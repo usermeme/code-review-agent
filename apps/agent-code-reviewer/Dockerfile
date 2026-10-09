@@ -18,7 +18,7 @@ COPY . .
 # Build code-reviewer agent
 RUN pnpm nx build agent-code-reviewer --prod
 
-# Stage 2: Production runtime with ADK API server
+# Stage 2: Production runtime
 FROM node:24-slim AS runner
 
 WORKDIR /app
@@ -32,12 +32,15 @@ RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
 # Copy built application and pruned package.json
 COPY --chown=node:node --from=builder /app/dist/apps/agent-code-reviewer ./
 
-# Install production dependencies and ADK runner CLI
-RUN pnpm install --prod --frozen-lockfile && pnpm add @google/adk-devtools@2.1.0 && chown -R node:node /app
+# Install production dependencies using frozen lockfile
+RUN pnpm install --prod --frozen-lockfile && chown -R node:node /app
 
 # Run as non-root user
 USER node
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "pnpm exec adk api_server ./main.js --port=${PORT:-8080} --host=0.0.0.0"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD node -e "fetch('http://localhost:' + (process.env.PORT || 8080) + '/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+
+CMD ["node", "main.js"]

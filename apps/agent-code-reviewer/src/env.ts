@@ -6,7 +6,8 @@ export const codeReviewerEnvSchema = z.object({
   REVIEW_MODEL: z.string().min(1),
   REVIEW_RESULT_TOPIC: z.string().min(1),
   INTERNAL_AUTH_TOKEN: z.string().min(1),
-  PORT: z.string().optional(),
+  HOST: z.string().optional().default('0.0.0.0'),
+  PORT: z.string().optional().default('8080'),
   GEMINI_API_KEY: z.string().optional(),
   GOOGLE_GENAI_USE_VERTEXAI: z.string().optional(),
 });

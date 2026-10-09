@@ -1,25 +1,45 @@
 import { envService } from './env.js';
-import { createOrchestrator } from './agents/orchestrator.agent.js';
-import { createGetRepoContextTool } from './tools/get-repo-context.tool.js';
-import { createGetDiscussionTool } from './tools/get-discussion.tool.js';
-import { createStoreDiscussionTool } from './tools/store-discussion.tool.js';
-import { createPublishReviewResultsTool } from './tools/publish-review-results.tool.js';
+import { createCodeReviewerAgent } from './agent.js';
+import { buildCodeReviewerServer } from './app.js';
 
-const coreUrl = envService.get('CORE_URL');
-const reviewModel = envService.get('REVIEW_MODEL');
-
-// 2. Setup the tools with the Core service URL and envService
-const tools = {
-  getRepoContext: createGetRepoContextTool(coreUrl),
-  publishReviewResults: createPublishReviewResultsTool(coreUrl, { envService }),
-  getDiscussion: createGetDiscussionTool(coreUrl),
-  storeDiscussion: createStoreDiscussionTool(coreUrl),
-};
-
-// 3. Export the LlmAgent instance.
-export const codeReviewAgent = createOrchestrator({
-  tools,
-  model: reviewModel,
-});
+// Export agent instance for ADK CLI & local tooling compatibility
+export const codeReviewAgent = createCodeReviewerAgent(envService);
 export const rootAgent = codeReviewAgent;
 export default codeReviewAgent;
+
+async function start(): Promise<void> {
+  const host = envService.get('HOST');
+  const port = Number(envService.get('PORT'));
+
+  const server = await buildCodeReviewerServer({
+    envService,
+    fastifyOptions: { logger: true },
+  });
+
+  try {
+    await server.listen({ port, host });
+    server.log.info(`[ Agent Code Reviewer ready ] http://${host}:${port}`);
+  } catch (err) {
+    server.log.error(err);
+    process.exit(1);
+  }
+
+  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+  for (const signal of signals) {
+    process.on(signal, () => {
+      void (async () => {
+        server.log.info(`Received ${signal}, shutting down gracefully...`);
+        try {
+          await server.close();
+          server.log.info('Server shutdown complete.');
+          process.exit(0);
+        } catch (err) {
+          server.log.error(err, 'Error during shutdown');
+          process.exit(1);
+        }
+      })();
+    });
+  }
+}
+
+void start();

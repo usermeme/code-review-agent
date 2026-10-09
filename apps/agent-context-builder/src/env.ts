@@ -6,7 +6,8 @@ export const contextBuilderEnvSchema = z.object({
   REVIEW_MODEL: z.string().min(1),
   CONTEXT_READY_TOPIC: z.string().min(1),
   GITHUB_TOKEN: z.string().optional(),
-  PORT: z.string().optional(),
+  HOST: z.string().optional().default('0.0.0.0'),
+  PORT: z.string().optional().default('8080'),
   GEMINI_API_KEY: z.string().optional(),
   GOOGLE_GENAI_USE_VERTEXAI: z.string().optional(),
 });
