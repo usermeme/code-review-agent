@@ -9,32 +9,14 @@ import {
   PREventPayload,
 } from 'shared-types';
 import type { CoreEnvService } from '../env.js';
-import {
-  buildContext as defaultBuildContext,
-  type BuildContextOptions,
-} from 'agent-context-builder';
-import {
-  runReview as defaultRunReview,
-  type ReviewExecutionInput,
-  type RunReviewOptions,
-} from 'agent-code-reviewer';
-
-export type BuildContextFn = (
-  options: BuildContextOptions,
-) => Promise<Record<string, string> | string>;
-
-export type RunReviewFn = (
-  input: ReviewExecutionInput,
-  options?: RunReviewOptions,
-) => Promise<ReviewResultPayload>;
+import type { AgentService } from './agent.service.js';
 
 export interface EventOrchestratorDependencies {
   envService: CoreEnvService;
   prRepository: PrRepository;
   contextRepository: ContextRepository;
-  pubsub?: PubSub;
-  buildContext?: BuildContextFn;
-  runReview?: RunReviewFn;
+  pubsub: PubSub;
+  agentService: AgentService;
 }
 
 export class EventOrchestratorService {
@@ -42,16 +24,14 @@ export class EventOrchestratorService {
   private prRepository: PrRepository;
   private contextRepository: ContextRepository;
   private envService: CoreEnvService;
-  private buildContextFn: BuildContextFn;
-  private runReviewFn: RunReviewFn;
+  private agentService: AgentService;
 
   constructor(deps: EventOrchestratorDependencies) {
-    this.pubsub = deps.pubsub ?? new PubSub();
+    this.pubsub = deps.pubsub;
     this.prRepository = deps.prRepository;
     this.contextRepository = deps.contextRepository;
     this.envService = deps.envService;
-    this.buildContextFn = deps.buildContext ?? defaultBuildContext;
-    this.runReviewFn = deps.runReview ?? defaultRunReview;
+    this.agentService = deps.agentService;
   }
 
   async ingestPREvent(
@@ -78,7 +58,7 @@ export class EventOrchestratorService {
       logger?.info(
         `[Core] PR merged event for ${prKey}. Triggering incremental context build.`,
       );
-      const sections = await this.buildContextFn({
+      const sections = await this.agentService.buildContext({
         provider,
         owner,
         repo,
@@ -132,7 +112,7 @@ export class EventOrchestratorService {
           },
         });
 
-        const sections = await this.buildContextFn({
+        const sections = await this.agentService.buildContext({
           provider,
           owner,
           repo,
@@ -172,7 +152,7 @@ export class EventOrchestratorService {
         ? req.changedFiles.join('\n')
         : (req.changedFiles ?? '');
 
-      const reviewResult = await this.runReviewFn(
+      const reviewResult = await this.agentService.runReview(
         {
           prMeta: {
             provider,
@@ -235,7 +215,7 @@ export class EventOrchestratorService {
       ? pendingPR.changedFiles.join('\n')
       : (pendingPR?.changedFiles ?? '');
 
-    const reviewResult = await this.runReviewFn(
+    const reviewResult = await this.agentService.runReview(
       {
         prMeta: {
           provider,

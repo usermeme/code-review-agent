@@ -4,7 +4,7 @@ import { EventOrchestratorService } from '../../services/event-orchestrator.serv
 import { PREventPayload } from 'shared-types';
 
 export interface PrEventsConsumerDependencies {
-  pubsub?: PubSub;
+  pubsub: PubSub;
   subscriptionName: string;
   orchestrator: EventOrchestratorService;
   logger?: FastifyBaseLogger;
@@ -19,7 +19,7 @@ export class PrEventsConsumer {
   private isRunning = false;
 
   constructor(deps: PrEventsConsumerDependencies) {
-    this.pubsub = deps.pubsub ?? new PubSub();
+    this.pubsub = deps.pubsub;
     this.subscriptionName = deps.subscriptionName;
     this.orchestrator = deps.orchestrator;
     this.logger = deps.logger;

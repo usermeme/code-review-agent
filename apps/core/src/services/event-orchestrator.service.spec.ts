@@ -12,6 +12,7 @@ describe('EventOrchestratorService', () => {
   let publishedMessages: { topic: string; data: any }[];
   let mockBuildContext: any;
   let mockRunReview: any;
+  let mockAgentService: any;
 
   beforeEach(() => {
     testEnvService = new EnvService(coreEnvSchema, {
@@ -60,6 +61,11 @@ describe('EventOrchestratorService', () => {
         },
       ],
     });
+
+    mockAgentService = {
+      buildContext: mockBuildContext,
+      runReview: mockRunReview,
+    };
   });
 
   it('builds context and runs review in-process when baseline context is missing', async () => {
@@ -68,8 +74,7 @@ describe('EventOrchestratorService', () => {
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
       envService: testEnvService,
-      buildContext: mockBuildContext,
-      runReview: mockRunReview,
+      agentService: mockAgentService,
     });
 
     const req = {
@@ -144,8 +149,7 @@ describe('EventOrchestratorService', () => {
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
       envService: testEnvService,
-      buildContext: mockBuildContext,
-      runReview: mockRunReview,
+      agentService: mockAgentService,
     });
 
     const req = {
@@ -197,8 +201,7 @@ describe('EventOrchestratorService', () => {
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
       envService: testEnvService,
-      buildContext: mockBuildContext,
-      runReview: mockRunReview,
+      agentService: mockAgentService,
     });
 
     const req = {
@@ -247,6 +250,7 @@ describe('EventOrchestratorService', () => {
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
       envService: testEnvService,
+      agentService: mockAgentService,
     });
 
     await orchestrator.handleReviewResults({

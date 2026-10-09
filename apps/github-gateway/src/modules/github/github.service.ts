@@ -13,7 +13,7 @@ import type { GatewayEnvService } from '../../env.js';
 
 export interface GithubServiceDependencies {
   envService: GatewayEnvService;
-  pubsub?: PubSub;
+  pubsub: PubSub;
   octokit?: Octokit;
   webhookSecret?: string;
   token?: string;
@@ -27,7 +27,7 @@ export class GithubService {
 
   constructor(deps: GithubServiceDependencies) {
     this.envService = deps.envService;
-    this.pubsub = deps.pubsub ?? new PubSub();
+    this.pubsub = deps.pubsub;
 
     const webhookSecret =
       deps.webhookSecret ?? deps.envService.get('GITHUB_WEBHOOK_SECRET');

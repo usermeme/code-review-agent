@@ -4,7 +4,7 @@ import { GithubService } from '../github/github.service.js';
 import { ReviewResultPayload } from 'shared-types';
 
 export interface ReviewResultsConsumerDependencies {
-  pubsub?: PubSub;
+  pubsub: PubSub;
   subscriptionName: string;
   githubService: GithubService;
   logger?: FastifyBaseLogger;
@@ -19,7 +19,7 @@ export class ReviewResultsConsumer {
   private isRunning = false;
 
   constructor(deps: ReviewResultsConsumerDependencies) {
-    this.pubsub = deps.pubsub ?? new PubSub();
+    this.pubsub = deps.pubsub;
     this.subscriptionName = deps.subscriptionName;
     this.githubService = deps.githubService;
     this.logger = deps.logger;

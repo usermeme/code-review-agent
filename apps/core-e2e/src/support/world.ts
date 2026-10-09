@@ -58,38 +58,35 @@ export class CoreWorld extends World {
       prRepository: this.prRepository,
       contextRepository: this.contextRepository,
       envService: this.envService,
-      buildContext: async (options) => {
-        return {
-          architecture: `Architecture for ${options.repo}`,
-          modules: 'core, gateway',
-        };
-      },
-      runReview: async (input) => {
-        return {
-          provider: input.prMeta.provider || 'github',
-          owner: input.prMeta.owner || 'usermeme',
-          repo: input.prMeta.repo,
-          prNumber: input.prMeta.number,
-          summary: 'Automated review completed',
-          comments: [
-            {
-              path: 'src/main.ts',
-              position: 1,
-              body: 'Automated inline review comment',
-            },
-          ],
-        };
+      agentService: {
+        buildContext: async (options) => {
+          return {
+            architecture: `Architecture for ${options.repo}`,
+            modules: 'core, gateway',
+          };
+        },
+        runReview: async (input) => {
+          return {
+            provider: input.prMeta.provider || 'github',
+            owner: input.prMeta.owner || 'usermeme',
+            repo: input.prMeta.repo,
+            prNumber: input.prMeta.number,
+            summary: 'Automated review completed',
+            comments: [
+              {
+                path: 'src/main.ts',
+                position: 1,
+                body: 'Automated inline review comment',
+              },
+            ],
+          };
+        },
       },
     });
 
     // 2. Build Core Fastify application
     this.app = await buildCoreServer({
-      databaseService: this.db,
-      prRepository: this.prRepository,
       contextRepository: this.contextRepository,
-      orchestrator: this.orchestrator,
-      pubsub: this.pubsub as unknown as PubSub,
-      startConsumer: false,
       envService: this.envService,
       fastifyOptions: { logger: false },
     });
