@@ -26,7 +26,6 @@ export class CoreWorld extends World {
   public orchestrator!: EventOrchestratorService;
   public envService!: CoreEnvService;
   public coreRpcClient!: Client<typeof CoreService>;
-  public internalAuthToken = 'secure-pubsub-token';
   public lastResponse?: LightMyRequestResponse;
 
   constructor(options: IWorldOptions) {
@@ -50,17 +49,37 @@ export class CoreWorld extends World {
       PORT: '8080',
       PR_EVENTS_SUBSCRIPTION: 'test-pr-events-sub',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
-      BUILD_CONTEXT_TOPIC: 'build-context-topic',
-      REVIEW_CODE_TOPIC: 'review-code-topic',
-      INTERNAL_AUTH_TOKEN: this.internalAuthToken,
+      REVIEW_MODEL: 'gemini-2.5-flash',
     });
 
-    // 1. Initialize Orchestrator
+    // 1. Initialize Orchestrator with mock in-process agent executors
     this.orchestrator = new EventOrchestratorService({
       pubsub: this.pubsub as unknown as PubSub,
       prRepository: this.prRepository,
       contextRepository: this.contextRepository,
       envService: this.envService,
+      buildContext: async (options) => {
+        return {
+          architecture: `Architecture for ${options.repo}`,
+          modules: 'core, gateway',
+        };
+      },
+      runReview: async (input) => {
+        return {
+          provider: input.prMeta.provider || 'github',
+          owner: input.prMeta.owner || 'usermeme',
+          repo: input.prMeta.repo,
+          prNumber: input.prMeta.number,
+          summary: 'Automated review completed',
+          comments: [
+            {
+              path: 'src/main.ts',
+              position: 1,
+              body: 'Automated inline review comment',
+            },
+          ],
+        };
+      },
     });
 
     // 2. Build Core Fastify application
@@ -75,7 +94,7 @@ export class CoreWorld extends World {
       fastifyOptions: { logger: false },
     });
 
-    // 3. In-process ConnectRPC client pointing to coreApp's orchestrator (for legacy step compatibility)
+    // 3. In-process ConnectRPC client pointing to coreApp's orchestrator
     const coreTransport = createRouterTransport((router) => {
       router.service(CoreService, {
         ingestPREvent: async (req) => {

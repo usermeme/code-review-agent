@@ -7,8 +7,6 @@ import { ContextRepository } from './modules/database/repositories/context.repos
 import { EventOrchestratorService } from './services/event-orchestrator.service.js';
 import { healthModule } from './modules/health/health.module.js';
 import { contextModule } from './modules/context/context.module.js';
-import { reviewModule } from './modules/review/review.module.js';
-import { internalModule } from './modules/internal/internal.module.js';
 import { PrEventsConsumer } from './modules/pubsub/pr-events.consumer.js';
 import type { CoreEnvService } from './env.js';
 
@@ -52,27 +50,13 @@ export async function buildCoreServer(
   // 1. Health check module
   await server.register(healthModule);
 
-  // 2. Internal PubSub callbacks module (temporary backward compat for agent push)
-  await server.register(internalModule, {
-    prefix: '/api/v1/internal',
-    orchestrator,
-    envService: options.envService,
-  });
-
-  // 3. Context lookup module
+  // 2. Context lookup module
   await server.register(contextModule, {
     prefix: '/api/v1/context',
     contextRepository,
   });
 
-  // 4. Review results module
-  await server.register(reviewModule, {
-    prefix: '/api/v1/review',
-    orchestrator,
-    envService: options.envService,
-  });
-
-  // 5. Pub/Sub PR Events Consumer
+  // 3. Pub/Sub PR Events Consumer
   if (options.startConsumer !== false) {
     const subscriptionName = options.envService.get('PR_EVENTS_SUBSCRIPTION');
     const consumer =

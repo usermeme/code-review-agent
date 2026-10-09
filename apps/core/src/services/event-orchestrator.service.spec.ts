@@ -10,6 +10,8 @@ describe('EventOrchestratorService', () => {
   let mockContextRepo: any;
   let testEnvService: CoreEnvService;
   let publishedMessages: { topic: string; data: any }[];
+  let mockBuildContext: any;
+  let mockRunReview: any;
 
   beforeEach(() => {
     testEnvService = new EnvService(coreEnvSchema, {
@@ -17,8 +19,6 @@ describe('EventOrchestratorService', () => {
       PORT: '8080',
       PR_EVENTS_SUBSCRIPTION: 'test-pr-events-sub',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
-      BUILD_CONTEXT_TOPIC: 'build-context-topic',
-      REVIEW_CODE_TOPIC: 'review-code-topic',
     });
     publishedMessages = [];
     mockPubSub = {
@@ -40,14 +40,36 @@ describe('EventOrchestratorService', () => {
       getContext: vi.fn().mockResolvedValue(null),
       saveContext: vi.fn().mockResolvedValue(undefined),
     };
+
+    mockBuildContext = vi.fn().mockResolvedValue({
+      architecture: 'In-process architecture',
+      modules: 'core, gateway',
+    });
+
+    mockRunReview = vi.fn().mockResolvedValue({
+      provider: 'github',
+      owner: 'test-org',
+      repo: 'test-repo',
+      prNumber: 42,
+      summary: 'Automated review passed',
+      comments: [
+        {
+          path: 'src/main.ts',
+          position: 5,
+          body: 'Code looks clean',
+        },
+      ],
+    });
   });
 
-  it('triggers context build when baseline context is missing', async () => {
+  it('builds context and runs review in-process when baseline context is missing', async () => {
     const orchestrator = new EventOrchestratorService({
       pubsub: mockPubSub,
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
       envService: testEnvService,
+      buildContext: mockBuildContext,
+      runReview: mockRunReview,
     });
 
     const req = {
@@ -74,18 +96,43 @@ describe('EventOrchestratorService', () => {
 
     const res = await orchestrator.ingestPREvent(req);
 
-    expect(res.status).toBe('queued');
+    expect(res.status).toBe('reviewing');
     expect(res.success).toBe(true);
-    expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
-      'github:test-org:test-repo:42',
-      expect.objectContaining({ status: 'queued' }),
+    expect(mockBuildContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: 'test-org',
+        repo: 'test-repo',
+        isIncrementalUpdate: false,
+      }),
+    );
+    expect(mockContextRepo.saveContext).toHaveBeenCalledWith(
+      'github:test-org:test-repo:0',
+      expect.objectContaining({
+        summary: expect.stringContaining('In-process architecture'),
+      }),
+    );
+    expect(mockRunReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prMeta: expect.objectContaining({
+          owner: 'test-org',
+          repo: 'test-repo',
+          number: 42,
+        }),
+      }),
+      expect.objectContaining({
+        baselineContext: expect.stringContaining('In-process architecture'),
+      }),
     );
     expect(publishedMessages).toHaveLength(1);
-    expect(publishedMessages[0].topic).toBe('build-context-topic');
+    expect(publishedMessages[0].topic).toBe('test-review-results-topic');
     expect(publishedMessages[0].data.prNumber).toBe(42);
+    expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+      'github:test-org:test-repo:42',
+      expect.objectContaining({ status: 'completed' }),
+    );
   });
 
-  it('triggers review directly when baseline context exists', async () => {
+  it('triggers review directly in-process when baseline context exists', async () => {
     mockContextRepo.getContext.mockResolvedValue({
       prKey: 'github:test-org:test-repo:0',
       summary: JSON.stringify({ architecture: 'microservices' }),
@@ -97,6 +144,8 @@ describe('EventOrchestratorService', () => {
       prRepository: mockPrRepo,
       contextRepository: mockContextRepo,
       envService: testEnvService,
+      buildContext: mockBuildContext,
+      runReview: mockRunReview,
     });
 
     const req = {
@@ -125,15 +174,71 @@ describe('EventOrchestratorService', () => {
 
     expect(res.status).toBe('reviewing');
     expect(res.success).toBe(true);
-    expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
-      'github:test-org:test-repo:42',
-      expect.objectContaining({ status: 'reviewing' }),
+    expect(mockBuildContext).not.toHaveBeenCalled();
+    expect(mockRunReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prMeta: expect.objectContaining({ number: 42 }),
+      }),
+      expect.objectContaining({
+        baselineContext: expect.stringContaining('microservices'),
+      }),
     );
     expect(publishedMessages).toHaveLength(1);
-    expect(publishedMessages[0].topic).toBe('review-code-topic');
-    expect(publishedMessages[0].data.baselineContext).toContain(
-      'microservices',
+    expect(publishedMessages[0].topic).toBe('test-review-results-topic');
+    expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+      'github:test-org:test-repo:42',
+      expect.objectContaining({ status: 'completed' }),
     );
+  });
+
+  it('triggers incremental context build when merged PR arrives', async () => {
+    const orchestrator = new EventOrchestratorService({
+      pubsub: mockPubSub,
+      prRepository: mockPrRepo,
+      contextRepository: mockContextRepo,
+      envService: testEnvService,
+      buildContext: mockBuildContext,
+      runReview: mockRunReview,
+    });
+
+    const req = {
+      $typeName: 'core.v1.IngestPREventRequest',
+      prMeta: {
+        $typeName: 'core.v1.PRMeta',
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        prNumber: 42,
+        action: 'closed',
+        title: 'Feature X',
+        author: 'developer',
+        branch: 'feat/x',
+        body: 'Details',
+        htmlUrl: '',
+        cloneUrl: '',
+        baseRef: 'main',
+        isIncrementalUpdate: true,
+      },
+      diff: '',
+      changedFiles: [],
+    } as unknown as IngestPREventRequest;
+
+    const res = await orchestrator.ingestPREvent(req);
+
+    expect(res.status).toBe('queued');
+    expect(mockBuildContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isIncrementalUpdate: true,
+        prNumber: 42,
+      }),
+    );
+    expect(mockContextRepo.saveContext).toHaveBeenCalledWith(
+      'github:test-org:test-repo:0',
+      expect.objectContaining({
+        summary: expect.stringContaining('In-process architecture'),
+      }),
+    );
+    expect(mockRunReview).not.toHaveBeenCalled();
   });
 
   it('publishes review results to REVIEW_RESULTS_TOPIC when review results arrive', async () => {

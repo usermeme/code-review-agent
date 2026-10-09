@@ -6,12 +6,10 @@ export const coreEnvSchema = z.object({
   PORT: z.string().transform(Number),
   PR_EVENTS_SUBSCRIPTION: z.string().min(1).default('pr-events-sub'),
   REVIEW_RESULTS_TOPIC: z.string().min(1).default('review-results'),
-  BUILD_CONTEXT_TOPIC: z.string().optional().default('build-context-topic'),
-  REVIEW_CODE_TOPIC: z.string().optional().default('review-code-topic'),
-  CONTEXT_READY_TOPIC: z.string().optional(),
-  REVIEW_RESULT_TOPIC: z.string().optional(),
-  INTERNAL_AUTH_TOKEN: z.string().optional(),
+  REVIEW_MODEL: z.string().optional().default('gemini-2.5-flash'),
   GOOGLE_CLOUD_PROJECT: z.string().optional(),
+  GITHUB_TOKEN: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
 });
 
 export type CoreEnvSchema = typeof coreEnvSchema;
