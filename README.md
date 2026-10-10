@@ -2,14 +2,14 @@
 
 A fully autonomous, context-aware AI Code Review system powered by [`@google/adk`](https://github.com/google/adk) and Google Gemini.
 
-`code-review-agent` follows a decoupled, secure event-driven microservices architecture featuring provider-specific gateways (**`github-gateway`**), a centralized domain & persistence microservice (**`core`**), and two specialized AI agent microservices (**`agent-context-builder`** and **`agent-code-reviewer`**). Gateways are completely isolated from the database, communicating with Core via typed ConnectRPC, while heavy AI tasks run asynchronously over Google Cloud Pub/Sub.
+`code-review-agent` follows a decoupled, secure event-driven microservices architecture featuring provider-specific gateways (**`github-gateway`**), a centralized domain & persistence microservice (**`core`**), and in-process specialized AI agent domain libraries (**`agent-context-builder`** and **`agent-code-reviewer`**). Gateways are completely isolated from the database, communicating with Core asynchronously over Google Cloud Pub/Sub via event-driven pull subscriptions.
 
 ---
 
 ## 🌟 Key Features
 
 - **Strict Security Boundaries**: Gateways have zero database access or credentials. Core holds zero Git access tokens.
-- **Pluggable Multi-Gateway Architecture**: Easily swap or add provider gateways (GitHub, GitLab, Bitbucket) implementing common ConnectRPC contracts.
+- **Pluggable Multi-Gateway Architecture**: Easily swap or add provider gateways (GitHub, GitLab, Bitbucket) implementing common Pub/Sub event schemas.
 - **Context-Aware Reviews**: Automatically generates and continuously updates a full baseline architectural context of your codebase to eliminate hallucinations.
 - **Agentic Multi-Role Swarm**: Spawns parallel specialized reviewers (Code Quality, Bug Detection, Ticket Alignment) using `@google/adk`.
 - **Top-Level Summaries & Inline Comments**: Submits formal pull request reviews alongside actionable inline review comments directly to the Git provider.
@@ -25,40 +25,31 @@ sequenceDiagram
     autonumber
     actor GitHub
     participant GW as github-gateway (:8080)
-    participant Core as core (:8080 + Firestore)
     participant Bus as Google Cloud Pub/Sub
-    participant CtxAgent as Context Builder Agent (ADK)
-    participant RevAgent as Code Reviewer Agent (ADK)
+    participant Core as core (:8080 + Firestore)
 
     %% 1. Ingress
     GitHub->>GW: 1. Webhook (PR Opened / Synchronized / Issue Comment)
     Note over GW: Validates HMAC signature<br/>Fetches PR diff via Octokit
-    GW->>Core: 2. ConnectRPC: IngestPREvent(meta, diff, changedFiles)
-    Note over Core: Stores PR status: 'queued'<br/>Checks Firestore baseline context
-    Core-->>GW: 3. RPC Response: 202 Accepted
-    GW-->>GitHub: 4. HTTP 200 OK (< 500ms)
+    GW->>Bus: 2. Publish (pr-events topic)
+    GW-->>GitHub: 3. HTTP 200 OK (< 500ms)
 
-    %% 2. Context Orchestration
+    %% 2. Orchestration & Agents (In-process)
+    Bus->>Core: 4. Pull Subscription (pr-events-sub)
+    Note over Core: Stores PR status: 'queued'<br/>Checks Firestore baseline context
     alt Baseline Context Missing
-        Core->>Bus: 5a. Publish Event (build-context-topic)
-        Bus->>CtxAgent: 6a. Trigger Context Builder
-        Note over CtxAgent: Clones repo, chunks files, synthesizes baseline
-        CtxAgent->>Bus: 7a. Publish (context-ready-topic)
-        Bus->>Core: 8a. Push to Core -> Save baseline context in Firestore
+        Note over Core: Triggers in-process Context Builder Agent (ADK)<br/>Clones repo, chunks files, synthesizes baseline
+        Note over Core: Saves baseline context in Firestore
     end
 
     %% 3. Code Review
-    Core->>Bus: 9. Publish Event (review-code-topic, with diff + baseline)
-    Bus->>RevAgent: 10. Trigger Code Reviewer Swarm
-    Note over RevAgent: Multi-agent swarm reviews diff against baseline
-    RevAgent->>Bus: 11. Publish Results (review-result-topic)
+    Note over Core: Triggers in-process Code Review Agent (ADK)<br/>Multi-agent swarm reviews diff against baseline
 
     %% 4. Review Completion & Egress
-    Bus->>Core: 12. Push to Core -> Save findings, update status 'completed'
-    Core->>GW: 13. ConnectRPC: GatewayService.PostReview(comments, summary)
+    Core->>Bus: 5. Publish Results (review-results topic)
+    Bus->>GW: 6. Pull Subscription (review-results-sub)
     Note over GW: Uses Octokit to submit formal review & inline comments
-    GW-->>Core: 14. RPC Response: { success: true, reviewId }
-    GW->>GitHub: 15. PR Review & Inline Comments Appear on GitHub!
+    GW->>GitHub: 7. PR Review & Inline Comments Appear on GitHub!
 ```
 
 ---
@@ -70,15 +61,16 @@ This monorepo is managed with [Nx](https://nx.dev) and [pnpm](https://pnpm.io):
 ```
 code-review-agent/
 ├── apps/
-│   ├── github-gateway/          # Stateless GitHub webhook ingress & ConnectRPC egress
+│   ├── github-gateway/          # Stateless GitHub webhook ingress & Pub/Sub egress
 │   ├── github-gateway-e2e/      # Cucumber/Gherkin BDD integration tests for GitHub Gateway
-│   ├── core/                    # Domain logic, Firestore persistence & Pub/Sub orchestration
-│   ├── core-e2e/                # Cucumber/Gherkin BDD integration tests for Core
-│   ├── agent-context-builder/   # ADK agent for repo indexing & baseline context
-│   └── agent-code-reviewer/     # ADK agent for diff review & inline findings
+│   ├── core/                    # Domain logic, Firestore persistence & in-process ADK orchestration
+│   └── core-e2e/                # Cucumber/Gherkin BDD integration tests for Core
 ├── libs/
+│   ├── agent-context-builder/   # ADK agent library for repo indexing & baseline context
+│   ├── agent-code-reviewer/     # ADK agent library for diff review & inline findings
+│   ├── pubsub/                  # Abstract Pub/Sub consumer & lifecycle manager
 │   ├── env/                     # Type-safe environment manager with eager Zod schema validation
-│   ├── contracts/               # Protobuf schemas & ConnectRPC client/server contracts
+│   ├── contracts/               # Protobuf schemas & ConnectRPC client/server contracts (Legacy/Internal)
 │   └── shared-types/            # Common domain TypeScript interfaces & schemas
 ├── .github/
 │   └── workflows/
@@ -93,12 +85,10 @@ code-review-agent/
 
 Every merge to `main` and version tag (`v*.*.*`) automatically publishes multi-architecture (`linux/amd64`, `linux/arm64`) images to GitHub Container Registry (GHCR):
 
-| Service             | Container Image                                            | Description                                                  |
-| :------------------ | :--------------------------------------------------------- | :----------------------------------------------------------- |
-| **GitHub Gateway**  | `ghcr.io/<owner>/code-review-agent-github-gateway:latest`  | Stateless webhook receiver & ConnectRPC GitHub egress        |
-| **Core Service**    | `ghcr.io/<owner>/code-review-agent-core:latest`            | Firestore database state, workflow orchestration, ConnectRPC |
-| **Context Builder** | `ghcr.io/<owner>/code-review-agent-context-builder:latest` | ADK agent for repo indexing & baseline context               |
-| **Code Reviewer**   | `ghcr.io/<owner>/code-review-agent-code-reviewer:latest`   | ADK agent for diff analysis & inline suggestions             |
+| Service            | Container Image                                           | Description                                                         |
+| :----------------- | :-------------------------------------------------------- | :------------------------------------------------------------------ |
+| **GitHub Gateway** | `ghcr.io/<owner>/code-review-agent-github-gateway:latest` | Stateless webhook receiver & GitHub egress                          |
+| **Core Service**   | `ghcr.io/<owner>/code-review-agent-core:latest`           | Firestore database state, workflow orchestration, in-process agents |
 
 ---
 
@@ -167,7 +157,7 @@ code-review-agent-deploy/ (Private Repo)
 code-review-agent-deploy/
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml               # Automated Cloud Run deployment workflow (all 4 services)
+│       └── deploy.yml               # Automated Cloud Run deployment workflow
 ├── scripts/
 │   └── setup-gcp-infra.sh           # Idempotent GCP setup (APIs, Firestore, Pub/Sub topics, push subscriptions)
 ├── terraform/                       # Optional: Declarative Terraform configuration
@@ -221,47 +211,13 @@ jobs:
             --region "${{ env.GCP_REGION }}" \
             --platform managed \
             --no-allow-unauthenticated \
-            --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,BUILD_CONTEXT_TOPIC=build-context-topic,CONTEXT_READY_TOPIC=context-ready-topic,REVIEW_CODE_TOPIC=review-code-topic,REVIEW_RESULT_TOPIC=review-result-topic,INTERNAL_AUTH_TOKEN=${{ secrets.INTERNAL_AUTH_TOKEN }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
-
-          CORE_URL=$(gcloud run services describe core-service --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
-          echo "CORE_URL=${CORE_URL}" >> $GITHUB_ENV
-
-      # 2. Deploy Context Builder Agent (ADK)
-      - name: Deploy Context Builder Agent
-        run: |
-          gcloud run deploy agent-context-builder \
-            --image "ghcr.io/${{ env.IMAGE_OWNER }}/code-review-agent-context-builder:${{ env.IMAGE_TAG }}" \
-            --region "${{ env.GCP_REGION }}" \
-            --platform managed \
-            --no-allow-unauthenticated \
             --memory 2Gi \
             --cpu 2 \
-            --timeout 600s \
+            --no-cpu-throttling \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},CONTEXT_READY_TOPIC=context-ready-topic,GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,PR_EVENTS_SUBSCRIPTION=pr-events-sub,REVIEW_RESULTS_TOPIC=review-results,REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
-          CONTEXT_BUILDER_URL=$(gcloud run services describe agent-context-builder --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
-          echo "CONTEXT_BUILDER_URL=${CONTEXT_BUILDER_URL}" >> $GITHUB_ENV
-
-      # 3. Deploy Code Reviewer Agent (ADK)
-      - name: Deploy Code Reviewer Agent
-        run: |
-          gcloud run deploy agent-code-reviewer \
-            --image "ghcr.io/${{ env.IMAGE_OWNER }}/code-review-agent-code-reviewer:${{ env.IMAGE_TAG }}" \
-            --region "${{ env.GCP_REGION }}" \
-            --platform managed \
-            --no-allow-unauthenticated \
-            --memory 2Gi \
-            --cpu 2 \
-            --timeout 600s \
-            --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},REVIEW_RESULT_TOPIC=review-result-topic,INTERNAL_AUTH_TOKEN=${{ secrets.INTERNAL_AUTH_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
-
-          CODE_REVIEWER_URL=$(gcloud run services describe agent-code-reviewer --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
-          echo "CODE_REVIEWER_URL=${CODE_REVIEWER_URL}" >> $GITHUB_ENV
-
-      # 4. Deploy GitHub Gateway (Public Ingress)
+      # 2. Deploy GitHub Gateway (Public Ingress)
       - name: Deploy GitHub Gateway
         run: |
           gcloud run deploy github-gateway \
@@ -269,59 +225,22 @@ jobs:
             --region "${{ env.GCP_REGION }}" \
             --platform managed \
             --allow-unauthenticated \
+            --memory 512Mi \
+            --cpu 1 \
+            --no-cpu-throttling \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,CORE_URL=${{ env.CORE_URL }},GITHUB_WEBHOOK_SECRET=${{ secrets.GITHUB_WEBHOOK_SECRET }},GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},INTERNAL_AUTH_TOKEN=${{ secrets.INTERNAL_AUTH_TOKEN }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,GITHUB_WEBHOOK_SECRET=${{ secrets.GITHUB_WEBHOOK_SECRET }},GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},PR_EVENTS_TOPIC=pr-events,REVIEW_RESULTS_SUBSCRIPTION=review-results-sub,GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
-          GATEWAY_URL=$(gcloud run services describe github-gateway --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
-          echo "GATEWAY_URL=${GATEWAY_URL}" >> $GITHUB_ENV
-
-      # 5. Link Gateway URL back to Core Service
-      - name: Update Core Service with Gateway URL
+      # 3. Configure Pub/Sub Pull Subscriptions
+      - name: Configure Pub/Sub Pull Subscriptions
         run: |
-          gcloud run services update core-service \
-            --region "${{ env.GCP_REGION }}" \
-            --update-env-vars "GATEWAY_URL=${{ env.GATEWAY_URL }}"
+          gcloud pubsub subscriptions create pr-events-sub \
+            --topic=pr-events \
+            --ack-deadline=600 || true
 
-      # 6. Configure Pub/Sub Push Subscriptions
-      - name: Configure Pub/Sub Push Subscriptions
-        run: |
-          SA_EMAIL="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
-
-          # Subscription 1: build-context-topic -> agent-context-builder
-          gcloud pubsub subscriptions create build-context-sub \
-            --topic=build-context-topic \
-            --push-endpoint="${{ env.CONTEXT_BUILDER_URL }}/" \
-            --push-auth-service-account="${SA_EMAIL}" \
-            --ack-deadline=600 || \
-          gcloud pubsub subscriptions update build-context-sub \
-            --push-endpoint="${{ env.CONTEXT_BUILDER_URL }}/"
-
-          # Subscription 2: context-ready-topic -> core
-          gcloud pubsub subscriptions create context-ready-sub \
-            --topic=context-ready-topic \
-            --push-endpoint="${{ env.CORE_URL }}/api/v1/internal/pubsub?token=${{ secrets.INTERNAL_AUTH_TOKEN }}" \
-            --push-auth-service-account="${SA_EMAIL}" \
-            --ack-deadline=60 || \
-          gcloud pubsub subscriptions update context-ready-sub \
-            --push-endpoint="${{ env.CORE_URL }}/api/v1/internal/pubsub?token=${{ secrets.INTERNAL_AUTH_TOKEN }}"
-
-          # Subscription 3: review-code-topic -> agent-code-reviewer
-          gcloud pubsub subscriptions create review-code-sub \
-            --topic=review-code-topic \
-            --push-endpoint="${{ env.CODE_REVIEWER_URL }}/" \
-            --push-auth-service-account="${SA_EMAIL}" \
-            --ack-deadline=600 || \
-          gcloud pubsub subscriptions update review-code-sub \
-            --push-endpoint="${{ env.CODE_REVIEWER_URL }}/"
-
-          # Subscription 4: review-result-topic -> core
-          gcloud pubsub subscriptions create review-result-sub \
-            --topic=review-result-topic \
-            --push-endpoint="${{ env.CORE_URL }}/api/v1/review/results?token=${{ secrets.INTERNAL_AUTH_TOKEN }}" \
-            --push-auth-service-account="${SA_EMAIL}" \
-            --ack-deadline=60 || \
-          gcloud pubsub subscriptions update review-result-sub \
-            --push-endpoint="${{ env.CORE_URL }}/api/v1/review/results?token=${{ secrets.INTERNAL_AUTH_TOKEN }}"
+          gcloud pubsub subscriptions create review-results-sub \
+            --topic=review-results \
+            --ack-deadline=60 || true
 ```
 
 ---
@@ -361,7 +280,7 @@ fi
 
 # 3. Create Pub/Sub Topics
 echo "Creating Pub/Sub topics..."
-for TOPIC in build-context-topic context-ready-topic review-code-topic review-result-topic; do
+for TOPIC in pr-events review-results; do
   if ! gcloud pubsub topics describe "${TOPIC}" &>/dev/null; then
     gcloud pubsub topics create "${TOPIC}"
     echo "Created topic: ${TOPIC}"
@@ -382,6 +301,7 @@ echo "Granting IAM roles to ${SA_EMAIL}..."
 ROLES=(
   "roles/datastore.user"
   "roles/pubsub.publisher"
+  "roles/pubsub.subscriber"
   "roles/run.invoker"
 )
 for ROLE in "${ROLES[@]}"; do
@@ -389,14 +309,6 @@ for ROLE in "${ROLES[@]}"; do
     --member="serviceAccount:${SA_EMAIL}" \
     --role="${ROLE}" --quiet
 done
-
-# 6. Allow Pub/Sub service agent to create auth tokens for push subscriptions
-PROJECT_NUMBER=$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')
-PUBSUB_SA="service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
-echo "Granting Service Account Token Creator to Pub/Sub SA: ${PUBSUB_SA}..."
-gcloud iam service-accounts add-iam-policy-binding "${SA_EMAIL}" \
-  --member="serviceAccount:${PUBSUB_SA}" \
-  --role="roles/iam.serviceAccountTokenCreator" --quiet
 
 echo "GCP Infrastructure setup complete! You are ready to deploy."
 ```
@@ -457,10 +369,8 @@ resource "google_firestore_database" "database" {
 # 3. Pub/Sub Topics
 resource "google_pubsub_topic" "topics" {
   for_each = toset([
-    "build-context-topic",
-    "context-ready-topic",
-    "review-code-topic",
-    "review-result-topic",
+    "pr-events",
+    "review-results",
   ])
   name       = each.key
   depends_on = [google_project_service.apis]
@@ -476,20 +386,12 @@ resource "google_project_iam_member" "sa_roles" {
   for_each = toset([
     "roles/datastore.user",
     "roles/pubsub.publisher",
+    "roles/pubsub.subscriber",
     "roles/run.invoker",
   ])
   project = var.project_id
   role    = each.key
   member  = "serviceAccount:${google_service_account.agent_sa.email}"
-}
-
-# 5. Allow Pub/Sub to mint OIDC tokens using agent service account
-data "google_project" "current" {}
-
-resource "google_service_account_iam_member" "pubsub_token_creator" {
-  service_account_id = google_service_account.agent_sa.name
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }
 ```
 
@@ -511,10 +413,11 @@ services:
     environment:
       - PORT=8080
       - HOST=0.0.0.0
-      - CORE_URL=http://core:8080
       - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
+      - PR_EVENTS_TOPIC=pr-events
+      - REVIEW_RESULTS_SUBSCRIPTION=review-results-sub
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
     depends_on:
       - core
 
@@ -524,41 +427,11 @@ services:
     environment:
       - PORT=8080
       - HOST=0.0.0.0
-      - GATEWAY_URL=http://github-gateway:8080
-      - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
-      - BUILD_CONTEXT_TOPIC=build-context-topic
-      - CONTEXT_READY_TOPIC=context-ready-topic
-      - REVIEW_CODE_TOPIC=review-code-topic
-      - REVIEW_RESULT_TOPIC=review-result-topic
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
-    # Mount GCP service account credentials if running outside GCP:
-    # volumes:
-    #   - ./gcp-key.json:/secrets/gcp-key.json
-    # environment:
-    #   - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-key.json
-
-  agent-context-builder:
-    image: ghcr.io/<owner>/code-review-agent-context-builder:latest
-    restart: always
-    environment:
-      - PORT=8080
-      - CORE_URL=http://core:8080
+      - PR_EVENTS_SUBSCRIPTION=pr-events-sub
+      - REVIEW_RESULTS_TOPIC=review-results
       - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - CONTEXT_READY_TOPIC=context-ready-topic
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
-
-  agent-code-reviewer:
-    image: ghcr.io/<owner>/code-review-agent-code-reviewer:latest
-    restart: always
-    environment:
-      - PORT=8080
-      - CORE_URL=http://core:8080
-      - REVIEW_MODEL=gemini-3.8-flash
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - REVIEW_RESULT_TOPIC=review-result-topic
-      - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
 ```
 
@@ -571,39 +444,33 @@ If you want an AI agent (such as Antigravity, Claude, Cursor, or Devin) to build
 ```markdown
 Please create a new private GitOps deployment repository named `code-review-agent-deploy` for the `code-review-agent` system.
 
-The application publishes 4 multi-arch container images to GitHub Container Registry (GHCR):
+The application publishes 2 multi-arch container images to GitHub Container Registry (GHCR):
 
 - `ghcr.io/<owner>/code-review-agent-github-gateway:latest`
 - `ghcr.io/<owner>/code-review-agent-core:latest`
-- `ghcr.io/<owner>/code-review-agent-context-builder:latest`
-- `ghcr.io/<owner>/code-review-agent-code-reviewer:latest`
 
 Please generate the complete, production-ready repository with the following files:
 
 1. `.github/workflows/deploy.yml`:
-   - Deploys all 4 services to Google Cloud Run in this order: Core, Context Builder, Code Reviewer, Gateway.
-   - Updates Core with the deployed Gateway URL.
-   - Configures the 4 Pub/Sub push subscriptions with OIDC authentication using service account `code-review-agent-sa@<project>.iam.gserviceaccount.com`:
-     - `build-context-sub` -> Agent Context Builder root (`/`)
-     - `context-ready-sub` -> Core endpoint (`/api/v1/internal/pubsub?token=${INTERNAL_AUTH_TOKEN}`)
-     - `review-code-sub` -> Agent Code Reviewer root (`/`)
-     - `review-result-sub` -> Core endpoint (`/api/v1/review/results?token=${INTERNAL_AUTH_TOKEN}`)
+   - Deploys both services to Google Cloud Run in this order: Core, Gateway.
+   - Configures the 2 Pub/Sub pull subscriptions:
+     - `pr-events-sub` (subscribes to `pr-events` topic)
+     - `review-results-sub` (subscribes to `review-results` topic)
 
 2. `scripts/setup-gcp-infra.sh`:
    - Idempotent bash script to enable GCP APIs (`run`, `pubsub`, `firestore`, `iam`).
    - Creates Firestore native database `(default)`.
-   - Creates the 4 Pub/Sub topics: `build-context-topic`, `context-ready-topic`, `review-code-topic`, `review-result-topic`.
-   - Provisions `code-review-agent-sa` service account with `roles/datastore.user`, `roles/pubsub.publisher`, and `roles/run.invoker`.
-   - Grants `roles/iam.serviceAccountTokenCreator` to the Pub/Sub service agent so push subscriptions can mint OIDC tokens.
+   - Creates the 2 Pub/Sub topics: `pr-events`, `review-results`.
+   - Provisions `code-review-agent-sa` service account with `roles/datastore.user`, `roles/pubsub.publisher`, `roles/pubsub.subscriber`, and `roles/run.invoker`.
 
 3. `terraform/main.tf`, `terraform/variables.tf`, `terraform/outputs.tf`:
    - Full Terraform declarations equivalent to `setup-gcp-infra.sh`.
 
 4. `docker-compose.prod.yml`:
-   - Production Docker Compose setup running all 4 services referencing the GHCR images.
+   - Production Docker Compose setup running both services referencing the GHCR images.
 
 5. `.env.example`:
-   - Complete template documenting all required secrets: `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`, `INTERNAL_AUTH_TOKEN`, `GEMINI_API_KEY`, `GCP_PROJECT_ID`, and `GCP_REGION`.
+   - Complete template documenting all required secrets: `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`, `GEMINI_API_KEY`, `GCP_PROJECT_ID`, and `GCP_REGION`.
 
 6. `README.md`:
    - Step-by-step instructions on setting GitHub repository secrets/variables, running the infra setup, and triggering the deployment workflow.
@@ -615,54 +482,30 @@ Each service strictly validates required variables and fails fast at startup if 
 
 ### GitHub Gateway (`apps/github-gateway`)
 
-| Variable                | Required | Description                                                                      |
-| :---------------------- | :------: | :------------------------------------------------------------------------------- |
-| `PORT`                  |   Yes    | Port to listen on (e.g. `8080`)                                                  |
-| `HOST`                  |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                       |
-| `CORE_URL`              |   Yes    | HTTP base URL of the Core microservice for ConnectRPC communication              |
-| `GITHUB_WEBHOOK_SECRET` |   Yes    | Secret string used to verify incoming GitHub webhook HMAC signatures             |
-| `GITHUB_TOKEN`          |   Yes    | GitHub Personal Access Token (classic with `repo` scope) for PR diffs & comments |
-| `INTERNAL_AUTH_TOKEN`   |   Yes    | Shared secret token for authenticating ConnectRPC requests                       |
+| Variable                      | Required | Description                                                                      |
+| :---------------------------- | :------: | :------------------------------------------------------------------------------- |
+| `PORT`                        |   Yes    | Port to listen on (e.g. `8080`)                                                  |
+| `HOST`                        |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                       |
+| `GITHUB_WEBHOOK_SECRET`       |   Yes    | Secret string used to verify incoming GitHub webhook HMAC signatures             |
+| `GITHUB_TOKEN`                |   Yes    | GitHub Personal Access Token (classic with `repo` scope) for PR diffs & comments |
+| `PR_EVENTS_TOPIC`             | Optional | Google Cloud Pub/Sub topic to publish PR events to                               |
+| `REVIEW_RESULTS_SUBSCRIPTION` | Optional | Google Cloud Pub/Sub subscription to pull review results from                    |
+| `GOOGLE_CLOUD_PROJECT`        | Optional | GCP Project ID (auto-detected when running in GCP)                               |
 
 ### Core Service (`apps/core`)
 
-| Variable                  | Required | Description                                                                   |
-| :------------------------ | :------: | :---------------------------------------------------------------------------- |
-| `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                               |
-| `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                    |
-| `GATEWAY_URL`             |   Yes    | HTTP base URL of the Gateway microservice for ConnectRPC review posting       |
-| `INTERNAL_AUTH_TOKEN`     |   Yes    | Shared secret token for authenticating ConnectRPC and internal push endpoints |
-| `BUILD_CONTEXT_TOPIC`     |   Yes    | Google Cloud Pub/Sub topic to publish context build requests to               |
-| `REVIEW_CODE_TOPIC`       |   Yes    | Google Cloud Pub/Sub topic to publish code review tasks to                    |
-| `CONTEXT_READY_TOPIC`     | Optional | Google Cloud Pub/Sub topic for context ready notifications                    |
-| `REVIEW_RESULT_TOPIC`     | Optional | Google Cloud Pub/Sub topic for review result events                           |
-| `GOOGLE_CLOUD_PROJECT`    | Optional | GCP Project ID (auto-detected when running in GCP)                            |
-| `FIRESTORE_EMULATOR_HOST` | Optional | Host of local Firestore emulator for dev/testing (e.g. `localhost:8081`)      |
-| `PUBSUB_EMULATOR_HOST`    | Optional | Host of local Pub/Sub emulator for dev/testing (e.g. `localhost:8085`)        |
-
-### Context Builder Agent (`apps/agent-context-builder`)
-
-| Variable                    | Required | Description                                                                                              |
-| :-------------------------- | :------: | :------------------------------------------------------------------------------------------------------- |
-| `PORT`                      |   Yes    | Port to listen on (e.g. `8080`)                                                                          |
-| `CORE_URL`                  |   Yes    | HTTP base URL of the Core microservice for fetching/saving context                                       |
-| `REVIEW_MODEL`              |   Yes    | Gemini model identifier (e.g. `gemini-3.8-flash`)                                                        |
-| `CONTEXT_READY_TOPIC`       |   Yes    | Google Cloud Pub/Sub topic to publish completion event to                                                |
-| `GITHUB_TOKEN`              | Optional | GitHub Personal Access Token (classic with `repo` scope) to clone private repositories or fetch PR diffs |
-| `GEMINI_API_KEY`            | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)                               |
-| `GOOGLE_GENAI_USE_VERTEXAI` | Optional | Set to `1` to authenticate via Google Cloud Vertex AI ADC                                                |
-
-### Code Reviewer Agent (`apps/agent-code-reviewer`)
-
-| Variable                    | Required | Description                                                                |
-| :-------------------------- | :------: | :------------------------------------------------------------------------- |
-| `PORT`                      |   Yes    | Port to listen on (e.g. `8080`)                                            |
-| `CORE_URL`                  |   Yes    | HTTP base URL of the Core microservice                                     |
-| `REVIEW_MODEL`              |   Yes    | Gemini model identifier (e.g. `gemini-3.8-flash`)                          |
-| `REVIEW_RESULT_TOPIC`       |   Yes    | Google Cloud Pub/Sub topic to publish review findings to                   |
-| `INTERNAL_AUTH_TOKEN`       |   Yes    | Shared secret token for authenticating direct HTTP fallback to Core        |
-| `GEMINI_API_KEY`            | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI) |
-| `GOOGLE_GENAI_USE_VERTEXAI` | Optional | Set to `1` to authenticate via Google Cloud Vertex AI ADC                  |
+| Variable                  | Required | Description                                                                |
+| :------------------------ | :------: | :------------------------------------------------------------------------- |
+| `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                            |
+| `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                 |
+| `PR_EVENTS_SUBSCRIPTION`  | Optional | Google Cloud Pub/Sub subscription to pull PR events from                   |
+| `REVIEW_RESULTS_TOPIC`    | Optional | Google Cloud Pub/Sub topic to publish review result events to              |
+| `REVIEW_MODEL`            | Optional | Gemini model identifier (e.g. `gemini-3.8-flash`)                          |
+| `GITHUB_TOKEN`            | Optional | GitHub Personal Access Token (classic with `repo` scope)                   |
+| `GEMINI_API_KEY`          | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI) |
+| `GOOGLE_CLOUD_PROJECT`    | Optional | GCP Project ID (auto-detected when running in GCP)                         |
+| `FIRESTORE_EMULATOR_HOST` | Optional | Host of local Firestore emulator for dev/testing (e.g. `localhost:8081`)   |
+| `PUBSUB_EMULATOR_HOST`    | Optional | Host of local Pub/Sub emulator for dev/testing (e.g. `localhost:8085`)     |
 
 ---
 
@@ -709,8 +552,6 @@ pnpm run build
 # Build individual Docker images locally
 pnpm run docker:build:github-gateway
 pnpm run docker:build:core
-pnpm run docker:build:context-builder
-pnpm run docker:build:code-reviewer
 ```
 
 ---
