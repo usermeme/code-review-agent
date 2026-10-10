@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DefaultAgentService } from './agent.service.js';
+import { AgentService } from './agent.service.js';
 
 vi.mock('agent-context-builder', () => ({
   buildContext: vi.fn().mockResolvedValue({
@@ -21,9 +21,9 @@ vi.mock('agent-code-reviewer', () => ({
 import { buildContext } from 'agent-context-builder';
 import { runReview } from 'agent-code-reviewer';
 
-describe('DefaultAgentService', () => {
+describe('AgentService', () => {
   it('delegates buildContext to agent-context-builder library', async () => {
-    const service = new DefaultAgentService();
+    const service = new AgentService();
     const result = await service.buildContext({
       provider: 'github',
       owner: 'test-org',
@@ -43,7 +43,7 @@ describe('DefaultAgentService', () => {
   });
 
   it('delegates runReview to agent-code-reviewer library', async () => {
-    const service = new DefaultAgentService();
+    const service = new AgentService();
     const result = await service.runReview({
       prMeta: {
         provider: 'github',

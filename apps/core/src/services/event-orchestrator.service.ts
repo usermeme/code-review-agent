@@ -89,50 +89,23 @@ export class EventOrchestratorService {
       action === 'manual_trigger'
     ) {
       // Check if baseline context exists in Firestore
-      let baselineContext =
+      const existingContext =
         await this.contextRepository.getContext(baselineKey);
 
-      if (!baselineContext) {
-        logger?.info(
-          `[Core] No baseline context found for ${baselineKey}. Building context in-process.`,
-        );
-        await this.prRepository.updatePRStatus(prKey, {
+      const baselineSummary =
+        existingContext?.summary ??
+        (await this.buildAndSaveBaselineContext({
+          baselineKey,
+          prKey,
           provider,
           owner,
           repo,
           prNumber,
-          status: 'queued',
+          meta,
           diff: req.diff,
           changedFiles: req.changedFiles,
-          prMeta: {
-            title: meta.title,
-            author: meta.author,
-            branch: meta.branch,
-            body: meta.body,
-          },
-        });
-
-        const sections = await this.agentService.buildContext({
-          provider,
-          owner,
-          repo,
-          prNumber,
-          cloneUrl: meta.cloneUrl || `https://github.com/${owner}/${repo}.git`,
-          ref: meta.baseRef || 'main',
-          isIncrementalUpdate: false,
-          model: this.envService.get('REVIEW_MODEL'),
-          githubToken: this.envService.get('GITHUB_TOKEN'),
-        });
-
-        const summary =
-          typeof sections === 'string' ? sections : JSON.stringify(sections);
-        await this.contextRepository.saveContext(baselineKey, { summary });
-        baselineContext = {
-          summary,
-          prKey: baselineKey,
-          updatedAt: new Date(),
-        };
-      }
+          logger,
+        }));
 
       // Run review in-process
       logger?.info(
@@ -170,7 +143,7 @@ export class EventOrchestratorService {
         },
         {
           model: this.envService.get('REVIEW_MODEL'),
-          baselineContext: baselineContext.summary,
+          baselineContext: baselineSummary,
         },
       );
 
@@ -265,6 +238,64 @@ export class EventOrchestratorService {
       });
       throw error;
     }
+  }
+
+  private async buildAndSaveBaselineContext(params: {
+    baselineKey: string;
+    prKey: string;
+    provider: string;
+    owner: string;
+    repo: string;
+    prNumber: number;
+    meta: {
+      title?: string;
+      author?: string;
+      branch?: string;
+      body?: string;
+      cloneUrl?: string;
+      baseRef?: string;
+    };
+    diff: string;
+    changedFiles?: string[];
+    logger?: FastifyBaseLogger;
+  }): Promise<string> {
+    params.logger?.info(
+      `[Core] No baseline context found for ${params.baselineKey}. Building context in-process.`,
+    );
+    await this.prRepository.updatePRStatus(params.prKey, {
+      provider: params.provider,
+      owner: params.owner,
+      repo: params.repo,
+      prNumber: params.prNumber,
+      status: 'queued',
+      diff: params.diff,
+      changedFiles: params.changedFiles,
+      prMeta: {
+        title: params.meta.title,
+        author: params.meta.author,
+        branch: params.meta.branch,
+        body: params.meta.body,
+      },
+    });
+
+    const sections = await this.agentService.buildContext({
+      provider: params.provider,
+      owner: params.owner,
+      repo: params.repo,
+      prNumber: params.prNumber,
+      cloneUrl:
+        params.meta.cloneUrl ||
+        `https://github.com/${params.owner}/${params.repo}.git`,
+      ref: params.meta.baseRef || 'main',
+      isIncrementalUpdate: false,
+      model: this.envService.get('REVIEW_MODEL'),
+      githubToken: this.envService.get('GITHUB_TOKEN'),
+    });
+
+    const summary =
+      typeof sections === 'string' ? sections : JSON.stringify(sections);
+    await this.contextRepository.saveContext(params.baselineKey, { summary });
+    return summary;
   }
 
   private async publishReviewResults(

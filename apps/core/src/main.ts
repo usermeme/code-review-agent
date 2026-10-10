@@ -4,7 +4,7 @@ import { buildCoreServer } from './app.js';
 import { FirestoreDatabaseService } from './modules/database/firestore.service.js';
 import { PrRepository } from './modules/database/repositories/pr.repository.js';
 import { ContextRepository } from './modules/database/repositories/context.repository.js';
-import { DefaultAgentService } from './services/agent.service.js';
+import { AgentService } from './services/agent.service.js';
 import { EventOrchestratorService } from './services/event-orchestrator.service.js';
 import { PrEventsConsumer } from './modules/pubsub/pr-events.consumer.js';
 
@@ -15,7 +15,7 @@ const pubsub = new PubSub();
 const databaseService = new FirestoreDatabaseService();
 const prRepository = new PrRepository(databaseService);
 const contextRepository = new ContextRepository(databaseService);
-const agentService = new DefaultAgentService();
+const agentService = new AgentService();
 
 const orchestrator = new EventOrchestratorService({
   envService,
