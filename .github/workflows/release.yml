@@ -29,12 +29,6 @@ jobs:
           - app: core
             image: code-review-agent-core
             file: apps/core/Dockerfile
-          - app: agent-context-builder
-            image: code-review-agent-context-builder
-            file: apps/agent-context-builder/Dockerfile
-          - app: agent-code-reviewer
-            image: code-review-agent-code-reviewer
-            file: apps/agent-code-reviewer/Dockerfile
 
     steps:
       - name: Checkout Code
