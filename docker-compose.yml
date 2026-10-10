@@ -46,7 +46,7 @@ services:
     environment:
       - PORT=8080
       - CORE_URL=http://core:8080
-      - REVIEW_MODEL=gemini-2.5-flash
+      - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
       - GITHUB_TOKEN=dummy-token
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
@@ -65,7 +65,7 @@ services:
     environment:
       - PORT=8080
       - CORE_URL=http://core:8080
-      - REVIEW_MODEL=gemini-2.5-flash
+      - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-project

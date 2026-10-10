@@ -24,6 +24,15 @@ Given(
   },
 );
 
+Then(
+  'repository {string} has a baseline context in the database',
+  async function (this: CoreWorld, repoFullName: string) {
+    const key = `github:${repoFullName.replace('/', ':')}:0`;
+    const doc = await this.contextRepository.getContext(key);
+    assert(doc !== null, `Expected baseline context for ${key} to exist in DB`);
+  },
+);
+
 When(
   'Gateway calls IngestPREvent for {string} PR #{int} with action {string}',
   async function (
@@ -118,27 +127,7 @@ Then('the IngestPREvent RPC response is accepted', function () {
 });
 
 Then(
-  'a message is published to topic {string} with action {string} and prNumber {int}',
-  function (
-    this: CoreWorld,
-    topicName: string,
-    action: string,
-    prNumber: number,
-  ) {
-    const msgs = this.pubsub.getMessagesByTopic(topicName);
-    assert(msgs.length > 0, `No messages published to topic ${topicName}`);
-    const found = msgs.some(
-      (m) => m.json?.action === action && m.json?.prNumber === prNumber,
-    );
-    assert(
-      found,
-      `Expected message with action=${action} and prNumber=${prNumber} not found in ${topicName}`,
-    );
-  },
-);
-
-Then(
-  'a message is published to topic {string} with repo {string} and prNumber {int}',
+  'a review result message is published to topic {string} with repo {string} and prNumber {int}',
   function (
     this: CoreWorld,
     topicName: string,
@@ -148,23 +137,12 @@ Then(
     const msgs = this.pubsub.getMessagesByTopic(topicName);
     assert(msgs.length > 0, `No messages published to topic ${topicName}`);
     const found = msgs.some(
-      (m) =>
-        m.json?.prMeta?.repo === repo && m.json?.prMeta?.number === prNumber,
+      (m) => m.json?.repo === repo && m.json?.prNumber === prNumber,
     );
     assert(
       found,
       `Expected review message for ${repo}#${prNumber} not found in ${topicName}`,
     );
-  },
-);
-
-Then(
-  'a message is published to topic {string} with isIncrementalUpdate true',
-  function (this: CoreWorld, topicName: string) {
-    const msgs = this.pubsub.getMessagesByTopic(topicName);
-    assert(msgs.length > 0, `No messages published to topic ${topicName}`);
-    const found = msgs.some((m) => m.json?.isIncrementalUpdate === true);
-    assert(found, `Expected incremental update message in ${topicName}`);
   },
 );
 

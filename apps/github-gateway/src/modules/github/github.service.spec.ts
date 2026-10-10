@@ -4,25 +4,29 @@ import { EnvService } from 'env';
 import { gatewayEnvSchema, GatewayEnvService } from '../../env.js';
 
 describe('GithubService', () => {
-  let mockCoreClient: any;
+  let mockPubSub: any;
   let mockOctokit: any;
   let testEnvService: GatewayEnvService;
+  let publishedMessages: { topic: string; data: any }[];
 
   beforeEach(() => {
     testEnvService = new EnvService(gatewayEnvSchema, {
       HOST: '0.0.0.0',
       PORT: '8080',
-      CORE_URL: 'http://localhost:8080',
       GITHUB_WEBHOOK_SECRET: 'test-secret',
       GITHUB_TOKEN: 'test-token',
-      INTERNAL_AUTH_TOKEN: 'test-internal-token',
+      PR_EVENTS_TOPIC: 'test-pr-events-topic',
+      REVIEW_RESULTS_SUBSCRIPTION: 'test-review-results-sub',
     });
-    mockCoreClient = {
-      ingestPREvent: vi.fn().mockResolvedValue({
-        success: true,
-        status: 'queued',
-        message: 'Context build triggered',
-      }),
+    publishedMessages = [];
+    mockPubSub = {
+      topic: vi.fn().mockImplementation((topicName: string) => ({
+        publishMessage: vi
+          .fn()
+          .mockImplementation(async ({ json }: { json: any }) => {
+            publishedMessages.push({ topic: topicName, data: json });
+          }),
+      })),
     };
 
     mockOctokit = {
@@ -50,9 +54,9 @@ describe('GithubService', () => {
     };
   });
 
-  it('processWebhook forwards PR opened event to CoreService via ConnectRPC', async () => {
+  it('processWebhook publishes PR opened event to PubSub topic', async () => {
     const service = new GithubService({
-      coreClient: mockCoreClient,
+      pubsub: mockPubSub,
       octokit: mockOctokit,
       envService: testEnvService,
     });
@@ -81,7 +85,9 @@ describe('GithubService', () => {
     );
 
     expect(res.ignored).toBe(false);
-    expect(mockCoreClient.ingestPREvent).toHaveBeenCalledWith(
+    expect(publishedMessages).toHaveLength(1);
+    expect(publishedMessages[0].topic).toBe('test-pr-events-topic');
+    expect(publishedMessages[0].data).toEqual(
       expect.objectContaining({
         prMeta: expect.objectContaining({
           provider: 'github',
@@ -96,7 +102,7 @@ describe('GithubService', () => {
 
   it('postReview creates formal review and inline comments via Octokit', async () => {
     const service = new GithubService({
-      coreClient: mockCoreClient,
+      pubsub: mockPubSub,
       octokit: mockOctokit,
       envService: testEnvService,
     });

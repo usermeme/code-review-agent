@@ -1,9 +1,9 @@
 import { When, Then, DataTable } from '@cucumber/cucumber';
 import assert from 'node:assert/strict';
 import { GithubGatewayWorld } from '../support/world.js';
-import type { PostReviewResponse } from 'contracts';
+import type { PostReviewResult } from '../../../github-gateway/src/modules/github/interfaces/github.interface.js';
 
-let lastRpcResponse: PostReviewResponse;
+let lastReviewResult: PostReviewResult;
 
 When(
   'Core calls PostReview RPC for {string} PR #{int} with summary {string} and comments:',
@@ -22,7 +22,7 @@ When(
       body: r.body,
     }));
 
-    lastRpcResponse = await this.gatewayRpcClient.postReview({
+    lastReviewResult = await this.githubService.postReview({
       owner,
       repo,
       prNumber,
@@ -42,7 +42,7 @@ When(
   ) {
     const [owner, repo] = repoFullName.split('/');
 
-    lastRpcResponse = await this.gatewayRpcClient.postReview({
+    lastReviewResult = await this.githubService.postReview({
       owner,
       repo,
       prNumber,
@@ -53,8 +53,8 @@ When(
 );
 
 Then('the PostReview RPC succeeds', function () {
-  assert(lastRpcResponse, 'No RPC response received');
-  assert.equal(lastRpcResponse.success, true);
+  assert(lastReviewResult, 'No review result received');
+  assert.equal(lastReviewResult.success, true);
 });
 
 Then(

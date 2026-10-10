@@ -2,41 +2,40 @@ import { PubSub } from '@google-cloud/pubsub';
 import { FastifyBaseLogger } from 'fastify';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
+import { IngestPREventRequest, IngestPREventResponse } from 'contracts';
 import {
-  IngestPREventRequest,
-  IngestPREventResponse,
-  GatewayService,
-  PostReviewRequest,
-} from 'contracts';
-import { ContextReadyPayload, ReviewResultPayload } from 'shared-types';
-import { Client } from '@connectrpc/connect';
+  ContextReadyPayload,
+  ReviewResultPayload,
+  PREventPayload,
+} from 'shared-types';
 import type { CoreEnvService } from '../env.js';
+import type { AgentService } from './agent.service.js';
 
 export interface EventOrchestratorDependencies {
   envService: CoreEnvService;
   prRepository: PrRepository;
   contextRepository: ContextRepository;
-  gatewayClient: Client<typeof GatewayService>;
-  pubsub?: PubSub;
+  pubsub: PubSub;
+  agentService: AgentService;
 }
 
 export class EventOrchestratorService {
   private pubsub: PubSub;
   private prRepository: PrRepository;
   private contextRepository: ContextRepository;
-  private gatewayClient: Client<typeof GatewayService>;
   private envService: CoreEnvService;
+  private agentService: AgentService;
 
   constructor(deps: EventOrchestratorDependencies) {
-    this.pubsub = deps.pubsub ?? new PubSub();
+    this.pubsub = deps.pubsub;
     this.prRepository = deps.prRepository;
     this.contextRepository = deps.contextRepository;
-    this.gatewayClient = deps.gatewayClient;
     this.envService = deps.envService;
+    this.agentService = deps.agentService;
   }
 
   async ingestPREvent(
-    req: IngestPREventRequest,
+    req: IngestPREventRequest | PREventPayload,
     logger?: FastifyBaseLogger,
   ): Promise<IngestPREventResponse> {
     const meta = req.prMeta;
@@ -54,27 +53,31 @@ export class EventOrchestratorService {
 
     logger?.info(`[Core] Ingesting PR event: ${action} for ${prKey}`);
 
-    // If PR is merged, trigger incremental context update
+    // If PR is merged, trigger incremental context update in-process
     if (action === 'closed' && meta.isIncrementalUpdate) {
       logger?.info(
         `[Core] PR merged event for ${prKey}. Triggering incremental context build.`,
       );
-      await this.publishContextBuild({
+      const sections = await this.agentService.buildContext({
         provider,
         owner,
         repo,
         prNumber,
-        action: 'merged',
-        htmlUrl: meta.htmlUrl,
         cloneUrl: meta.cloneUrl,
         ref: meta.baseRef,
         isIncrementalUpdate: true,
+        model: this.envService.get('REVIEW_MODEL'),
+        githubToken: this.envService.get('GITHUB_TOKEN'),
       });
+
+      const summary =
+        typeof sections === 'string' ? sections : JSON.stringify(sections);
+      await this.contextRepository.saveContext(baselineKey, { summary });
 
       return {
         success: true,
         status: 'queued',
-        message: 'Incremental context build triggered for merged PR',
+        message: 'Incremental context build completed for merged PR',
       } as IngestPREventResponse;
     }
 
@@ -86,24 +89,44 @@ export class EventOrchestratorService {
       action === 'manual_trigger'
     ) {
       // Check if baseline context exists in Firestore
-      const baselineContext =
+      const existingContext =
         await this.contextRepository.getContext(baselineKey);
 
-      if (baselineContext) {
-        logger?.info(
-          `[Core] Baseline context found for ${baselineKey}. Triggering review directly.`,
-        );
-        await this.prRepository.updatePRStatus(prKey, {
+      const baselineSummary =
+        existingContext?.summary ??
+        (await this.buildAndSaveBaselineContext({
+          baselineKey,
+          prKey,
           provider,
           owner,
           repo,
           prNumber,
-          status: 'reviewing',
+          meta,
           diff: req.diff,
           changedFiles: req.changedFiles,
-        });
+          logger,
+        }));
 
-        await this.publishReviewCode({
+      // Run review in-process
+      logger?.info(
+        `[Core] Baseline context ready. Running review for ${prKey} in-process.`,
+      );
+      await this.prRepository.updatePRStatus(prKey, {
+        provider,
+        owner,
+        repo,
+        prNumber,
+        status: 'reviewing',
+        diff: req.diff,
+        changedFiles: req.changedFiles,
+      });
+
+      const changedFilesStr = Array.isArray(req.changedFiles)
+        ? req.changedFiles.join('\n')
+        : (req.changedFiles ?? '');
+
+      const reviewResult = await this.agentService.runReview(
+        {
           prMeta: {
             provider,
             owner,
@@ -115,53 +138,21 @@ export class EventOrchestratorService {
             body: meta.body,
           },
           diff: req.diff,
-          changedFiles: req.changedFiles.join('\n'),
-          baselineContext: baselineContext.summary,
-        });
-
-        return {
-          success: true,
-          status: 'reviewing',
-          message: 'Review triggered directly with existing baseline context',
-        } as IngestPREventResponse;
-      }
-
-      // No baseline context found. Save pending PR info and trigger full context build
-      logger?.info(
-        `[Core] No baseline context found for ${baselineKey}. Queuing PR and building context.`,
-      );
-      await this.prRepository.updatePRStatus(prKey, {
-        provider,
-        owner,
-        repo,
-        prNumber,
-        status: 'queued',
-        diff: req.diff,
-        changedFiles: req.changedFiles,
-        prMeta: {
-          title: meta.title,
-          author: meta.author,
-          branch: meta.branch,
-          body: meta.body,
+          changedFiles: changedFilesStr,
+          tickets: [],
         },
-      });
+        {
+          model: this.envService.get('REVIEW_MODEL'),
+          baselineContext: baselineSummary,
+        },
+      );
 
-      await this.publishContextBuild({
-        provider,
-        owner,
-        repo,
-        prNumber,
-        action,
-        htmlUrl: meta.htmlUrl,
-        cloneUrl: meta.cloneUrl || `https://github.com/${owner}/${repo}.git`,
-        ref: meta.baseRef || 'main',
-        isIncrementalUpdate: false,
-      });
+      await this.handleReviewResults(reviewResult, logger);
 
       return {
         success: true,
-        status: 'queued',
-        message: 'Context build triggered',
+        status: 'reviewing',
+        message: 'Review completed and results published',
       } as IngestPREventResponse;
     }
 
@@ -187,80 +178,60 @@ export class EventOrchestratorService {
       return;
     }
 
-    // Context is ready for pending PR! Now trigger the review!
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
     const pendingPR = await this.prRepository.getPRStatus(prKey);
 
     logger?.info(`[Core] Triggering code review for ${prKey}`);
     await this.prRepository.updatePRStatus(prKey, { status: 'reviewing' });
 
-    await this.publishReviewCode({
-      prMeta: {
-        provider,
-        owner,
-        repo,
-        number: prNumber,
-        title: pendingPR?.prMeta?.['title'] || '',
-        author: pendingPR?.prMeta?.['author'] || '',
-        branch: pendingPR?.prMeta?.['branch'] || '',
-        body: pendingPR?.prMeta?.['body'] || '',
+    const changedFilesStr = Array.isArray(pendingPR?.changedFiles)
+      ? pendingPR.changedFiles.join('\n')
+      : (pendingPR?.changedFiles ?? '');
+
+    const reviewResult = await this.agentService.runReview(
+      {
+        prMeta: {
+          provider,
+          owner,
+          repo,
+          number: prNumber,
+          title: pendingPR?.prMeta?.['title'] || '',
+          author: pendingPR?.prMeta?.['author'] || '',
+          branch: pendingPR?.prMeta?.['branch'] || '',
+          body: pendingPR?.prMeta?.['body'] || '',
+        },
+        diff: pendingPR?.diff || '',
+        changedFiles: changedFilesStr,
+        tickets: [],
       },
-      diff: pendingPR?.diff || '',
-      changedFiles: Array.isArray(pendingPR?.changedFiles)
-        ? pendingPR.changedFiles.join('\n')
-        : '',
-      baselineContext: summary,
-    });
+      {
+        model: this.envService.get('REVIEW_MODEL'),
+        baselineContext: summary,
+      },
+    );
+
+    await this.handleReviewResults(reviewResult, logger);
   }
 
   async handleReviewResults(
     payload: ReviewResultPayload,
     logger?: FastifyBaseLogger,
   ): Promise<void> {
-    const {
-      provider,
-      owner,
-      repo,
-      prNumber,
-      summary,
-      ticketCoverage,
-      comments,
-    } = payload;
+    const { provider, owner, repo, prNumber, summary } = payload;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
 
     logger?.info(
-      `[Core] Handling review results for ${prKey}. Calling Gateway to post review.`,
+      `[Core] Handling review results for ${prKey}. Publishing to Review Results topic.`,
     );
 
     try {
-      const reviewReq: PostReviewRequest = {
-        $typeName: 'gateway.v1.PostReviewRequest',
-        provider,
-        owner,
-        repo,
-        prNumber,
-        summary: summary || '',
-        ticketCoverage: ticketCoverage || '',
-        comments: (comments || []).map((c) => ({
-          $typeName: 'gateway.v1.ReviewComment',
-          path: c.path,
-          position: c.position,
-          body: c.body,
-        })),
-      };
-
-      const res = await this.gatewayClient.postReview(reviewReq);
-      logger?.info(
-        `[Core] Gateway postReview responded: success=${res.success}, reviewId=${res.reviewId}`,
-      );
-
+      await this.publishReviewResults(payload);
       await this.prRepository.updatePRStatus(prKey, {
-        status: res.success ? 'completed' : 'failed',
+        status: 'completed',
         summary,
-        error: res.success ? undefined : res.message,
       });
     } catch (error) {
-      logger?.error(`[Core] Failed to post review via Gateway: ${error}`);
+      logger?.error(`[Core] Failed to publish review results: ${error}`);
       await this.prRepository.updatePRStatus(prKey, {
         status: 'failed',
         error: String(error),
@@ -269,17 +240,70 @@ export class EventOrchestratorService {
     }
   }
 
-  private async publishContextBuild(data: Record<string, any>): Promise<void> {
-    const topicName = this.envService.get('BUILD_CONTEXT_TOPIC');
-    await this.pubsub.topic(topicName).publishMessage({
-      json: data,
+  private async buildAndSaveBaselineContext(params: {
+    baselineKey: string;
+    prKey: string;
+    provider: string;
+    owner: string;
+    repo: string;
+    prNumber: number;
+    meta: {
+      title?: string;
+      author?: string;
+      branch?: string;
+      body?: string;
+      cloneUrl?: string;
+      baseRef?: string;
+    };
+    diff: string;
+    changedFiles?: string[];
+    logger?: FastifyBaseLogger;
+  }): Promise<string> {
+    params.logger?.info(
+      `[Core] No baseline context found for ${params.baselineKey}. Building context in-process.`,
+    );
+    await this.prRepository.updatePRStatus(params.prKey, {
+      provider: params.provider,
+      owner: params.owner,
+      repo: params.repo,
+      prNumber: params.prNumber,
+      status: 'queued',
+      diff: params.diff,
+      changedFiles: params.changedFiles,
+      prMeta: {
+        title: params.meta.title,
+        author: params.meta.author,
+        branch: params.meta.branch,
+        body: params.meta.body,
+      },
     });
+
+    const sections = await this.agentService.buildContext({
+      provider: params.provider,
+      owner: params.owner,
+      repo: params.repo,
+      prNumber: params.prNumber,
+      cloneUrl:
+        params.meta.cloneUrl ||
+        `https://github.com/${params.owner}/${params.repo}.git`,
+      ref: params.meta.baseRef || 'main',
+      isIncrementalUpdate: false,
+      model: this.envService.get('REVIEW_MODEL'),
+      githubToken: this.envService.get('GITHUB_TOKEN'),
+    });
+
+    const summary =
+      typeof sections === 'string' ? sections : JSON.stringify(sections);
+    await this.contextRepository.saveContext(params.baselineKey, { summary });
+    return summary;
   }
 
-  private async publishReviewCode(data: Record<string, any>): Promise<void> {
-    const topicName = this.envService.get('REVIEW_CODE_TOPIC');
+  private async publishReviewResults(
+    payload: ReviewResultPayload,
+  ): Promise<void> {
+    const topicName = this.envService.get('REVIEW_RESULTS_TOPIC');
     await this.pubsub.topic(topicName).publishMessage({
-      json: data,
+      json: payload,
     });
   }
 }

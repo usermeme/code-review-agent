@@ -26,7 +26,7 @@ assignees: ''
 - **pnpm version**: (e.g. 10.29.3)
 - **Deployment Mode**: (e.g. Local Docker Compose / Cloud Run / Kubernetes)
 - **Git Provider**: (e.g. GitHub)
-- **LLM Model**: (e.g. gemini-2.5-flash)
+- **LLM Model**: (e.g. gemini-3.8-flash)
 
 ## 📄 Logs / Error Output
 

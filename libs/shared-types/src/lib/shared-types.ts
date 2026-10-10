@@ -26,12 +26,41 @@ export interface RepositoryContext {
   updatedAt: Date;
 }
 
+export interface PRMeta {
+  provider: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
+  title: string;
+  author: string;
+  branch: string;
+  body?: string;
+  htmlUrl: string;
+  action: string;
+  cloneUrl?: string;
+  baseRef?: string;
+  isIncrementalUpdate?: boolean;
+}
+
+export interface PREventPayload {
+  prMeta: PRMeta;
+  diff: string;
+  changedFiles: string[];
+}
+
+export interface ReviewCommentPayload {
+  path: string;
+  position?: number;
+  line?: number;
+  body: string;
+}
+
 export interface ReviewResultPayload {
   provider: string;
   owner: string;
   repo: string;
   prNumber: number;
-  comments: { path: string; position: number; body: string }[];
+  comments: ReviewCommentPayload[];
   summary?: string;
   ticketCoverage?: string;
 }

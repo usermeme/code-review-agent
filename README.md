@@ -239,7 +239,7 @@ jobs:
             --cpu 2 \
             --timeout 600s \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},CONTEXT_READY_TOPIC=context-ready-topic,GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},CONTEXT_READY_TOPIC=context-ready-topic,GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
           CONTEXT_BUILDER_URL=$(gcloud run services describe agent-context-builder --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
           echo "CONTEXT_BUILDER_URL=${CONTEXT_BUILDER_URL}" >> $GITHUB_ENV
@@ -256,7 +256,7 @@ jobs:
             --cpu 2 \
             --timeout 600s \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-2.5-flash' }},REVIEW_RESULT_TOPIC=review-result-topic,INTERNAL_AUTH_TOKEN=${{ secrets.INTERNAL_AUTH_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,CORE_URL=${{ env.CORE_URL }},REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},REVIEW_RESULT_TOPIC=review-result-topic,INTERNAL_AUTH_TOKEN=${{ secrets.INTERNAL_AUTH_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
           CODE_REVIEWER_URL=$(gcloud run services describe agent-code-reviewer --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
           echo "CODE_REVIEWER_URL=${CODE_REVIEWER_URL}" >> $GITHUB_ENV
@@ -543,7 +543,7 @@ services:
     environment:
       - PORT=8080
       - CORE_URL=http://core:8080
-      - REVIEW_MODEL=gemini-2.5-flash
+      - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - CONTEXT_READY_TOPIC=context-ready-topic
       - GITHUB_TOKEN=${GITHUB_TOKEN}
@@ -555,7 +555,7 @@ services:
     environment:
       - PORT=8080
       - CORE_URL=http://core:8080
-      - REVIEW_MODEL=gemini-2.5-flash
+      - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - REVIEW_RESULT_TOPIC=review-result-topic
       - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
@@ -646,7 +646,7 @@ Each service strictly validates required variables and fails fast at startup if 
 | :-------------------------- | :------: | :------------------------------------------------------------------------------------------------------- |
 | `PORT`                      |   Yes    | Port to listen on (e.g. `8080`)                                                                          |
 | `CORE_URL`                  |   Yes    | HTTP base URL of the Core microservice for fetching/saving context                                       |
-| `REVIEW_MODEL`              |   Yes    | Gemini model identifier (e.g. `gemini-2.5-flash`)                                                        |
+| `REVIEW_MODEL`              |   Yes    | Gemini model identifier (e.g. `gemini-3.8-flash`)                                                        |
 | `CONTEXT_READY_TOPIC`       |   Yes    | Google Cloud Pub/Sub topic to publish completion event to                                                |
 | `GITHUB_TOKEN`              | Optional | GitHub Personal Access Token (classic with `repo` scope) to clone private repositories or fetch PR diffs |
 | `GEMINI_API_KEY`            | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)                               |
@@ -658,7 +658,7 @@ Each service strictly validates required variables and fails fast at startup if 
 | :-------------------------- | :------: | :------------------------------------------------------------------------- |
 | `PORT`                      |   Yes    | Port to listen on (e.g. `8080`)                                            |
 | `CORE_URL`                  |   Yes    | HTTP base URL of the Core microservice                                     |
-| `REVIEW_MODEL`              |   Yes    | Gemini model identifier (e.g. `gemini-2.5-flash`)                          |
+| `REVIEW_MODEL`              |   Yes    | Gemini model identifier (e.g. `gemini-3.8-flash`)                          |
 | `REVIEW_RESULT_TOPIC`       |   Yes    | Google Cloud Pub/Sub topic to publish review findings to                   |
 | `INTERNAL_AUTH_TOKEN`       |   Yes    | Shared secret token for authenticating direct HTTP fallback to Core        |
 | `GEMINI_API_KEY`            | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI) |

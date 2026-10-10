@@ -1,11 +1,14 @@
+import { PubSub } from '@google-cloud/pubsub';
 import { envService } from './env.js';
 import { buildCoreServer } from './app.js';
 
 const host = envService.get('HOST');
 const port = envService.get('PORT');
 
+const pubsub = new PubSub();
 const server = await buildCoreServer({
   envService,
+  pubsub,
   fastifyOptions: { logger: true },
 });
 
