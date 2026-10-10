@@ -61,10 +61,6 @@ jobs:
             file: apps/github-gateway/Dockerfile
           - app: core
             file: apps/core/Dockerfile
-          - app: agent-context-builder
-            file: apps/agent-context-builder/Dockerfile
-          - app: agent-code-reviewer
-            file: apps/agent-code-reviewer/Dockerfile
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
