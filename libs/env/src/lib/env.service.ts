@@ -39,8 +39,3 @@ export class EnvService<T extends ZodType<any, any, any>> {
     return value;
   }
 }
-
-/**
- * Alias for backward compatibility.
- */
-export { EnvService as Env };

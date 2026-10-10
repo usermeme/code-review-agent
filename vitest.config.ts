@@ -16,6 +16,7 @@ export default defineConfig({
         __dirname,
         'libs/agent-code-reviewer/src/index.ts',
       ),
+      pubsub: path.resolve(__dirname, 'libs/pubsub/src/index.ts'),
     },
   },
   test: {

@@ -6,7 +6,7 @@ export const coreEnvSchema = z.object({
   PORT: z.string().transform(Number),
   PR_EVENTS_SUBSCRIPTION: z.string().min(1).default('pr-events-sub'),
   REVIEW_RESULTS_TOPIC: z.string().min(1).default('review-results'),
-  REVIEW_MODEL: z.string().optional().default('gemini-2.5-flash'),
+  REVIEW_MODEL: z.string().optional().default('gemini-3.8-flash'),
   GOOGLE_CLOUD_PROJECT: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),

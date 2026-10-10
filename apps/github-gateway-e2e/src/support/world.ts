@@ -60,8 +60,9 @@ export class GithubGatewayWorld extends World {
 
     // 2. Build Fastify Gateway application
     this.app = await buildGatewayServer({
-      githubService: this.githubService,
       envService: this.envService,
+      pubsub: this.pubsub,
+      githubService: this.githubService,
       fastifyOptions: { logger: false },
     });
   }

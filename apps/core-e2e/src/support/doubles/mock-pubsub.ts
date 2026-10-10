@@ -36,6 +36,13 @@ export class MockPubSub {
     return this.messages.filter((m) => m.topic === topicName);
   }
 
+  subscription() {
+    return {
+      on: () => {},
+      close: async () => {},
+    };
+  }
+
   clear(): void {
     this.messages = [];
   }

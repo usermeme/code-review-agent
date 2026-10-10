@@ -49,7 +49,7 @@ export class CoreWorld extends World {
       PORT: '8080',
       PR_EVENTS_SUBSCRIPTION: 'test-pr-events-sub',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
-      REVIEW_MODEL: 'gemini-2.5-flash',
+      REVIEW_MODEL: 'gemini-3.8-flash',
     });
 
     // 1. Initialize Orchestrator with mock in-process agent executors
@@ -86,8 +86,12 @@ export class CoreWorld extends World {
 
     // 2. Build Core Fastify application
     this.app = await buildCoreServer({
-      contextRepository: this.contextRepository,
       envService: this.envService,
+      pubsub: this.pubsub as unknown as PubSub,
+      databaseService: this.db,
+      prRepository: this.prRepository,
+      contextRepository: this.contextRepository,
+      orchestrator: this.orchestrator,
       fastifyOptions: { logger: false },
     });
 
