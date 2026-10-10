@@ -3,17 +3,15 @@
   "version": "0.0.1",
   "license": "MIT",
   "scripts": {
-    "lint": "nx run-many -t lint",
+    "lint": "NX_INTERACTIVE=false nx run-many -t lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "nx run-many -t typecheck",
-    "test": "nx run-many -t test",
-    "e2e": "nx run-many -t e2e",
-    "build": "nx run-many -t build",
+    "typecheck": "NX_INTERACTIVE=false nx run-many -t typecheck",
+    "test": "NX_INTERACTIVE=false nx run-many -t test",
+    "e2e": "NX_INTERACTIVE=false nx run-many -t e2e",
+    "build": "NX_INTERACTIVE=false nx run-many -t build",
     "docker:build:github-gateway": "docker build -f apps/github-gateway/Dockerfile -t code-review-agent-github-gateway .",
-    "docker:build:core": "docker build -f apps/core/Dockerfile -t code-review-agent-core .",
-    "docker:build:context-builder": "docker build -f apps/agent-context-builder/Dockerfile -t code-review-agent-context-builder .",
-    "docker:build:code-reviewer": "docker build -f apps/agent-code-reviewer/Dockerfile -t code-review-agent-code-reviewer ."
+    "docker:build:core": "docker build -f apps/core/Dockerfile -t code-review-agent-core ."
   },
   "packageManager": "pnpm@10.29.3",
   "engines": {

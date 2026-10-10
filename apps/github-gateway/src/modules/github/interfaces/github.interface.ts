@@ -2,9 +2,9 @@ export interface PostReviewOptions {
   owner: string;
   repo: string;
   prNumber: number;
-  summary: string;
+  summary?: string;
   ticketCoverage?: string;
-  comments: { path: string; position: number; body: string }[];
+  comments: { path: string; position?: number; line?: number; body: string }[];
 }
 
 export interface PostReviewResult {

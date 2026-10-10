@@ -1,12 +1,31 @@
+import { PubSub } from '@google-cloud/pubsub';
 import { envService } from './env.js';
 import { buildServer } from './app.js';
+import { GithubService } from './modules/github/github.service.js';
+import { ReviewResultsConsumer } from './modules/pubsub/review-results.consumer.js';
 
 const host = envService.get('HOST');
 const port = envService.get('PORT');
 
+const pubsub = new PubSub();
+const githubService = new GithubService({ pubsub, envService });
+
 const server = await buildServer({
   envService,
+  githubService,
   fastifyOptions: { logger: true },
+});
+
+const consumer = new ReviewResultsConsumer({
+  pubsub,
+  subscriptionName: envService.get('REVIEW_RESULTS_SUBSCRIPTION'),
+  githubService,
+  logger: server.log,
+});
+consumer.start();
+
+server.addHook('onClose', async () => {
+  await consumer.stop();
 });
 
 try {

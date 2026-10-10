@@ -7,13 +7,13 @@ import {
   GithubWebhookPayload,
 } from './interfaces/github.interface.js';
 import { ProcessedWebhookResult } from '../webhooks/interfaces/webhooks.interface.js';
-import { Client } from '@connectrpc/connect';
-import { CoreService, IngestPREventRequest } from 'contracts';
+import { PubSub } from '@google-cloud/pubsub';
+import { PREventPayload } from 'shared-types';
 import type { GatewayEnvService } from '../../env.js';
 
 export interface GithubServiceDependencies {
   envService: GatewayEnvService;
-  coreClient: Client<typeof CoreService>;
+  pubsub: PubSub;
   octokit?: Octokit;
   webhookSecret?: string;
   token?: string;
@@ -22,10 +22,12 @@ export interface GithubServiceDependencies {
 export class GithubService {
   private webhooks: Webhooks;
   private octokit: Octokit;
-  private coreClient: Client<typeof CoreService>;
+  private pubsub: PubSub;
+  private envService: GatewayEnvService;
 
   constructor(deps: GithubServiceDependencies) {
-    this.coreClient = deps.coreClient;
+    this.envService = deps.envService;
+    this.pubsub = deps.pubsub;
 
     const webhookSecret =
       deps.webhookSecret ?? deps.envService.get('GITHUB_WEBHOOK_SECRET');
@@ -33,6 +35,13 @@ export class GithubService {
 
     this.webhooks = new Webhooks({ secret: webhookSecret });
     this.octokit = deps.octokit ?? new Octokit({ auth: token });
+  }
+
+  private async publishPREvent(payload: PREventPayload): Promise<void> {
+    const topicName = this.envService.get('PR_EVENTS_TOPIC');
+    await this.pubsub.topic(topicName).publishMessage({
+      json: payload,
+    });
   }
 
   private get octokitClient(): Octokit {
@@ -116,10 +125,8 @@ export class GithubService {
         `Received GitHub PR merged event: ${payload.pull_request.html_url}`,
       );
 
-      const req: IngestPREventRequest = {
-        $typeName: 'core.v1.IngestPREventRequest',
+      const eventPayload: PREventPayload = {
         prMeta: {
-          $typeName: 'core.v1.PRMeta',
           provider: 'github',
           owner,
           repo,
@@ -140,8 +147,8 @@ export class GithubService {
         changedFiles: [],
       };
 
-      const res = await this.coreClient.ingestPREvent(req);
-      return { ignored: false, reason: res.message };
+      await this.publishPREvent(eventPayload);
+      return { ignored: false, reason: 'PR merged event published to queue' };
     }
 
     if (
@@ -157,10 +164,8 @@ export class GithubService {
       const diff = await this.fetchPRDiff(owner, repo, prNumber);
       const changedFiles = await this.fetchChangedFiles(owner, repo, prNumber);
 
-      const req: IngestPREventRequest = {
-        $typeName: 'core.v1.IngestPREventRequest',
+      const eventPayload: PREventPayload = {
         prMeta: {
-          $typeName: 'core.v1.PRMeta',
           provider: 'github',
           owner,
           repo,
@@ -181,8 +186,8 @@ export class GithubService {
         changedFiles,
       };
 
-      const res = await this.coreClient.ingestPREvent(req);
-      return { ignored: false, reason: res.message };
+      await this.publishPREvent(eventPayload);
+      return { ignored: false, reason: 'PR event published to queue' };
     }
 
     return { ignored: true, reason: `Ignored PR action: ${action}` };
@@ -217,10 +222,8 @@ export class GithubService {
           prNumber,
         );
 
-        const req: IngestPREventRequest = {
-          $typeName: 'core.v1.IngestPREventRequest',
+        const eventPayload: PREventPayload = {
           prMeta: {
-            $typeName: 'core.v1.PRMeta',
             provider: 'github',
             owner,
             repo,
@@ -241,8 +244,11 @@ export class GithubService {
           changedFiles,
         };
 
-        const res = await this.coreClient.ingestPREvent(req);
-        return { ignored: false, reason: res.message };
+        await this.publishPREvent(eventPayload);
+        return {
+          ignored: false,
+          reason: 'Manual review event published to queue',
+        };
       }
     }
     return { ignored: true, reason: 'Ignored issue comment action' };
