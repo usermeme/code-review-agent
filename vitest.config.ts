@@ -31,6 +31,7 @@ export default defineConfig({
       REVIEW_RESULTS_TOPIC: 'review-results',
       REVIEW_RESULTS_SUBSCRIPTION: 'review-results-sub',
       REVIEW_MODEL: 'gemini-2.5-pro',
+      GIT_ADAPTER_URL: 'http://adapter:8080',
     },
   },
 });

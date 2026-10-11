@@ -1,0 +1,34 @@
+{
+  "name": "github-ingress-e2e",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/github-ingress-e2e/src",
+  "targets": {
+    "e2e": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "cucumber-js --config apps/github-ingress-e2e/cucumber.json",
+        "env": {
+          "NODE_OPTIONS": "--import tsx",
+          "HOST": "0.0.0.0",
+          "PORT": "8080",
+          "GITHUB_WEBHOOK_SECRET": "test-webhook-secret",
+          "PR_EVENTS_TOPIC": "test-pr-events-topic"
+        }
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint apps/github-ingress-e2e"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p apps/github-ingress-e2e/tsconfig.json --noEmit"
+      }
+    }
+  },
+  "tags": []
+}

@@ -10,7 +10,8 @@
     "test": "NX_INTERACTIVE=false nx run-many -t test",
     "e2e": "NX_INTERACTIVE=false nx run-many -t e2e",
     "build": "NX_INTERACTIVE=false nx run-many -t build",
-    "docker:build:github-gateway": "docker build -f apps/github-gateway/Dockerfile -t code-review-agent-github-gateway .",
+    "docker:build:github-ingress": "docker build -f apps/github-ingress/Dockerfile -t code-review-agent-github-ingress .",
+    "docker:build:github-adapter": "docker build -f apps/github-adapter/Dockerfile -t code-review-agent-github-adapter .",
     "docker:build:core": "docker build -f apps/core/Dockerfile -t code-review-agent-core ."
   },
   "packageManager": "pnpm@10.29.3",

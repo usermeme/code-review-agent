@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { EventOrchestratorService } from './event-orchestrator.service.js';
 import { IngestPREventRequest } from 'contracts';
+import { PREventPayload } from 'shared-types';
 import { EnvService } from 'env';
 import { coreEnvSchema, CoreEnvService } from '../env.js';
 
@@ -20,6 +21,8 @@ describe('EventOrchestratorService', () => {
       PORT: '8080',
       PR_EVENTS_SUBSCRIPTION: 'test-pr-events-sub',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
+      GIT_ADAPTER_URL: 'http://adapter:8080',
+      REVIEW_MODEL: 'gemini-3.8-flash',
     });
     publishedMessages = [];
     mockPubSub = {
@@ -291,6 +294,58 @@ describe('EventOrchestratorService', () => {
     expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
       'github:test-org:test-repo:42',
       expect.objectContaining({ status: 'completed' }),
+    );
+  });
+
+  it('fetches diff and changed files from gitAdapterClient when incoming diff is empty', async () => {
+    const mockAdapterClient = {
+      getPRDiff: vi.fn().mockResolvedValue({
+        diff: 'fetched-diff-content',
+        changedFiles: ['fetched-file.ts'],
+      }),
+      searchCode: vi.fn(),
+      getFileContent: vi.fn(),
+    };
+
+    const orchestratorWithAdapter = new EventOrchestratorService({
+      envService: testEnvService,
+      prRepository: mockPrRepo,
+      contextRepository: mockContextRepo,
+      pubsub: mockPubSub,
+      agentService: mockAgentService,
+      gitAdapterClient: mockAdapterClient,
+    });
+
+    const req: PREventPayload = {
+      prMeta: {
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        prNumber: 42,
+        title: 'Feature PR',
+        author: 'developer',
+        branch: 'feat/test',
+        htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+        action: 'opened',
+      },
+      diff: '',
+      changedFiles: [],
+    };
+
+    const result = await orchestratorWithAdapter.ingestPREvent(req);
+
+    expect(result.success).toBe(true);
+    expect(mockAdapterClient.getPRDiff).toHaveBeenCalledWith(
+      'test-org',
+      'test-repo',
+      42,
+    );
+    expect(mockRunReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        diff: 'fetched-diff-content',
+        changedFiles: 'fetched-file.ts',
+      }),
+      expect.any(Object),
     );
   });
 });

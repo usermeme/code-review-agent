@@ -77,3 +77,46 @@ export interface WebhookEventPayload {
   installationId?: number;
   isIncrementalUpdate?: boolean;
 }
+
+export interface PRDiffResult {
+  diff: string;
+  changedFiles: string[];
+}
+
+export interface CodeSearchItem {
+  name: string;
+  path: string;
+  sha: string;
+  htmlUrl: string;
+}
+
+export interface CodeSearchResult {
+  totalCount: number;
+  items: CodeSearchItem[];
+}
+
+export interface FileContentResult {
+  path: string;
+  content: string;
+  encoding: string;
+  sha?: string;
+}
+
+export interface GitAdapterContract {
+  getPRDiff(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<PRDiffResult>;
+  searchCode(
+    owner: string,
+    repo: string,
+    query: string,
+  ): Promise<CodeSearchResult>;
+  getFileContent(
+    owner: string,
+    repo: string,
+    path: string,
+    ref?: string,
+  ): Promise<FileContentResult>;
+}

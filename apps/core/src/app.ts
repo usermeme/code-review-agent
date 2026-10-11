@@ -8,6 +8,7 @@ import { AgentService } from './services/agent.service.js';
 import { EventOrchestratorService } from './services/event-orchestrator.service.js';
 import { healthModule } from './modules/health/health.module.js';
 import { contextModule } from './modules/context/context.module.js';
+import { pubsubModule } from './modules/pubsub/pubsub.module.js';
 import { PrEventsConsumer } from './modules/pubsub/pr-events.consumer.js';
 import type { CoreEnvService } from './env.js';
 
@@ -57,7 +58,13 @@ export async function buildCoreServer(
     contextRepository,
   });
 
-  // 3. Pub/Sub PR Events Consumer lifecycle (Nest-style onReady / onClose)
+  // 3. Pub/Sub PR Events Push route module (wakes up scale-to-zero serverless instances)
+  await server.register(pubsubModule, {
+    prefix: '/api/v1/pubsub',
+    orchestrator,
+  });
+
+  // 4. Pub/Sub PR Events Pull Consumer
   const subscriptionName = options.envService.get('PR_EVENTS_SUBSCRIPTION');
   const consumer =
     options.prEventsConsumer ??
