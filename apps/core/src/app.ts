@@ -64,28 +64,24 @@ export async function buildCoreServer(
     orchestrator,
   });
 
-  // 4. Optional Pub/Sub PR Events Pull Consumer (for persistent / non-serverless environments)
+  // 4. Pub/Sub PR Events Pull Consumer
   const subscriptionName = options.envService.get('PR_EVENTS_SUBSCRIPTION');
   const consumer =
     options.prEventsConsumer ??
-    (subscriptionName
-      ? new PrEventsConsumer({
-          pubsub: options.pubsub,
-          subscriptionName,
-          orchestrator,
-          logger: server.log,
-        })
-      : undefined);
-
-  if (consumer) {
-    server.addHook('onReady', async () => {
-      consumer.start();
+    new PrEventsConsumer({
+      pubsub: options.pubsub,
+      subscriptionName,
+      orchestrator,
+      logger: server.log,
     });
 
-    server.addHook('onClose', async () => {
-      await consumer.stop();
-    });
-  }
+  server.addHook('onReady', async () => {
+    consumer.start();
+  });
+
+  server.addHook('onClose', async () => {
+    await consumer.stop();
+  });
 
   return server;
 }
