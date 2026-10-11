@@ -57,8 +57,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - app: github-gateway
-            file: apps/github-gateway/Dockerfile
+          - app: github-ingress
+            file: apps/github-ingress/Dockerfile
+          - app: github-adapter
+            file: apps/github-adapter/Dockerfile
           - app: core
             file: apps/core/Dockerfile
     steps:

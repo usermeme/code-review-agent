@@ -23,9 +23,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - app: github-gateway
-            image: code-review-agent-github-gateway
-            file: apps/github-gateway/Dockerfile
+          - app: github-ingress
+            image: code-review-agent-github-ingress
+            file: apps/github-ingress/Dockerfile
+          - app: github-adapter
+            image: code-review-agent-github-adapter
+            file: apps/github-adapter/Dockerfile
           - app: core
             image: code-review-agent-core
             file: apps/core/Dockerfile

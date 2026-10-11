@@ -1,22 +1,35 @@
 version: '3.8'
 
 services:
-  gateway:
+  ingress:
     build:
       context: .
-      dockerfile: apps/github-gateway/Dockerfile
+      dockerfile: apps/github-ingress/Dockerfile
     ports:
       - '3000:8080'
     environment:
       - PORT=8080
       - HOST=0.0.0.0
       - GITHUB_WEBHOOK_SECRET=local-webhook-secret
-      - GITHUB_TOKEN=dummy-token
       - PR_EVENTS_TOPIC=pr-events
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-project
     depends_on:
-      - core
+      - pubsub-emulator
+
+  adapter:
+    build:
+      context: .
+      dockerfile: apps/github-adapter/Dockerfile
+    ports:
+      - '3002:8080'
+    environment:
+      - PORT=8080
+      - HOST=0.0.0.0
+      - GITHUB_TOKEN=dummy-token
+      - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
+      - PUBSUB_PROJECT_ID=local-project
+    depends_on:
       - pubsub-emulator
 
   core:
@@ -35,9 +48,11 @@ services:
       - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
       - GITHUB_TOKEN=dummy-token
+      - GITHUB_ADAPTER_URL=http://adapter:8080
     depends_on:
       - firestore-emulator
       - pubsub-emulator
+      - adapter
 
   firestore-emulator:
     image: google/cloud-sdk:emulators
@@ -68,6 +83,6 @@ services:
           -d '{\"topic\":\"projects/local-project/topics/pr-events\",\"pushConfig\":{\"pushEndpoint\":\"http://core:8080/api/v1/pubsub/pr-events\"}}';
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/subscriptions/review-results-sub \
           -H 'Content-Type: application/json' \
-          -d '{\"topic\":\"projects/local-project/topics/review-results\",\"pushConfig\":{\"pushEndpoint\":\"http://gateway:8080/api/v1/pubsub/review-results\"}}';
+          -d '{\"topic\":\"projects/local-project/topics/review-results\",\"pushConfig\":{\"pushEndpoint\":\"http://adapter:8080/api/v1/pubsub/review-results\"}}';
         echo 'PubSub emulator initialized successfully with push endpoints.';
       "

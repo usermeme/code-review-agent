@@ -8,6 +8,7 @@ import {
   ReviewResultPayload,
   PREventPayload,
 } from 'shared-types';
+import { GithubAdapterClient } from '../modules/provider/github-adapter.client.js';
 import type { CoreEnvService } from '../env.js';
 import type { AgentService } from './agent.service.js';
 
@@ -17,6 +18,7 @@ export interface EventOrchestratorDependencies {
   contextRepository: ContextRepository;
   pubsub: PubSub;
   agentService: AgentService;
+  githubAdapterClient?: GithubAdapterClient;
 }
 
 export class EventOrchestratorService {
@@ -25,6 +27,7 @@ export class EventOrchestratorService {
   private contextRepository: ContextRepository;
   private envService: CoreEnvService;
   private agentService: AgentService;
+  private githubAdapterClient?: GithubAdapterClient;
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub;
@@ -32,6 +35,11 @@ export class EventOrchestratorService {
     this.contextRepository = deps.contextRepository;
     this.envService = deps.envService;
     this.agentService = deps.agentService;
+
+    const adapterUrl = deps.envService.get('GITHUB_ADAPTER_URL');
+    this.githubAdapterClient =
+      deps.githubAdapterClient ??
+      (adapterUrl ? new GithubAdapterClient(adapterUrl) : undefined);
   }
 
   async ingestPREvent(
@@ -88,6 +96,32 @@ export class EventOrchestratorService {
       action === 'review_requested' ||
       action === 'manual_trigger'
     ) {
+      let diff = req.diff || '';
+      let changedFiles = req.changedFiles || [];
+
+      if (
+        (!diff || changedFiles.length === 0) &&
+        this.githubAdapterClient &&
+        provider === 'github'
+      ) {
+        try {
+          logger?.info(
+            `[Core] Fetching diff and changed files from github-adapter for ${prKey}`,
+          );
+          const adapterData = await this.githubAdapterClient.getPRDiff(
+            owner,
+            repo,
+            prNumber,
+          );
+          diff = adapterData.diff;
+          changedFiles = adapterData.changedFiles;
+        } catch (err) {
+          logger?.warn(
+            `[Core] Failed to fetch PR diff from adapter for ${prKey}: ${err}`,
+          );
+        }
+      }
+
       // Check if baseline context exists in Firestore
       const existingContext =
         await this.contextRepository.getContext(baselineKey);
@@ -102,8 +136,8 @@ export class EventOrchestratorService {
           repo,
           prNumber,
           meta,
-          diff: req.diff,
-          changedFiles: req.changedFiles,
+          diff,
+          changedFiles,
           logger,
         }));
 
@@ -117,13 +151,13 @@ export class EventOrchestratorService {
         repo,
         prNumber,
         status: 'reviewing',
-        diff: req.diff,
-        changedFiles: req.changedFiles,
+        diff,
+        changedFiles,
       });
 
-      const changedFilesStr = Array.isArray(req.changedFiles)
-        ? req.changedFiles.join('\n')
-        : (req.changedFiles ?? '');
+      const changedFilesStr = Array.isArray(changedFiles)
+        ? changedFiles.join('\n')
+        : (changedFiles ?? '');
 
       const reviewResult = await this.agentService.runReview(
         {
@@ -137,7 +171,7 @@ export class EventOrchestratorService {
             branch: meta.branch,
             body: meta.body,
           },
-          diff: req.diff,
+          diff,
           changedFiles: changedFilesStr,
           tickets: [],
         },
