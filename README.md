@@ -539,7 +539,7 @@ Each service strictly validates required variables and fails fast at startup if 
 | `PORT`                        |   Yes    | Port to listen on (e.g. `8080`)                                                      |
 | `HOST`                        |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                           |
 | `GITHUB_TOKEN`                |   Yes    | GitHub Personal Access Token (classic with `repo` scope) for diff, search & comments |
-| `REVIEW_RESULTS_SUBSCRIPTION` | Optional | Google Cloud Pub/Sub subscription to pull review results from (omit when using push) |
+| `REVIEW_RESULTS_SUBSCRIPTION` |   Yes    | Google Cloud Pub/Sub subscription to pull/process review results                     |
 | `GOOGLE_CLOUD_PROJECT`        | Optional | GCP Project ID (auto-detected when running in GCP)                                   |
 
 ### Core Service (`apps/core`)

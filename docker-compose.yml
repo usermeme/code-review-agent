@@ -27,6 +27,7 @@ services:
       - PORT=8080
       - HOST=0.0.0.0
       - GITHUB_TOKEN=dummy-token
+      - REVIEW_RESULTS_SUBSCRIPTION=review-results-sub
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-project
     depends_on:

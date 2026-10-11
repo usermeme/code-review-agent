@@ -6,12 +6,9 @@ async function bootstrap() {
   const host = envService.get('HOST');
   const port = envService.get('PORT');
 
-  const subscriptionName = envService.get('REVIEW_RESULTS_SUBSCRIPTION');
-  const pubsub = subscriptionName
-    ? new PubSub({
-        projectId: envService.get('GOOGLE_CLOUD_PROJECT'),
-      })
-    : undefined;
+  const pubsub = new PubSub({
+    projectId: envService.get('GOOGLE_CLOUD_PROJECT'),
+  });
 
   const server = await buildServer({
     envService,

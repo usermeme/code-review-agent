@@ -9,7 +9,7 @@ import type { AdapterEnvService } from './env.js';
 
 export interface BuildServerOptions {
   envService: AdapterEnvService;
-  pubsub?: PubSub;
+  pubsub: PubSub;
   githubService?: GithubService;
   reviewResultsConsumer?: ReviewResultsConsumer;
   fastifyOptions?: FastifyServerOptions;
@@ -41,28 +41,26 @@ export async function buildServer(
     githubService,
   });
 
-  // 4. Optional Pub/Sub Pull Consumer (for persistent / non-serverless environments)
+  // 4. Pub/Sub Pull Consumer
   const subscriptionName = options.envService.get(
     'REVIEW_RESULTS_SUBSCRIPTION',
   );
-  if (subscriptionName && options.pubsub) {
-    const consumer =
-      options.reviewResultsConsumer ??
-      new ReviewResultsConsumer({
-        pubsub: options.pubsub,
-        subscriptionName,
-        githubService,
-        logger: server.log,
-      });
-
-    server.addHook('onReady', async () => {
-      consumer.start();
+  const consumer =
+    options.reviewResultsConsumer ??
+    new ReviewResultsConsumer({
+      pubsub: options.pubsub,
+      subscriptionName,
+      githubService,
+      logger: server.log,
     });
 
-    server.addHook('onClose', async () => {
-      await consumer.stop();
-    });
-  }
+  server.addHook('onReady', async () => {
+    consumer.start();
+  });
+
+  server.addHook('onClose', async () => {
+    await consumer.stop();
+  });
 
   return server;
 }

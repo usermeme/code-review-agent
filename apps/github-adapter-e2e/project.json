@@ -12,7 +12,8 @@
           "NODE_OPTIONS": "--import tsx",
           "HOST": "0.0.0.0",
           "PORT": "8080",
-          "GITHUB_TOKEN": "test-github-token"
+          "GITHUB_TOKEN": "test-github-token",
+          "REVIEW_RESULTS_SUBSCRIPTION": "review-results-sub"
         }
       }
     },
