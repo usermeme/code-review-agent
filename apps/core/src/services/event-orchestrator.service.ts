@@ -75,7 +75,6 @@ export class EventOrchestratorService {
         ref: meta.baseRef,
         isIncrementalUpdate: true,
         model: this.envService.get('REVIEW_MODEL'),
-        githubToken: this.envService.get('GITHUB_TOKEN'),
       });
 
       const summary =
@@ -319,7 +318,6 @@ export class EventOrchestratorService {
       ref: params.meta.baseRef || 'main',
       isIncrementalUpdate: false,
       model: this.envService.get('REVIEW_MODEL'),
-      githubToken: this.envService.get('GITHUB_TOKEN'),
     });
 
     const summary =
