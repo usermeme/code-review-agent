@@ -49,7 +49,6 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
       - GITHUB_TOKEN=dummy-token
       - GIT_ADAPTER_URL=http://adapter:8080
-      - GITHUB_ADAPTER_URL=http://adapter:8080
     depends_on:
       - firestore-emulator
       - pubsub-emulator

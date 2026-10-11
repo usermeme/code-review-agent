@@ -37,9 +37,7 @@ export class EventOrchestratorService {
     this.envService = deps.envService;
     this.agentService = deps.agentService;
 
-    const adapterUrl =
-      deps.envService.get('GIT_ADAPTER_URL') ||
-      deps.envService.get('GITHUB_ADAPTER_URL');
+    const adapterUrl = deps.envService.get('GIT_ADAPTER_URL');
     this.gitAdapterClient =
       deps.gitAdapterClient ??
       (adapterUrl ? new GitAdapterClient(adapterUrl) : undefined);
