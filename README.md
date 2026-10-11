@@ -548,9 +548,9 @@ Each service strictly validates required variables and fails fast at startup if 
 | :------------------------ | :------: | :---------------------------------------------------------------------------------- |
 | `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                                     |
 | `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                          |
-| `PR_EVENTS_SUBSCRIPTION`  | Optional | Google Cloud Pub/Sub subscription to pull PR events from (omit when using push)     |
-| `REVIEW_RESULTS_TOPIC`    | Optional | Google Cloud Pub/Sub topic to publish review result events to                       |
-| `REVIEW_MODEL`            | Optional | Gemini model identifier (e.g. `gemini-3.8-flash`)                                   |
+| `PR_EVENTS_SUBSCRIPTION`  |   Yes    | Google Cloud Pub/Sub subscription to pull/process PR events                         |
+| `REVIEW_RESULTS_TOPIC`    |   Yes    | Google Cloud Pub/Sub topic to publish review result events to                       |
+| `REVIEW_MODEL`            |   Yes    | Gemini model identifier (e.g. `gemini-3.8-flash`)                                   |
 | `GIT_ADAPTER_URL`         |   Yes    | URL of Git Provider Adapter for on-demand code queries (e.g. `http://adapter:8080`) |
 | `GEMINI_API_KEY`          | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)          |
 | `GOOGLE_CLOUD_PROJECT`    | Optional | GCP Project ID (auto-detected when running in GCP)                                  |

@@ -22,6 +22,7 @@ describe('EventOrchestratorService', () => {
       PR_EVENTS_SUBSCRIPTION: 'test-pr-events-sub',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
       GIT_ADAPTER_URL: 'http://adapter:8080',
+      REVIEW_MODEL: 'gemini-3.8-flash',
     });
     publishedMessages = [];
     mockPubSub = {

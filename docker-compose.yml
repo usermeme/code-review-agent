@@ -47,7 +47,7 @@ services:
       - REVIEW_RESULTS_TOPIC=review-results
       - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
-      - GITHUB_TOKEN=dummy-token
+      - PR_EVENTS_SUBSCRIPTION=pr-events-sub
       - GIT_ADAPTER_URL=http://adapter:8080
     depends_on:
       - firestore-emulator
