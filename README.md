@@ -35,8 +35,8 @@ sequenceDiagram
     GW-->>GitHub: 3. HTTP 200 OK (< 500ms)
 
     %% 2. Orchestration & Agents (In-process)
-    Bus->>Core: 4. Pull Subscription (pr-events-sub)
-    Note over Core: Stores PR status: 'queued'<br/>Checks Firestore baseline context
+    Bus->>Core: 4. Push Subscription POST /api/v1/pubsub/pr-events
+    Note over Core: Wakes up from 0 instances<br/>Stores PR status: 'queued'<br/>Checks Firestore baseline context
     alt Baseline Context Missing
         Note over Core: Triggers in-process Context Builder Agent (ADK)<br/>Clones repo, chunks files, synthesizes baseline
         Note over Core: Saves baseline context in Firestore
@@ -47,8 +47,8 @@ sequenceDiagram
 
     %% 4. Review Completion & Egress
     Core->>Bus: 5. Publish Results (review-results topic)
-    Bus->>GW: 6. Pull Subscription (review-results-sub)
-    Note over GW: Uses Octokit to submit formal review & inline comments
+    Bus->>GW: 6. Push Subscription POST /api/v1/pubsub/review-results
+    Note over GW: Wakes up from 0 instances<br/>Uses Octokit to submit formal review & inline comments
     GW->>GitHub: 7. PR Review & Inline Comments Appear on GitHub!
 ```
 
@@ -215,7 +215,7 @@ jobs:
             --cpu 2 \
             --no-cpu-throttling \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,PR_EVENTS_SUBSCRIPTION=pr-events-sub,REVIEW_RESULTS_TOPIC=review-results,REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
       # 2. Deploy GitHub Gateway (Public Ingress)
       - name: Deploy GitHub Gateway
@@ -229,18 +229,35 @@ jobs:
             --cpu 1 \
             --no-cpu-throttling \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,GITHUB_WEBHOOK_SECRET=${{ secrets.GITHUB_WEBHOOK_SECRET }},GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},PR_EVENTS_TOPIC=pr-events,REVIEW_RESULTS_SUBSCRIPTION=review-results-sub,GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,GITHUB_WEBHOOK_SECRET=${{ secrets.GITHUB_WEBHOOK_SECRET }},GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},PR_EVENTS_TOPIC=pr-events,GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
-      # 3. Configure Pub/Sub Pull Subscriptions
-      - name: Configure Pub/Sub Pull Subscriptions
+      # 3. Configure Pub/Sub Push Subscriptions (enables scale-to-zero wake-up)
+      - name: Configure Pub/Sub Push Subscriptions
         run: |
+          CORE_URL=$(gcloud run services describe core-service --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
+          GW_URL=$(gcloud run services describe github-gateway --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
+
+          # 1. PR Events Push Subscription to Core
           gcloud pubsub subscriptions create pr-events-sub \
             --topic=pr-events \
-            --ack-deadline=600 || true
+            --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events" \
+            --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --ack-deadline=600 || \
+          gcloud pubsub subscriptions update pr-events-sub \
+            --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events" \
+            --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --ack-deadline=600
 
+          # 2. Review Results Push Subscription to Gateway
           gcloud pubsub subscriptions create review-results-sub \
             --topic=review-results \
-            --ack-deadline=60 || true
+            --push-endpoint="${GW_URL}/api/v1/pubsub/review-results" \
+            --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --ack-deadline=60 || \
+          gcloud pubsub subscriptions update review-results-sub \
+            --push-endpoint="${GW_URL}/api/v1/pubsub/review-results" \
+            --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --ack-deadline=60
 ```
 
 ---
@@ -482,30 +499,30 @@ Each service strictly validates required variables and fails fast at startup if 
 
 ### GitHub Gateway (`apps/github-gateway`)
 
-| Variable                      | Required | Description                                                                      |
-| :---------------------------- | :------: | :------------------------------------------------------------------------------- |
-| `PORT`                        |   Yes    | Port to listen on (e.g. `8080`)                                                  |
-| `HOST`                        |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                       |
-| `GITHUB_WEBHOOK_SECRET`       |   Yes    | Secret string used to verify incoming GitHub webhook HMAC signatures             |
-| `GITHUB_TOKEN`                |   Yes    | GitHub Personal Access Token (classic with `repo` scope) for PR diffs & comments |
-| `PR_EVENTS_TOPIC`             | Optional | Google Cloud Pub/Sub topic to publish PR events to                               |
-| `REVIEW_RESULTS_SUBSCRIPTION` | Optional | Google Cloud Pub/Sub subscription to pull review results from                    |
-| `GOOGLE_CLOUD_PROJECT`        | Optional | GCP Project ID (auto-detected when running in GCP)                               |
+| Variable                      | Required | Description                                                                          |
+| :---------------------------- | :------: | :----------------------------------------------------------------------------------- |
+| `PORT`                        |   Yes    | Port to listen on (e.g. `8080`)                                                      |
+| `HOST`                        |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                           |
+| `GITHUB_WEBHOOK_SECRET`       |   Yes    | Secret string used to verify incoming GitHub webhook HMAC signatures                 |
+| `GITHUB_TOKEN`                |   Yes    | GitHub Personal Access Token (classic with `repo` scope) for PR diffs & comments     |
+| `PR_EVENTS_TOPIC`             | Optional | Google Cloud Pub/Sub topic to publish PR events to                                   |
+| `REVIEW_RESULTS_SUBSCRIPTION` | Optional | Google Cloud Pub/Sub subscription to pull review results from (omit when using push) |
+| `GOOGLE_CLOUD_PROJECT`        | Optional | GCP Project ID (auto-detected when running in GCP)                                   |
 
 ### Core Service (`apps/core`)
 
-| Variable                  | Required | Description                                                                |
-| :------------------------ | :------: | :------------------------------------------------------------------------- |
-| `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                            |
-| `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                 |
-| `PR_EVENTS_SUBSCRIPTION`  | Optional | Google Cloud Pub/Sub subscription to pull PR events from                   |
-| `REVIEW_RESULTS_TOPIC`    | Optional | Google Cloud Pub/Sub topic to publish review result events to              |
-| `REVIEW_MODEL`            | Optional | Gemini model identifier (e.g. `gemini-3.8-flash`)                          |
-| `GITHUB_TOKEN`            | Optional | GitHub Personal Access Token (classic with `repo` scope)                   |
-| `GEMINI_API_KEY`          | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI) |
-| `GOOGLE_CLOUD_PROJECT`    | Optional | GCP Project ID (auto-detected when running in GCP)                         |
-| `FIRESTORE_EMULATOR_HOST` | Optional | Host of local Firestore emulator for dev/testing (e.g. `localhost:8081`)   |
-| `PUBSUB_EMULATOR_HOST`    | Optional | Host of local Pub/Sub emulator for dev/testing (e.g. `localhost:8085`)     |
+| Variable                  | Required | Description                                                                     |
+| :------------------------ | :------: | :------------------------------------------------------------------------------ |
+| `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                                 |
+| `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                      |
+| `PR_EVENTS_SUBSCRIPTION`  | Optional | Google Cloud Pub/Sub subscription to pull PR events from (omit when using push) |
+| `REVIEW_RESULTS_TOPIC`    | Optional | Google Cloud Pub/Sub topic to publish review result events to                   |
+| `REVIEW_MODEL`            | Optional | Gemini model identifier (e.g. `gemini-3.8-flash`)                               |
+| `GITHUB_TOKEN`            | Optional | GitHub Personal Access Token (classic with `repo` scope)                        |
+| `GEMINI_API_KEY`          | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)      |
+| `GOOGLE_CLOUD_PROJECT`    | Optional | GCP Project ID (auto-detected when running in GCP)                              |
+| `FIRESTORE_EMULATOR_HOST` | Optional | Host of local Firestore emulator for dev/testing (e.g. `localhost:8081`)        |
+| `PUBSUB_EMULATOR_HOST`    | Optional | Host of local Pub/Sub emulator for dev/testing (e.g. `localhost:8085`)          |
 
 ---
 

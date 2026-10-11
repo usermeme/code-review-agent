@@ -13,7 +13,6 @@ services:
       - GITHUB_WEBHOOK_SECRET=local-webhook-secret
       - GITHUB_TOKEN=dummy-token
       - PR_EVENTS_TOPIC=pr-events
-      - REVIEW_RESULTS_SUBSCRIPTION=review-results-sub
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-project
     depends_on:
@@ -32,7 +31,6 @@ services:
       - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-project
-      - PR_EVENTS_SUBSCRIPTION=pr-events-sub
       - REVIEW_RESULTS_TOPIC=review-results
       - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
@@ -64,12 +62,12 @@ services:
         echo 'Creating PubSub topics...';
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/pr-events;
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/review-results;
-        echo 'Creating PubSub subscriptions...';
+        echo 'Creating PubSub push subscriptions...';
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/subscriptions/pr-events-sub \
           -H 'Content-Type: application/json' \
-          -d '{\"topic\":\"projects/local-project/topics/pr-events\"}';
+          -d '{\"topic\":\"projects/local-project/topics/pr-events\",\"pushConfig\":{\"pushEndpoint\":\"http://core:8080/api/v1/pubsub/pr-events\"}}';
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/subscriptions/review-results-sub \
           -H 'Content-Type: application/json' \
-          -d '{\"topic\":\"projects/local-project/topics/review-results\"}';
-        echo 'PubSub emulator initialized successfully.';
+          -d '{\"topic\":\"projects/local-project/topics/review-results\",\"pushConfig\":{\"pushEndpoint\":\"http://gateway:8080/api/v1/pubsub/review-results\"}}';
+        echo 'PubSub emulator initialized successfully with push endpoints.';
       "

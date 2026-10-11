@@ -4,7 +4,7 @@ import { EnvService } from 'env';
 export const coreEnvSchema = z.object({
   HOST: z.string().min(1),
   PORT: z.string().transform(Number),
-  PR_EVENTS_SUBSCRIPTION: z.string().min(1).default('pr-events-sub'),
+  PR_EVENTS_SUBSCRIPTION: z.string().optional(),
   REVIEW_RESULTS_TOPIC: z.string().min(1).default('review-results'),
   REVIEW_MODEL: z.string().optional().default('gemini-3.8-flash'),
   GOOGLE_CLOUD_PROJECT: z.string().optional(),

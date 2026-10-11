@@ -7,7 +7,7 @@ export const gatewayEnvSchema = z.object({
   GITHUB_WEBHOOK_SECRET: z.string().min(1),
   GITHUB_TOKEN: z.string().min(1),
   PR_EVENTS_TOPIC: z.string().min(1).default('pr-events'),
-  REVIEW_RESULTS_SUBSCRIPTION: z.string().min(1).default('review-results-sub'),
+  REVIEW_RESULTS_SUBSCRIPTION: z.string().optional(),
   GOOGLE_CLOUD_PROJECT: z.string().optional(),
 });
 
