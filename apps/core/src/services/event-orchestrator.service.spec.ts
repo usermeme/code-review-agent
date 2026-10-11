@@ -295,7 +295,7 @@ describe('EventOrchestratorService', () => {
     );
   });
 
-  it('fetches diff and changed files from githubAdapterClient when incoming diff is empty', async () => {
+  it('fetches diff and changed files from gitAdapterClient when incoming diff is empty', async () => {
     const mockAdapterClient = {
       getPRDiff: vi.fn().mockResolvedValue({
         diff: 'fetched-diff-content',
@@ -311,7 +311,7 @@ describe('EventOrchestratorService', () => {
       contextRepository: mockContextRepo,
       pubsub: mockPubSub,
       agentService: mockAgentService,
-      githubAdapterClient: mockAdapterClient as any,
+      gitAdapterClient: mockAdapterClient,
     });
 
     const req: PREventPayload = {

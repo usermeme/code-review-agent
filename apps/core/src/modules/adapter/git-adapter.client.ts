@@ -1,26 +1,11 @@
-export interface PRDiffResponse {
-  diff: string;
-  changedFiles: string[];
-}
+import type {
+  GitAdapterContract,
+  PRDiffResult,
+  CodeSearchResult,
+  FileContentResult,
+} from 'shared-types';
 
-export interface CodeSearchResponse {
-  totalCount: number;
-  items: Array<{
-    name: string;
-    path: string;
-    sha: string;
-    htmlUrl: string;
-  }>;
-}
-
-export interface FileContentResponse {
-  path: string;
-  content: string;
-  encoding: string;
-  sha?: string;
-}
-
-export class GithubAdapterClient {
+export class GitAdapterClient implements GitAdapterContract {
   private baseUrl: string;
 
   constructor(baseUrl: string) {
@@ -31,30 +16,30 @@ export class GithubAdapterClient {
     owner: string,
     repo: string,
     prNumber: number,
-  ): Promise<PRDiffResponse> {
+  ): Promise<PRDiffResult> {
     const url = `${this.baseUrl}/api/v1/repos/${owner}/${repo}/pulls/${prNumber}/diff`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(
-        `Failed to fetch PR diff from adapter: HTTP ${res.status} ${res.statusText}`,
+        `Failed to fetch PR diff from git adapter: HTTP ${res.status} ${res.statusText}`,
       );
     }
-    return (await res.json()) as PRDiffResponse;
+    return (await res.json()) as PRDiffResult;
   }
 
   async searchCode(
     owner: string,
     repo: string,
     query: string,
-  ): Promise<CodeSearchResponse> {
+  ): Promise<CodeSearchResult> {
     const url = `${this.baseUrl}/api/v1/repos/${owner}/${repo}/search?q=${encodeURIComponent(query)}`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(
-        `Failed to search code from adapter: HTTP ${res.status} ${res.statusText}`,
+        `Failed to search code from git adapter: HTTP ${res.status} ${res.statusText}`,
       );
     }
-    return (await res.json()) as CodeSearchResponse;
+    return (await res.json()) as CodeSearchResult;
   }
 
   async getFileContent(
@@ -62,15 +47,15 @@ export class GithubAdapterClient {
     repo: string,
     path: string,
     ref?: string,
-  ): Promise<FileContentResponse> {
+  ): Promise<FileContentResult> {
     const query = ref ? `?ref=${encodeURIComponent(ref)}` : '';
     const url = `${this.baseUrl}/api/v1/repos/${owner}/${repo}/files/${path}${query}`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(
-        `Failed to fetch file content from adapter: HTTP ${res.status} ${res.statusText}`,
+        `Failed to fetch file content from git adapter: HTTP ${res.status} ${res.statusText}`,
       );
     }
-    return (await res.json()) as FileContentResponse;
+    return (await res.json()) as FileContentResult;
   }
 }

@@ -5,6 +5,7 @@ import {
   PRDiffResult,
   CodeSearchResult,
   FileContentResult,
+  GitAdapterContract,
 } from './interfaces/github.interface.js';
 import type { AdapterEnvService } from '../../env.js';
 
@@ -14,7 +15,7 @@ export interface GithubServiceDependencies {
   token?: string;
 }
 
-export class GithubService {
+export class GithubService implements GitAdapterContract {
   private octokit: Octokit;
   private envService: AdapterEnvService;
 

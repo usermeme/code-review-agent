@@ -10,7 +10,11 @@ export const coreEnvSchema = z.object({
   GOOGLE_CLOUD_PROJECT: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
-  GITHUB_ADAPTER_URL: z.string().optional().default('http://adapter:8080'),
+  GIT_ADAPTER_URL: z
+    .string()
+    .optional()
+    .default(process.env['GITHUB_ADAPTER_URL'] ?? 'http://adapter:8080'),
+  GITHUB_ADAPTER_URL: z.string().optional(),
 });
 
 export type CoreEnvSchema = typeof coreEnvSchema;

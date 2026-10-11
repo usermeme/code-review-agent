@@ -7,8 +7,9 @@ import {
   ContextReadyPayload,
   ReviewResultPayload,
   PREventPayload,
+  GitAdapterContract,
 } from 'shared-types';
-import { GithubAdapterClient } from '../modules/provider/github-adapter.client.js';
+import { GitAdapterClient } from '../modules/adapter/git-adapter.client.js';
 import type { CoreEnvService } from '../env.js';
 import type { AgentService } from './agent.service.js';
 
@@ -18,7 +19,7 @@ export interface EventOrchestratorDependencies {
   contextRepository: ContextRepository;
   pubsub: PubSub;
   agentService: AgentService;
-  githubAdapterClient?: GithubAdapterClient;
+  gitAdapterClient?: GitAdapterContract;
 }
 
 export class EventOrchestratorService {
@@ -27,7 +28,7 @@ export class EventOrchestratorService {
   private contextRepository: ContextRepository;
   private envService: CoreEnvService;
   private agentService: AgentService;
-  private githubAdapterClient?: GithubAdapterClient;
+  private gitAdapterClient?: GitAdapterContract;
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub;
@@ -36,10 +37,12 @@ export class EventOrchestratorService {
     this.envService = deps.envService;
     this.agentService = deps.agentService;
 
-    const adapterUrl = deps.envService.get('GITHUB_ADAPTER_URL');
-    this.githubAdapterClient =
-      deps.githubAdapterClient ??
-      (adapterUrl ? new GithubAdapterClient(adapterUrl) : undefined);
+    const adapterUrl =
+      deps.envService.get('GIT_ADAPTER_URL') ||
+      deps.envService.get('GITHUB_ADAPTER_URL');
+    this.gitAdapterClient =
+      deps.gitAdapterClient ??
+      (adapterUrl ? new GitAdapterClient(adapterUrl) : undefined);
   }
 
   async ingestPREvent(
@@ -99,16 +102,12 @@ export class EventOrchestratorService {
       let diff = req.diff || '';
       let changedFiles = req.changedFiles || [];
 
-      if (
-        (!diff || changedFiles.length === 0) &&
-        this.githubAdapterClient &&
-        provider === 'github'
-      ) {
+      if ((!diff || changedFiles.length === 0) && this.gitAdapterClient) {
         try {
           logger?.info(
-            `[Core] Fetching diff and changed files from github-adapter for ${prKey}`,
+            `[Core] Fetching diff and changed files from git adapter for ${prKey}`,
           );
-          const adapterData = await this.githubAdapterClient.getPRDiff(
+          const adapterData = await this.gitAdapterClient.getPRDiff(
             owner,
             repo,
             prNumber,
