@@ -27,15 +27,7 @@ export class GithubAdapterWorld extends World {
       HOST: '0.0.0.0',
       PORT: '8080',
       GITHUB_TOKEN: 'test-github-token',
-      REVIEW_RESULTS_SUBSCRIPTION: 'test-review-results-sub',
     });
-
-    const mockPubSub = {
-      subscription: () => ({
-        on: () => {},
-        close: async () => {},
-      }),
-    };
 
     this.githubService = new GithubService({
       octokit: this.octokit as unknown as Octokit,
@@ -44,7 +36,6 @@ export class GithubAdapterWorld extends World {
 
     this.app = await buildAdapterServer({
       envService: this.envService,
-      pubsub: mockPubSub as any,
       githubService: this.githubService,
       fastifyOptions: { logger: false },
     });

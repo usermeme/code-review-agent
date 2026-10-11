@@ -1,4 +1,3 @@
-import { PubSub } from '@google-cloud/pubsub';
 import { envService } from './env.js';
 import { buildServer } from './app.js';
 
@@ -6,13 +5,8 @@ async function bootstrap() {
   const host = envService.get('HOST');
   const port = envService.get('PORT');
 
-  const pubsub = new PubSub({
-    projectId: envService.get('GOOGLE_CLOUD_PROJECT'),
-  });
-
   const server = await buildServer({
     envService,
-    pubsub,
   });
 
   try {

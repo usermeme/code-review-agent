@@ -9,7 +9,6 @@ import { EventOrchestratorService } from './services/event-orchestrator.service.
 import { healthModule } from './modules/health/health.module.js';
 import { contextModule } from './modules/context/context.module.js';
 import { pubsubModule } from './modules/pubsub/pubsub.module.js';
-import { PrEventsConsumer } from './modules/pubsub/pr-events.consumer.js';
 import type { CoreEnvService } from './env.js';
 
 export interface BuildCoreServerOptions {
@@ -20,7 +19,6 @@ export interface BuildCoreServerOptions {
   contextRepository?: ContextRepository;
   agentService?: AgentService;
   orchestrator?: EventOrchestratorService;
-  prEventsConsumer?: PrEventsConsumer;
   fastifyOptions?: FastifyServerOptions;
 }
 
@@ -62,25 +60,6 @@ export async function buildCoreServer(
   await server.register(pubsubModule, {
     prefix: '/api/v1/pubsub',
     orchestrator,
-  });
-
-  // 4. Pub/Sub PR Events Pull Consumer
-  const subscriptionName = options.envService.get('PR_EVENTS_SUBSCRIPTION');
-  const consumer =
-    options.prEventsConsumer ??
-    new PrEventsConsumer({
-      pubsub: options.pubsub,
-      subscriptionName,
-      orchestrator,
-      logger: server.log,
-    });
-
-  server.addHook('onReady', async () => {
-    consumer.start();
-  });
-
-  server.addHook('onClose', async () => {
-    await consumer.stop();
   });
 
   return server;
