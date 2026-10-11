@@ -21,6 +21,7 @@ describe('EventOrchestratorService', () => {
       PORT: '8080',
       PR_EVENTS_SUBSCRIPTION: 'test-pr-events-sub',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
+      GIT_ADAPTER_URL: 'http://adapter:8080',
     });
     publishedMessages = [];
     mockPubSub = {

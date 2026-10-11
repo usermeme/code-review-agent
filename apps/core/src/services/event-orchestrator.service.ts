@@ -28,7 +28,7 @@ export class EventOrchestratorService {
   private contextRepository: ContextRepository;
   private envService: CoreEnvService;
   private agentService: AgentService;
-  private gitAdapterClient?: GitAdapterContract;
+  private gitAdapterClient: GitAdapterContract;
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub;
@@ -39,8 +39,7 @@ export class EventOrchestratorService {
 
     const adapterUrl = deps.envService.get('GIT_ADAPTER_URL');
     this.gitAdapterClient =
-      deps.gitAdapterClient ??
-      (adapterUrl ? new GitAdapterClient(adapterUrl) : undefined);
+      deps.gitAdapterClient ?? new GitAdapterClient(adapterUrl);
   }
 
   async ingestPREvent(
@@ -100,7 +99,7 @@ export class EventOrchestratorService {
       let diff = req.diff || '';
       let changedFiles = req.changedFiles || [];
 
-      if ((!diff || changedFiles.length === 0) && this.gitAdapterClient) {
+      if (!diff || changedFiles.length === 0) {
         try {
           logger?.info(
             `[Core] Fetching diff and changed files from git adapter for ${prKey}`,
