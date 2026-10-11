@@ -1,5 +1,6 @@
 import type {
   PRDiffResult,
+  PRFile,
   CodeSearchItem,
   CodeSearchResult,
   FileContentResult,
@@ -8,6 +9,7 @@ import type {
 
 export type {
   PRDiffResult,
+  PRFile,
   CodeSearchItem,
   CodeSearchResult,
   FileContentResult,

@@ -85,4 +85,54 @@ describe('providerRoutes', () => {
       'main',
     );
   });
+
+  it('GET /repos/:owner/:repo/pulls/:number/files returns PR files', async () => {
+    mockGithubService.getPRFiles = vi.fn().mockResolvedValue([
+      {
+        filename: 'index.ts',
+        status: 'modified',
+        content: 'console.log(1);',
+      },
+    ]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/pulls/42/files',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([
+      { filename: 'index.ts', status: 'modified', content: 'console.log(1);' },
+    ]);
+    expect(mockGithubService.getPRFiles).toHaveBeenCalledWith(
+      'test-owner',
+      'test-repo',
+      42,
+    );
+  });
+
+  it('GET /repos/:owner/:repo/tarball returns tarball stream', async () => {
+    const { Readable } = await import('node:stream');
+    const mockStream = Readable.from([Buffer.from('fake-tar-bytes')]);
+    mockGithubService.getRepoTarball = vi.fn().mockResolvedValue({
+      body: mockStream,
+      headers: {
+        get: (h: string) => (h === 'x-github-commit-sha' ? 'sha-123' : null),
+      },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/tarball?ref=main',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('application/x-gzip');
+    expect(res.headers['x-commit-sha']).toBe('sha-123');
+    expect(mockGithubService.getRepoTarball).toHaveBeenCalledWith(
+      'test-owner',
+      'test-repo',
+      'main',
+    );
+  });
 });

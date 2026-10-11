@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import * as tar from 'tar';
+import type { GitAdapterContract } from 'shared-types';
 
 export interface RepoSnapshot {
   dir: string;
@@ -24,15 +25,15 @@ export function parseRepoCoordinates(cloneUrl?: string): {
 }
 
 /**
- * Downloads and extracts a repository archive via the Git provider's REST API.
- * Uses streaming tar extraction in Node.js — zero git CLI or binary required.
+ * Downloads and extracts a repository archive via the Git adapter.
+ * Uses streaming tar extraction in Node.js — zero git CLI or direct provider dependencies required.
  */
 export async function downloadRepoArchive(params: {
   cloneUrl?: string;
   ref?: string;
-  token?: string;
   owner?: string;
   repo?: string;
+  gitAdapter: GitAdapterContract;
 }): Promise<RepoSnapshot> {
   let { owner, repo } = params;
   if (!owner || !repo) {
@@ -48,42 +49,25 @@ export async function downloadRepoArchive(params: {
   }
 
   const ref = params.ref || 'main';
-  const token = params.token;
-
   const dir = await mkdtemp(join(tmpdir(), 'repoctx-'));
 
-  const headers: Record<string, string> = {
-    'User-Agent': 'code-review-agent',
-    Accept: 'application/vnd.github+json',
-  };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const tarballUrl = `https://api.github.com/repos/${owner}/${repo}/tarball/${encodeURIComponent(ref)}`;
-
   try {
-    const response = await fetch(tarballUrl, {
-      headers,
-      redirect: 'follow',
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download repository archive from ${tarballUrl}: HTTP ${response.status} ${response.statusText}`,
-      );
-    }
+    const response = await params.gitAdapter.getRepoTarball(owner, repo, ref);
 
     if (!response.body) {
       throw new Error(
-        `Repository archive response body from ${tarballUrl} was empty.`,
+        `Repository archive response body from git adapter was empty.`,
       );
     }
 
-    // Extract the tar.gz stream directly into dir, stripping the top-level GitHub directory prefix
+    const stream =
+      typeof (response.body as any).getReader === 'function'
+        ? Readable.fromWeb(response.body as any)
+        : (response.body as any);
+
+    // Extract the tar.gz stream directly into dir, stripping the top-level directory prefix
     await pipeline(
-      Readable.fromWeb(response.body as any),
+      stream,
       tar.x({
         cwd: dir,
         strip: 1,
@@ -91,6 +75,7 @@ export async function downloadRepoArchive(params: {
     );
 
     const headSha =
+      response.headers.get('x-commit-sha') ||
       response.headers.get('x-github-commit-sha') ||
       response.headers.get('etag')?.replace(/"/g, '') ||
       ref;

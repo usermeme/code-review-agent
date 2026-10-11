@@ -1,6 +1,7 @@
 import type {
   GitAdapterContract,
   PRDiffResult,
+  PRFile,
   CodeSearchResult,
   FileContentResult,
 } from 'shared-types';
@@ -25,6 +26,21 @@ export class GitAdapterClient implements GitAdapterContract {
       );
     }
     return (await res.json()) as PRDiffResult;
+  }
+
+  async getPRFiles(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<PRFile[]> {
+    const url = `${this.baseUrl}/api/v1/repos/${owner}/${repo}/pulls/${prNumber}/files`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(
+        `Failed to fetch PR files from git adapter: HTTP ${res.status} ${res.statusText}`,
+      );
+    }
+    return (await res.json()) as PRFile[];
   }
 
   async searchCode(
@@ -57,5 +73,21 @@ export class GitAdapterClient implements GitAdapterContract {
       );
     }
     return (await res.json()) as FileContentResult;
+  }
+
+  async getRepoTarball(
+    owner: string,
+    repo: string,
+    ref?: string,
+  ): Promise<Response> {
+    const query = ref ? `?ref=${encodeURIComponent(ref)}` : '';
+    const url = `${this.baseUrl}/api/v1/repos/${owner}/${repo}/tarball${query}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(
+        `Failed to fetch repo tarball from git adapter: HTTP ${res.status} ${res.statusText}`,
+      );
+    }
+    return res;
   }
 }

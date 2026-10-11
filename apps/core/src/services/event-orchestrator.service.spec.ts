@@ -302,8 +302,10 @@ describe('EventOrchestratorService', () => {
         diff: 'fetched-diff-content',
         changedFiles: ['fetched-file.ts'],
       }),
+      getPRFiles: vi.fn(),
       searchCode: vi.fn(),
       getFileContent: vi.fn(),
+      getRepoTarball: vi.fn(),
     };
 
     const orchestratorWithAdapter = new EventOrchestratorService({

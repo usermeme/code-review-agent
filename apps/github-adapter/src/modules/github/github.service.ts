@@ -3,6 +3,7 @@ import {
   PostReviewOptions,
   PostReviewResult,
   PRDiffResult,
+  PRFile,
   CodeSearchResult,
   FileContentResult,
   GitAdapterContract,
@@ -18,10 +19,12 @@ export interface GithubServiceDependencies {
 export class GithubService implements GitAdapterContract {
   private octokit: Octokit;
   private envService: AdapterEnvService;
+  private token: string;
 
   constructor(deps: GithubServiceDependencies) {
     this.envService = deps.envService;
     const token = deps.token ?? deps.envService.get('GITHUB_TOKEN');
+    this.token = token;
     this.octokit = deps.octokit ?? new Octokit({ auth: token });
   }
 
@@ -57,6 +60,79 @@ export class GithubService implements GitAdapterContract {
       diff,
       changedFiles,
     };
+  }
+
+  async getPRFiles(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<PRFile[]> {
+    const filesResponse = await this.octokitClient.rest.pulls.listFiles({
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+
+    const results: PRFile[] = [];
+    for (const file of filesResponse.data) {
+      if (file.status === 'removed') {
+        results.push({
+          filename: file.filename,
+          status: file.status,
+        });
+        continue;
+      }
+
+      let content: string | undefined;
+      try {
+        const fileContent = await this.getFileContent(
+          owner,
+          repo,
+          file.filename,
+        );
+        content = fileContent.content;
+      } catch {
+        content = file.patch;
+      }
+
+      results.push({
+        filename: file.filename,
+        status: file.status,
+        content,
+        patch: file.patch,
+      });
+    }
+
+    return results;
+  }
+
+  async getRepoTarball(
+    owner: string,
+    repo: string,
+    ref?: string,
+  ): Promise<Response> {
+    const targetRef = ref || 'main';
+    const tarballUrl = `https://api.github.com/repos/${owner}/${repo}/tarball/${encodeURIComponent(targetRef)}`;
+    const headers: Record<string, string> = {
+      'User-Agent': 'code-review-agent-github-adapter',
+      Accept: 'application/vnd.github+json',
+    };
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const response = await fetch(tarballUrl, {
+      headers,
+      redirect: 'follow',
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to download repository archive from GitHub: HTTP ${response.status} ${response.statusText}`,
+      );
+    }
+
+    return response;
   }
 
   async searchCode(

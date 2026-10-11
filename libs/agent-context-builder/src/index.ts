@@ -17,6 +17,8 @@ export * from './tools/summarize-chunks.tool.js';
 export * from './tools/synthesize-context.tool.js';
 export * from './tools/store-context.tool.js';
 export * from './agents/orchestrator.agent.js';
+import type { GitAdapterContract } from 'shared-types';
+
 export * from './services/chunker.service.js';
 export * from './services/archive.service.js';
 export * from './services/agent-docs.service.js';
@@ -29,7 +31,7 @@ export interface BuildContextOptions {
   prNumber?: number;
   cloneUrl?: string;
   ref?: string;
-  githubToken?: string;
+  gitAdapter?: GitAdapterContract;
   isIncrementalUpdate?: boolean;
   model?: string;
   contextLoader?: ContextLoader;
@@ -60,7 +62,7 @@ export async function buildContext(
   const tools = {
     fetchContext: createFetchContextTool(options.contextLoader),
     prepareRepo: createPrepareRepoTool({
-      githubToken: options.githubToken ?? envService.get('GITHUB_TOKEN'),
+      gitAdapter: options.gitAdapter,
     }),
     summarizeChunks: createSummarizeRepoTool({ model }),
     synthesizeContext: createSynthesizeContextTool({ model }),

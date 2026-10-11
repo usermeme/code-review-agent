@@ -107,4 +107,51 @@ describe('GithubService (Adapter)', () => {
     expect(result.path).toBe('src/index.ts');
     expect(result.content).toBe(rawCode);
   });
+
+  it('fetches PR files and their contents', async () => {
+    mockOctokit.rest.pulls.listFiles.mockResolvedValue({
+      data: [
+        { filename: 'deleted.ts', status: 'removed' },
+        { filename: 'app.ts', status: 'modified' },
+      ],
+    });
+    mockOctokit.rest.repos.getContent.mockResolvedValue({
+      data: {
+        path: 'app.ts',
+        content: Buffer.from('const a = 1;').toString('base64'),
+        encoding: 'base64',
+      },
+    });
+
+    const result = await service.getPRFiles('owner', 'repo', 1);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ filename: 'deleted.ts', status: 'removed' });
+    expect(result[1]).toEqual({
+      filename: 'app.ts',
+      status: 'modified',
+      content: 'const a = 1;',
+      patch: undefined,
+    });
+  });
+
+  it('downloads repo tarball archive', async () => {
+    const mockFetchResponse = {
+      ok: true,
+      status: 200,
+    };
+    global.fetch = vi.fn().mockResolvedValue(mockFetchResponse);
+
+    const result = await service.getRepoTarball('owner', 'repo', 'main');
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api.github.com/repos/owner/repo/tarball/main',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer test-token',
+        }),
+      }),
+    );
+    expect(result).toBe(mockFetchResponse);
+  });
 });

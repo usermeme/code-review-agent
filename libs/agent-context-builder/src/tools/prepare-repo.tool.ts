@@ -4,6 +4,7 @@ import { STATE } from '../constants/state-keys.constant.js';
 import { downloadRepoArchive } from '../services/archive.service.js';
 import { collectFiles, buildChunks } from '../services/chunker.service.js';
 import { collectAgentDocs } from '../services/agent-docs.service.js';
+import type { GitAdapterContract } from 'shared-types';
 
 export interface PrepareRepoPayload {
   provider: string;
@@ -16,7 +17,7 @@ export interface PrepareRepoPayload {
 }
 
 export interface PrepareRepoToolDependencies {
-  githubToken?: string;
+  gitAdapter?: GitAdapterContract;
 }
 
 export function createPrepareRepoTool(deps: PrepareRepoToolDependencies = {}) {
@@ -40,44 +41,32 @@ export function createPrepareRepoTool(deps: PrepareRepoToolDependencies = {}) {
         extraIgnores: [],
       };
 
-      if (
-        input.isIncrementalUpdate &&
-        input.provider === 'github' &&
-        input.prNumber
-      ) {
-        // INCREMENTAL MODE: Fetch only changed files using GitHub API
-        const token = deps.githubToken;
-        const headers: Record<string, string> = token
-          ? { Authorization: `Bearer ${token}` }
-          : {};
+      if (!deps.gitAdapter) {
+        throw new Error(
+          'Git adapter contract is required to prepare repository context.',
+        );
+      }
 
-        const filesResponse = await fetch(
-          `https://api.github.com/repos/${input.owner}/${input.repo}/pulls/${input.prNumber}/files`,
-          { headers },
+      if (input.isIncrementalUpdate && input.prNumber) {
+        // INCREMENTAL MODE: Fetch changed files using Git Adapter
+        const changedFilesData = await deps.gitAdapter.getPRFiles(
+          input.owner,
+          input.repo,
+          input.prNumber,
         );
 
-        if (!filesResponse.ok) {
-          throw new Error(`Failed to fetch PR files: ${filesResponse.status}`);
-        }
-
-        const changedFilesData = (await filesResponse.json()) as any[];
         const filesRecord: import('../services/chunker.service.js').RepoFile[] =
           [];
         const { estimateTokens } = await import('../services/tokens.util.js');
 
         for (const file of changedFilesData) {
-          if (file.status === 'removed') continue;
+          if (file.status === 'removed' || !file.content) continue;
 
-          const contentResponse = await fetch(file.raw_url, { headers });
-
-          if (contentResponse.ok) {
-            const content = await contentResponse.text();
-            filesRecord.push({
-              path: file.filename,
-              content,
-              tokens: estimateTokens(content),
-            });
-          }
+          filesRecord.push({
+            path: file.filename,
+            content: file.content,
+            tokens: estimateTokens(file.content),
+          });
         }
 
         const agentDocs = collectAgentDocs(filesRecord);
@@ -89,16 +78,15 @@ export function createPrepareRepoTool(deps: PrepareRepoToolDependencies = {}) {
 
         return `Incremental update prepared successfully. Found ${chunks.length} chunks of changed files.`;
       } else {
-        // BASELINE MODE: Download repository archive via Git provider API
-        const token = deps.githubToken;
+        // BASELINE MODE: Download repository archive via Git Adapter
         const ref = input.ref || 'main';
 
         const snapshot = await downloadRepoArchive({
           cloneUrl: input.cloneUrl,
           ref,
-          token,
           owner: input.owner,
           repo: input.repo,
+          gitAdapter: deps.gitAdapter,
         });
 
         const files = await collectFiles(snapshot.dir, options.extraIgnores);

@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+import { Readable } from 'node:stream';
 import { GithubService } from '../github/github.service.js';
 
 export interface ProviderRoutesOptions {
@@ -30,7 +31,26 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
     }
   });
 
-  // 2. Search Code in Repository
+  // 2. Fetch PR Files with Content
+  fastify.get<{
+    Params: { owner: string; repo: string; number: string };
+  }>('/repos/:owner/:repo/pulls/:number/files', async (request, reply) => {
+    const { owner, repo, number } = request.params;
+    const prNumber = parseInt(number, 10);
+    if (isNaN(prNumber)) {
+      return reply.code(400).send({ error: 'Invalid PR number' });
+    }
+
+    try {
+      const result = await githubService.getPRFiles(owner, repo, prNumber);
+      return result;
+    } catch (error) {
+      fastify.log.error(`Failed to fetch PR files: ${error}`);
+      return reply.code(500).send({ error: String(error) });
+    }
+  });
+
+  // 3. Search Code in Repository
   fastify.get<{
     Params: { owner: string; repo: string };
     Querystring: { q?: string };
@@ -50,7 +70,37 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
     }
   });
 
-  // 3. Get File Content
+  // 4. Download Repository Tarball Archive
+  fastify.get<{
+    Params: { owner: string; repo: string };
+    Querystring: { ref?: string };
+  }>('/repos/:owner/:repo/tarball', async (request, reply) => {
+    const { owner, repo } = request.params;
+    const ref = request.query.ref;
+
+    try {
+      const upstream = await githubService.getRepoTarball(owner, repo, ref);
+      if (!upstream.body) {
+        return reply.code(500).send({ error: 'Empty tarball response body' });
+      }
+
+      reply.header('content-type', 'application/x-gzip');
+      const sha = upstream.headers.get('x-github-commit-sha') || ref || 'main';
+      reply.header('x-commit-sha', sha);
+
+      const stream =
+        typeof (upstream.body as any).getReader === 'function'
+          ? Readable.fromWeb(upstream.body as any)
+          : upstream.body;
+
+      return reply.send(stream);
+    } catch (error) {
+      fastify.log.error(`Failed to fetch repo tarball: ${error}`);
+      return reply.code(500).send({ error: String(error) });
+    }
+  });
+
+  // 5. Get File Content
   fastify.get<{
     Params: { owner: string; repo: string; '*': string };
     Querystring: { ref?: string };
