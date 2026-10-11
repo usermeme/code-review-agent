@@ -16,14 +16,18 @@ import {
   createStoreDiscussionTool,
   type DiscussionStoreFunction,
 } from './tools/store-discussion.tool.js';
+import { createSearchRepositoryCodeTool } from './tools/search-repository-code.tool.js';
+import { createFetchRepositoryFileTool } from './tools/fetch-repository-file.tool.js';
 import { envService } from './env.js';
-import type { ReviewResultPayload } from 'shared-types';
+import type { GitAdapterContract, ReviewResultPayload } from 'shared-types';
 
 export * from './constants/state-keys.constant.js';
 export * from './tools/get-repo-context.tool.js';
 export * from './tools/publish-review-results.tool.js';
 export * from './tools/get-discussion.tool.js';
 export * from './tools/store-discussion.tool.js';
+export * from './tools/search-repository-code.tool.js';
+export * from './tools/fetch-repository-file.tool.js';
 export * from './agents/orchestrator.agent.js';
 export * from './agents/problems.agent.js';
 export * from './agents/quality.agent.js';
@@ -36,6 +40,7 @@ export interface RunReviewOptions {
   model?: string;
   baselineContext?: string | Record<string, string>;
   contextLoader?: ContextLoader;
+  gitAdapter?: GitAdapterContract;
   searchDiscussions?: DiscussionSearchFunction;
   storeDiscussion?: DiscussionStoreFunction;
   onPublishResult?: (payload: ReviewResultPayload) => Promise<void> | void;
@@ -84,6 +89,16 @@ export async function runReview(
       storeDiscussion: options.storeDiscussion,
       defaultRepo: `${input.prMeta.owner}/${input.prMeta.repo}`,
       defaultPrNumber: input.prMeta.number,
+    }),
+    searchRepositoryCode: createSearchRepositoryCodeTool({
+      gitAdapter: options.gitAdapter,
+      defaultOwner: input.prMeta.owner,
+      defaultRepo: input.prMeta.repo,
+    }),
+    fetchRepositoryFile: createFetchRepositoryFileTool({
+      gitAdapter: options.gitAdapter,
+      defaultOwner: input.prMeta.owner,
+      defaultRepo: input.prMeta.repo,
     }),
   };
 

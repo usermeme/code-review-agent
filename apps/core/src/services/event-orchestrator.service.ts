@@ -122,8 +122,14 @@ export class EventOrchestratorService {
       const existingContext =
         await this.contextRepository.getContext(baselineKey);
 
+      const isValidContext =
+        existingContext?.summary &&
+        existingContext.summary.trim() !== '' &&
+        existingContext.summary.trim() !== '{}' &&
+        existingContext.summary.trim() !== '{"summary":""}';
+
       const baselineSummary =
-        existingContext?.summary ??
+        (isValidContext ? existingContext.summary : null) ??
         (await this.buildAndSaveBaselineContext({
           baselineKey,
           prKey,
@@ -174,6 +180,7 @@ export class EventOrchestratorService {
         {
           model: this.envService.get('REVIEW_MODEL'),
           baselineContext: baselineSummary,
+          gitAdapter: this.gitAdapterClient,
         },
       );
 
@@ -237,6 +244,7 @@ export class EventOrchestratorService {
       {
         model: this.envService.get('REVIEW_MODEL'),
         baselineContext: summary,
+        gitAdapter: this.gitAdapterClient,
       },
     );
 
@@ -324,7 +332,19 @@ export class EventOrchestratorService {
 
     const summary =
       typeof sections === 'string' ? sections : JSON.stringify(sections);
-    await this.contextRepository.saveContext(params.baselineKey, { summary });
+    const isValid =
+      summary &&
+      summary.trim() !== '' &&
+      summary.trim() !== '{}' &&
+      summary.trim() !== '{"summary":""}';
+
+    if (isValid) {
+      await this.contextRepository.saveContext(params.baselineKey, { summary });
+    } else {
+      params.logger?.warn(
+        `[Core] Baseline context generation returned empty for ${params.baselineKey}. Skipping save to prevent cache poisoning.`,
+      );
+    }
     return summary;
   }
 

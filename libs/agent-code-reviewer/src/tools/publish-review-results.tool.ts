@@ -12,6 +12,10 @@ export const findingItemSchema = z.object({
   startLine: z.number().describe('Starting line number of the finding'),
   endLine: z.number().describe('Ending line number of the finding'),
   body: z.string().describe('Explanation of the bug, risk, or quality defect'),
+  confidence: z
+    .number()
+    .optional()
+    .describe('Confidence score between 0 and 1'),
   suggestion: z
     .string()
     .optional()
@@ -59,7 +63,11 @@ export function createPublishReviewResultsTool(
         );
       }
 
-      const comments = input.findings.map((f) => {
+      const highConfidenceFindings = input.findings.filter(
+        (f) => f.confidence === undefined || f.confidence >= 0.75,
+      );
+
+      const comments = highConfidenceFindings.map((f) => {
         let commentBody = `### [${f.severity.toUpperCase()}] ${f.title}\n\n${f.body}`;
         if (f.suggestion) {
           commentBody += `\n\n\`\`\`suggestion\n${f.suggestion}\n\`\`\``;

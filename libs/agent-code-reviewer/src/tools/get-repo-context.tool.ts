@@ -56,14 +56,16 @@ export function createGetRepoContextTool(
       if (directContext) {
         if (typeof directContext === 'object') {
           sections = directContext;
-        } else {
+        } else if (directContext.trim() && directContext.trim() !== '{}') {
           try {
             sections = JSON.parse(directContext);
           } catch {
             sections = { architecture: directContext };
           }
         }
-      } else if (deps.contextLoader) {
+      }
+
+      if (Object.keys(sections).length === 0 && deps.contextLoader) {
         const loaded = await deps.contextLoader(prKey);
         if (loaded) {
           sections = loaded;
@@ -71,11 +73,23 @@ export function createGetRepoContextTool(
       }
 
       const state = toolContext?.state;
-      state?.set(STATE.ctxArchitecture, sections['architecture'] ?? '');
-      state?.set(STATE.ctxModules, sections['modules'] ?? '');
-      state?.set(STATE.ctxPatterns, sections['patterns'] ?? '');
-      state?.set(STATE.ctxErrorHandling, sections['errorHandling'] ?? '');
-      state?.set(STATE.ctxAgentDocs, sections['agentDocs'] ?? '');
+      state?.set(
+        STATE.ctxArchitecture,
+        sections['architecture'] || '(repo context not loaded)',
+      );
+      state?.set(
+        STATE.ctxModules,
+        sections['modules'] || '(repo context not loaded)',
+      );
+      state?.set(
+        STATE.ctxPatterns,
+        sections['patterns'] || '(repo context not loaded)',
+      );
+      state?.set(
+        STATE.ctxErrorHandling,
+        sections['errorHandling'] || '(repo context not loaded)',
+      );
+      state?.set(STATE.ctxAgentDocs, sections['agentDocs'] || '');
 
       return {
         digest: (sections['architecture'] ?? '').slice(0, 2000),
