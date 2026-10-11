@@ -2,8 +2,13 @@ import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 import { STATE } from '../constants/state-keys.constant.js';
 import { downloadRepoArchive } from '../services/archive.service.js';
-import { collectFiles, buildChunks } from '../services/chunker.service.js';
+import {
+  collectFiles,
+  buildChunks,
+  type RepoFile,
+} from '../services/chunker.service.js';
 import { collectAgentDocs } from '../services/agent-docs.service.js';
+import { estimateTokens } from '../services/tokens.util.js';
 import type { GitAdapterContract } from 'shared-types';
 
 export interface PrepareRepoPayload {
@@ -55,9 +60,7 @@ export function createPrepareRepoTool(deps: PrepareRepoToolDependencies = {}) {
           input.prNumber,
         );
 
-        const filesRecord: import('../services/chunker.service.js').RepoFile[] =
-          [];
-        const { estimateTokens } = await import('../services/tokens.util.js');
+        const filesRecord: RepoFile[] = [];
 
         for (const file of changedFilesData) {
           if (file.status === 'removed' || !file.content) continue;

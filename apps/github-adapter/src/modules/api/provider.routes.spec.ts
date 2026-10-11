@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Readable } from 'node:stream';
 import Fastify, { FastifyInstance } from 'fastify';
 import { providerRoutes } from './provider.routes.js';
 import { GithubService } from '../github/github.service.js';
@@ -112,7 +113,6 @@ describe('providerRoutes', () => {
   });
 
   it('GET /repos/:owner/:repo/tarball returns tarball stream', async () => {
-    const { Readable } = await import('node:stream');
     const mockStream = Readable.from([Buffer.from('fake-tar-bytes')]);
     mockGithubService.getRepoTarball = vi.fn().mockResolvedValue({
       body: mockStream,
