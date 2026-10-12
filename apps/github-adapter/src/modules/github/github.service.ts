@@ -19,13 +19,9 @@ export interface GithubServiceDependencies {
 
 export class GithubService implements GitAdapterContract {
   private octokit: Octokit;
-  private envService: AdapterEnvService;
-  private token: string;
 
   constructor(deps: GithubServiceDependencies) {
-    this.envService = deps.envService;
     const token = deps.token ?? deps.envService.get('GITHUB_TOKEN');
-    this.token = token;
     this.octokit = deps.octokit ?? new Octokit({ auth: token });
   }
 
