@@ -1,6 +1,7 @@
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
+import { ContextError } from '../constants/errors.constant.js';
 import { STATE } from '../constants/state-keys.constant.js';
 
 export interface RepoContextTarget {
@@ -76,19 +77,19 @@ export function createGetRepoContextTool(
       const state = toolContext?.state;
       state?.set(
         STATE.ctxArchitecture,
-        sections['architecture'] || '(repo context not loaded)',
+        sections['architecture'] || ContextError.REPO_CONTEXT_NOT_LOADED,
       );
       state?.set(
         STATE.ctxModules,
-        sections['modules'] || '(repo context not loaded)',
+        sections['modules'] || ContextError.REPO_CONTEXT_NOT_LOADED,
       );
       state?.set(
         STATE.ctxPatterns,
-        sections['patterns'] || '(repo context not loaded)',
+        sections['patterns'] || ContextError.REPO_CONTEXT_NOT_LOADED,
       );
       state?.set(
         STATE.ctxErrorHandling,
-        sections['errorHandling'] || '(repo context not loaded)',
+        sections['errorHandling'] || ContextError.REPO_CONTEXT_NOT_LOADED,
       );
       state?.set(STATE.ctxAgentDocs, sections['agentDocs'] || '');
 

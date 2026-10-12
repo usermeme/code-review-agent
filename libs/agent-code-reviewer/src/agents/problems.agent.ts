@@ -6,6 +6,7 @@ import {
 } from '@google/adk';
 import { z } from 'zod';
 
+import { ContextError } from '../constants/errors.constant.js';
 import { STATE } from '../constants/state-keys.constant.js';
 import { findingsReportSchema } from '../schemas/review.schema.js';
 import type { ReviewSkill } from '../skills/review.skill.js';
@@ -17,10 +18,10 @@ const instruction =
     const changedFiles = ctx.state.get<string>(STATE.changedFiles) ?? '';
     const architecture =
       ctx.state.get<string>(STATE.ctxArchitecture) ||
-      '(repo context not loaded)';
+      ContextError.REPO_CONTEXT_NOT_LOADED;
     const errorHandling =
       ctx.state.get<string>(STATE.ctxErrorHandling) ||
-      '(repo context not loaded)';
+      ContextError.REPO_CONTEXT_NOT_LOADED;
 
     const changedFilesContext = changedFiles
       ? `\nFull content of the changed files:\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
@@ -69,20 +70,20 @@ Report uncertain findings too, with an honest "confidence" value (0.0 to 1.0) â€
 
 export interface CreateProblemsAgentPayload {
   skill: ReviewSkill;
-  model: BaseLlm | string;
+  llm: BaseLlm | string;
   tools?: BaseTool[];
 }
 
 export function createProblemsAgent({
   skill,
-  model,
+  llm,
   tools,
 }: CreateProblemsAgentPayload): LlmAgent {
   return new LlmAgent({
     name: 'code_problems_agent',
     description:
       'Deep defect hunt: logic bugs, race conditions, performance, data leaks, security, error handling.',
-    model,
+    model: llm,
     instruction: instruction(skill),
     inputSchema: z.object({
       focus: z

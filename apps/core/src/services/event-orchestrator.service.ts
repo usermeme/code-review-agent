@@ -81,7 +81,7 @@ export class EventOrchestratorService {
         cloneUrl: meta.cloneUrl,
         ref: meta.baseRef,
         isIncrementalUpdate: true,
-        model: this.llm,
+        llm: this.llm,
         gitAdapter: this.gitAdapterClient,
       });
 
@@ -185,7 +185,7 @@ export class EventOrchestratorService {
           tickets: [],
         },
         {
-          model: this.llm,
+          llm: this.llm,
           baselineContext: baselineSummary,
           gitAdapter: this.gitAdapterClient,
         },
@@ -249,7 +249,7 @@ export class EventOrchestratorService {
         tickets: [],
       },
       {
-        model: this.llm,
+        llm: this.llm,
         baselineContext: summary,
         gitAdapter: this.gitAdapterClient,
       },
@@ -333,7 +333,7 @@ export class EventOrchestratorService {
         `https://github.com/${params.owner}/${params.repo}.git`,
       ref: params.meta.baseRef || 'main',
       isIncrementalUpdate: false,
-      model: this.llm,
+      llm: this.llm,
       gitAdapter: this.gitAdapterClient,
     });
 

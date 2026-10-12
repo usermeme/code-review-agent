@@ -7,13 +7,16 @@ import { type Chunk, renderChunk } from '../services/chunker.service.js';
 import { generateText } from '../services/generate.service.js';
 
 export interface CreateSummarizeRepoToolPayload {
-  model: BaseLlm | string;
+  llm: BaseLlm | string;
 }
 
 export function createSummarizeRepoTool({
-  model,
+  llm: modelOrLlm,
 }: CreateSummarizeRepoToolPayload) {
-  const llm = typeof model === 'string' ? new Gemini({ model }) : model;
+  const llm =
+    typeof modelOrLlm === 'string'
+      ? new Gemini({ model: modelOrLlm })
+      : modelOrLlm;
 
   return new FunctionTool({
     name: 'summarize_chunks',

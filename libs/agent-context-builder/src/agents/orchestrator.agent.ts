@@ -7,7 +7,7 @@ import {
 import { z } from 'zod';
 
 export interface ContextOrchestratorPayload {
-  model: BaseLlm | string;
+  llm: BaseLlm | string;
   tools: {
     fetchContext: BaseTool;
     prepareRepo: BaseTool;
@@ -78,13 +78,13 @@ Return a success message as your final response.`;
 }
 
 export function createContextOrchestrator({
-  model,
+  llm,
   tools,
 }: ContextOrchestratorPayload): LlmAgent {
   return new LlmAgent({
     name: 'context_builder_orchestrator',
     description: 'Coordinates the repository context building process.',
-    model,
+    model: llm,
     inputSchema: contextPubSubPayloadSchema,
     instruction,
     tools: [

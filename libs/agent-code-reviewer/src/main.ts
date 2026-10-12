@@ -23,7 +23,7 @@ import {
 } from './tools/store-discussion.tool.js';
 
 export interface RunReviewOptions {
-  model: BaseLlm | string;
+  llm: BaseLlm | string;
   baselineContext?: string | Record<string, string>;
   contextLoader?: ContextLoader;
   gitAdapter?: GitAdapterContract;
@@ -52,7 +52,7 @@ export async function runReview(
   input: ReviewExecutionInput,
   options: RunReviewOptions,
 ): Promise<ReviewResultPayload> {
-  const model = options.model;
+  const llm = options.llm;
   let resultPayload: ReviewResultPayload | null = null;
 
   const tools: OrchestratorTools = {
@@ -94,7 +94,7 @@ export async function runReview(
   };
 
   const agent = createOrchestrator({
-    model,
+    llm,
     tools,
   });
 

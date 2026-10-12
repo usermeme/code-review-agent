@@ -2,6 +2,7 @@ export * from './agents/orchestrator.agent.js';
 export * from './agents/problems.agent.js';
 export * from './agents/quality.agent.js';
 export * from './agents/ticket.agent.js';
+export * from './constants/errors.constant.js';
 export * from './constants/state-keys.constant.js';
 export * from './main.js';
 export * from './schemas/review.schema.js';

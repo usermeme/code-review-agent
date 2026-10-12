@@ -32,14 +32,14 @@ describe('AgentService', () => {
       prNumber: 1,
       cloneUrl: 'https://github.com/test-org/test-repo.git',
       ref: 'main',
-      model: 'test-model',
+      llm: 'test-model',
     });
 
     expect(buildContext).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'test-org',
         repo: 'test-repo',
-        model: 'test-model',
+        llm: 'test-model',
       }),
     );
     expect(result).toEqual({ architecture: 'Test Architecture' });
@@ -64,7 +64,7 @@ describe('AgentService', () => {
         tickets: [],
       },
       {
-        model: 'test-model',
+        llm: 'test-model',
       },
     );
 
@@ -73,7 +73,7 @@ describe('AgentService', () => {
         diff: 'diff content',
       }),
       {
-        model: 'test-model',
+        llm: 'test-model',
       },
     );
     expect(result).toEqual(

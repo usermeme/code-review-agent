@@ -6,6 +6,7 @@ import {
 } from '@google/adk';
 import { z } from 'zod';
 
+import { ContextError } from '../constants/errors.constant.js';
 import { STATE } from '../constants/state-keys.constant.js';
 import { findingsReportSchema } from '../schemas/review.schema.js';
 import type { ReviewSkill } from '../skills/review.skill.js';
@@ -16,7 +17,8 @@ const instruction =
     const diff = ctx.state.get<string>(STATE.diff) ?? '';
     const changedFiles = ctx.state.get<string>(STATE.changedFiles) ?? '';
     const patterns =
-      ctx.state.get<string>(STATE.ctxPatterns) || '(repo context not loaded)';
+      ctx.state.get<string>(STATE.ctxPatterns) ||
+      ContextError.REPO_CONTEXT_NOT_LOADED;
     const agentDocs = ctx.state.get<string>(STATE.ctxAgentDocs) || '';
     const modules = ctx.state.get<string>(STATE.ctxModules) || '';
     const repoSkills =
@@ -78,20 +80,20 @@ Do not report defects/bugs — a separate agent covers those. Report uncertain f
 
 export interface CreateQualityAgentPayload {
   skill: ReviewSkill;
-  model: BaseLlm | string;
+  llm: BaseLlm | string;
   tools?: BaseTool[];
 }
 
 export function createQualityAgent({
   skill,
-  model,
+  llm,
   tools,
 }: CreateQualityAgentPayload): LlmAgent {
   return new LlmAgent({
     name: 'code_quality_agent',
     description:
       "Reviews patterns, antipatterns, and code smells against the repository's established conventions.",
-    model,
+    model: llm,
     instruction: instruction(skill),
     inputSchema: z.object({
       focus: z

@@ -20,7 +20,7 @@ export interface BuildContextOptions {
   ref?: string;
   gitAdapter?: GitAdapterContract;
   isIncrementalUpdate?: boolean;
-  model: BaseLlm | string;
+  llm: BaseLlm | string;
   contextLoader?: ContextLoader;
   onStoreContext?: (result: {
     provider: string;
@@ -34,7 +34,7 @@ export interface BuildContextOptions {
 export async function buildContext(
   options: BuildContextOptions,
 ): Promise<Record<string, string>> {
-  const model = options.model;
+  const llm = options.llm;
   let resultSections: Record<string, string> = {};
 
   const storeContext = createStoreContextTool({
@@ -51,13 +51,13 @@ export async function buildContext(
     prepareRepo: createPrepareRepoTool({
       gitAdapter: options.gitAdapter,
     }),
-    summarizeChunks: createSummarizeRepoTool({ model }),
-    synthesizeContext: createSynthesizeContextTool({ model }),
+    summarizeChunks: createSummarizeRepoTool({ llm }),
+    synthesizeContext: createSynthesizeContextTool({ llm }),
     storeContext,
   };
 
   const agent = createContextOrchestrator({
-    model,
+    llm,
     tools,
   });
 

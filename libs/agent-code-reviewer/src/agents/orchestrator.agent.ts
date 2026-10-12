@@ -114,44 +114,44 @@ export interface OrchestratorTools {
   getDiscussion: BaseTool;
   storeDiscussion: BaseTool;
   publishReviewResults: BaseTool;
-  getRepoGuidelines?: BaseTool;
-  searchRepositoryCode?: BaseTool;
-  fetchRepositoryFile?: BaseTool;
+  getRepoGuidelines: BaseTool;
+  searchRepositoryCode: BaseTool;
+  fetchRepositoryFile: BaseTool;
 }
 
 export interface CreateOrchestratorPayload {
   tools: OrchestratorTools;
-  model: BaseLlm | string;
+  llm: BaseLlm | string;
 }
 
 export function createOrchestrator({
   tools,
-  model,
+  llm,
 }: CreateOrchestratorPayload): LlmAgent {
   const skill = loadReviewSkill('');
 
-  const repoTools = [
+  const repoTools: BaseTool[] = [
     tools.searchRepositoryCode,
     tools.fetchRepositoryFile,
-  ].filter((t): t is BaseTool => Boolean(t));
+  ];
 
   const allTools: BaseTool[] = [
     tools.getRepoContext,
-    ...(tools.getRepoGuidelines ? [tools.getRepoGuidelines] : []),
+    tools.getRepoGuidelines,
     tools.publishReviewResults,
     tools.getDiscussion,
     tools.storeDiscussion,
     ...repoTools,
     new AgentTool({
-      agent: createTicketAgent({ model }),
+      agent: createTicketAgent({ llm }),
       skipSummarization: true,
     }),
     new AgentTool({
-      agent: createProblemsAgent({ skill, model, tools: repoTools }),
+      agent: createProblemsAgent({ skill, llm, tools: repoTools }),
       skipSummarization: true,
     }),
     new AgentTool({
-      agent: createQualityAgent({ skill, model, tools: repoTools }),
+      agent: createQualityAgent({ skill, llm, tools: repoTools }),
       skipSummarization: true,
     }),
   ];
@@ -159,7 +159,7 @@ export function createOrchestrator({
   return new LlmAgent({
     name: 'core_review_agent',
     description: 'Parent agent orchestrating the full PR review.',
-    model,
+    model: llm,
     inputSchema: pubSubPayloadSchema,
     instruction: instruction(),
     tools: allTools,

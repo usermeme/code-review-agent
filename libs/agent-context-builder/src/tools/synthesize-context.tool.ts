@@ -5,13 +5,16 @@ import { STATE } from '../constants/state-keys.constant.js';
 import { generateText } from '../services/generate.service.js';
 
 export interface CreateSynthesizeContextToolPayload {
-  model: BaseLlm | string;
+  llm: BaseLlm | string;
 }
 
 export function createSynthesizeContextTool({
-  model,
+  llm: modelOrLlm,
 }: CreateSynthesizeContextToolPayload) {
-  const llm = typeof model === 'string' ? new Gemini({ model }) : model;
+  const llm =
+    typeof modelOrLlm === 'string'
+      ? new Gemini({ model: modelOrLlm })
+      : modelOrLlm;
 
   return new FunctionTool({
     name: 'synthesize_context',
