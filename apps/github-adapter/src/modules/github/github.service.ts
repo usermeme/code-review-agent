@@ -113,27 +113,33 @@ export class GithubService implements GitAdapterContract {
     ref?: string,
   ): Promise<Response> {
     const targetRef = ref || 'main';
-    const tarballUrl = `https://api.github.com/repos/${owner}/${repo}/tarball/${encodeURIComponent(targetRef)}`;
+    const octokitRes =
+      await this.octokitClient.rest.repos.downloadTarballArchive({
+        owner,
+        repo,
+        ref: targetRef,
+        request: {
+          parseSuccessResponseBody: false,
+        },
+      });
+
     const headers: Record<string, string> = {
-      'User-Agent': 'code-review-agent-github-adapter',
-      Accept: 'application/vnd.github+json',
+      'content-type':
+        octokitRes.headers['content-type'] || 'application/x-gzip',
     };
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
-    }
-
-    const response = await fetch(tarballUrl, {
-      headers,
-      redirect: 'follow',
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to download repository archive from GitHub: HTTP ${response.status} ${response.statusText}`,
+    if (octokitRes.headers['x-github-commit-sha']) {
+      headers['x-github-commit-sha'] = String(
+        octokitRes.headers['x-github-commit-sha'],
       );
     }
 
-    return response;
+    return new Response(
+      octokitRes.data as ConstructorParameters<typeof Response>[0],
+      {
+        status: octokitRes.status,
+        headers,
+      },
+    );
   }
 
   async searchCode(

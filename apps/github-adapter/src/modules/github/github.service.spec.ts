@@ -19,6 +19,7 @@ describe('GithubService (Adapter)', () => {
       };
       repos: {
         getContent: ReturnType<typeof vi.fn>;
+        downloadTarballArchive: ReturnType<typeof vi.fn>;
       };
       issues: {
         createComment: ReturnType<typeof vi.fn>;
@@ -41,6 +42,7 @@ describe('GithubService (Adapter)', () => {
         },
         repos: {
           getContent: vi.fn(),
+          downloadTarballArchive: vi.fn(),
         },
         issues: {
           createComment: vi.fn(),
@@ -155,22 +157,49 @@ describe('GithubService (Adapter)', () => {
   });
 
   it('downloads repo tarball archive', async () => {
-    const mockFetchResponse = {
-      ok: true,
+    const mockData = new Uint8Array([1, 2, 3]);
+    mockOctokit.rest.repos.downloadTarballArchive.mockResolvedValue({
       status: 200,
-    };
-    global.fetch = vi.fn().mockResolvedValue(mockFetchResponse);
+      headers: {
+        'content-type': 'application/x-gzip',
+        'x-github-commit-sha': 'sha12345',
+      },
+      data: mockData,
+    });
 
     const result = await service.getRepoTarball('owner', 'repo', 'main');
 
-    expect(global.fetch).toHaveBeenCalledWith(
-      'https://api.github.com/repos/owner/repo/tarball/main',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: 'Bearer test-token',
-        }),
-      }),
-    );
-    expect(result).toBe(mockFetchResponse);
+    expect(mockOctokit.rest.repos.downloadTarballArchive).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      ref: 'main',
+      request: {
+        parseSuccessResponseBody: false,
+      },
+    });
+    expect(result.status).toBe(200);
+    expect(result.headers.get('content-type')).toBe('application/x-gzip');
+    expect(result.headers.get('x-github-commit-sha')).toBe('sha12345');
+  });
+
+  it('downloads repo tarball archive with default ref if omitted', async () => {
+    mockOctokit.rest.repos.downloadTarballArchive.mockResolvedValue({
+      status: 200,
+      headers: {
+        'content-type': 'application/x-gzip',
+      },
+      data: new Uint8Array(),
+    });
+
+    await service.getRepoTarball('owner', 'repo');
+
+    expect(mockOctokit.rest.repos.downloadTarballArchive).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      ref: 'main',
+      request: {
+        parseSuccessResponseBody: false,
+      },
+    });
   });
 });
