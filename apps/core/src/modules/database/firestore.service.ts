@@ -3,11 +3,15 @@ import { FastifyBaseLogger } from 'fastify';
 
 import { DatabaseService as IDatabaseService } from './interfaces/database.interface.js';
 
+export interface FirestoreDatabaseServiceDependencies {
+  firestore: Firestore;
+}
+
 export class FirestoreDatabaseService implements IDatabaseService {
   private firestore: Firestore;
 
-  constructor() {
-    this.firestore = new Firestore();
+  constructor(deps: FirestoreDatabaseServiceDependencies) {
+    this.firestore = deps.firestore;
   }
 
   async connect(logger: FastifyBaseLogger): Promise<void> {

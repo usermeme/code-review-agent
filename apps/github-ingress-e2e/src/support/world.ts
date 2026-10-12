@@ -4,6 +4,7 @@ import { EnvService } from '@code-review-agent/env';
 import { PREventPayload } from '@code-review-agent/shared-types';
 import { IWorldOptions, setWorldConstructor, World } from '@cucumber/cucumber';
 import { PubSub } from '@google-cloud/pubsub';
+import { Webhooks } from '@octokit/webhooks';
 import { FastifyInstance, LightMyRequestResponse } from 'fastify';
 
 import { buildServer as buildIngressServer } from '../../../github-ingress/src/app.js';
@@ -44,16 +45,15 @@ export class GithubIngressWorld extends World {
     } as unknown as PubSub;
 
     // 1. Initialize GithubIngressService
+    const webhooks = new Webhooks({ secret: this.webhookSecret });
     this.ingressService = new GithubIngressService({
       pubsub: this.pubsub,
       envService: this.envService,
-      webhookSecret: this.webhookSecret,
+      webhooks,
     });
 
     // 2. Build Fastify Ingress application
     this.app = await buildIngressServer({
-      envService: this.envService,
-      pubsub: this.pubsub,
       ingressService: this.ingressService,
       fastifyOptions: { logger: false },
     });

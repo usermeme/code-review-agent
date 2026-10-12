@@ -12,8 +12,7 @@ import {
 export interface GithubIngressServiceDependencies {
   envService: IngressEnvService;
   pubsub: PubSub;
-  webhookSecret?: string;
-  webhooks?: Webhooks;
+  webhooks: Webhooks;
 }
 
 export class GithubIngressService {
@@ -24,11 +23,7 @@ export class GithubIngressService {
   constructor(deps: GithubIngressServiceDependencies) {
     this.envService = deps.envService;
     this.pubsub = deps.pubsub;
-
-    const webhookSecret =
-      deps.webhookSecret ?? deps.envService.get('GITHUB_WEBHOOK_SECRET');
-
-    this.webhooks = deps.webhooks ?? new Webhooks({ secret: webhookSecret });
+    this.webhooks = deps.webhooks;
   }
 
   private async publishPREvent(payload: PREventPayload): Promise<void> {

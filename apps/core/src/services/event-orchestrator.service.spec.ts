@@ -1,6 +1,10 @@
 import { IngestPREventRequest } from '@code-review-agent/contracts';
 import { EnvService } from '@code-review-agent/env';
-import { PREventPayload } from '@code-review-agent/shared-types';
+import { MockLlm } from '@code-review-agent/llm';
+import {
+  GitAdapterContract,
+  PREventPayload,
+} from '@code-review-agent/shared-types';
 import { PubSub } from '@google-cloud/pubsub';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -31,6 +35,8 @@ describe('EventOrchestratorService', () => {
     buildContext: ReturnType<typeof vi.fn>;
     runReview: ReturnType<typeof vi.fn>;
   };
+  let mockGitAdapterClient: GitAdapterContract;
+  let mockLlm: MockLlm;
 
   function createTestOrchestrator(
     overrides: Partial<EventOrchestratorDependencies> = {},
@@ -41,6 +47,8 @@ describe('EventOrchestratorService', () => {
       contextRepository: mockContextRepo as unknown as ContextRepository,
       pubsub: mockPubSub as unknown as PubSub,
       agentService: mockAgentService as unknown as AgentService,
+      gitAdapterClient: mockGitAdapterClient,
+      llm: mockLlm,
       ...overrides,
     });
   }
@@ -101,6 +109,16 @@ describe('EventOrchestratorService', () => {
       buildContext: mockBuildContext,
       runReview: mockRunReview,
     };
+
+    mockGitAdapterClient = {
+      getPRDiff: vi.fn(),
+      getPRFiles: vi.fn(),
+      searchCode: vi.fn(),
+      getFileContent: vi.fn(),
+      getRepoTarball: vi.fn(),
+    };
+
+    mockLlm = new MockLlm();
   });
 
   it('builds context and runs review in-process when baseline context is missing', async () => {

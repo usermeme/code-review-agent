@@ -32,11 +32,9 @@ export class GithubAdapterWorld extends World {
 
     this.githubService = new GithubService({
       octokit: this.octokit as unknown as Octokit,
-      envService: this.envService,
     });
 
     this.app = await buildAdapterServer({
-      envService: this.envService,
       githubService: this.githubService,
       fastifyOptions: { logger: false },
     });

@@ -1,7 +1,9 @@
 import { PubSub } from '@google-cloud/pubsub';
+import { Webhooks } from '@octokit/webhooks';
 
 import { buildServer } from './app.js';
 import { envService } from './env.js';
+import { GithubIngressService } from './modules/webhooks/ingress.service.js';
 
 async function bootstrap() {
   const host = envService.get('HOST');
@@ -11,9 +13,18 @@ async function bootstrap() {
     projectId: envService.get('GOOGLE_CLOUD_PROJECT'),
   });
 
-  const server = await buildServer({
-    envService,
+  const webhooks = new Webhooks({
+    secret: envService.get('GITHUB_WEBHOOK_SECRET'),
+  });
+
+  const ingressService = new GithubIngressService({
     pubsub,
+    envService,
+    webhooks,
+  });
+
+  const server = await buildServer({
+    ingressService,
   });
 
   try {

@@ -2,7 +2,6 @@ import {
   IngestPREventRequest,
   IngestPREventResponse,
 } from '@code-review-agent/contracts';
-import { LlmFactory } from '@code-review-agent/llm';
 import {
   ContextReadyPayload,
   GitAdapterContract,
@@ -14,7 +13,6 @@ import { PubSub } from '@google-cloud/pubsub';
 import { FastifyBaseLogger } from 'fastify';
 
 import type { CoreEnvService } from '../env.js';
-import { GitAdapterClient } from '../modules/adapter/git-adapter.client.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import type { AgentService } from './agent.service.js';
@@ -25,8 +23,8 @@ export interface EventOrchestratorDependencies {
   contextRepository: ContextRepository;
   pubsub: PubSub;
   agentService: AgentService;
-  gitAdapterClient?: GitAdapterContract;
-  llm?: BaseLlm;
+  gitAdapterClient: GitAdapterContract;
+  llm: BaseLlm;
 }
 
 export class EventOrchestratorService {
@@ -44,12 +42,8 @@ export class EventOrchestratorService {
     this.contextRepository = deps.contextRepository;
     this.envService = deps.envService;
     this.agentService = deps.agentService;
-
-    const adapterUrl = deps.envService.get('GIT_ADAPTER_URL');
-    this.gitAdapterClient =
-      deps.gitAdapterClient ?? new GitAdapterClient(adapterUrl);
-
-    this.llm = deps.llm ?? new LlmFactory(deps.envService.data).createLlm();
+    this.gitAdapterClient = deps.gitAdapterClient;
+    this.llm = deps.llm;
   }
 
   async ingestPREvent(

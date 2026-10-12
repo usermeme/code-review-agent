@@ -1,6 +1,5 @@
 import { Octokit } from '@octokit/rest';
 
-import type { AdapterEnvService } from '../../env.js';
 import {
   CodeSearchResult,
   FileContentResult,
@@ -12,17 +11,14 @@ import {
 } from './interfaces/github.interface.js';
 
 export interface GithubServiceDependencies {
-  envService: AdapterEnvService;
-  octokit?: Octokit;
-  token?: string;
+  octokit: Octokit;
 }
 
 export class GithubService implements GitAdapterContract {
   private octokit: Octokit;
 
   constructor(deps: GithubServiceDependencies) {
-    const token = deps.token ?? deps.envService.get('GITHUB_TOKEN');
-    this.octokit = deps.octokit ?? new Octokit({ auth: token });
+    this.octokit = deps.octokit;
   }
 
   private get octokitClient(): Octokit {

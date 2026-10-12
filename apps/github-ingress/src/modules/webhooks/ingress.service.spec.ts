@@ -1,4 +1,5 @@
 import { PubSub } from '@google-cloud/pubsub';
+import { Webhooks } from '@octokit/webhooks';
 import { FastifyBaseLogger } from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -40,7 +41,7 @@ describe('GithubIngressService', () => {
     const deps: GithubIngressServiceDependencies = {
       envService: mockEnvService as unknown as IngressEnvService,
       pubsub: mockPubSub as unknown as PubSub,
-      webhookSecret: 'test-secret',
+      webhooks: new Webhooks({ secret: 'test-secret' }),
     };
 
     service = new GithubIngressService(deps);

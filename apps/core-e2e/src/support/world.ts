@@ -1,5 +1,6 @@
 import { CoreService } from '@code-review-agent/contracts';
 import { EnvService } from '@code-review-agent/env';
+import { LlmFactory } from '@code-review-agent/llm';
 import { ReviewResultPayload } from '@code-review-agent/shared-types';
 import {
   Client,
@@ -12,6 +13,7 @@ import { FastifyInstance, LightMyRequestResponse } from 'fastify';
 
 import { buildCoreServer } from '../../../core/src/app.js';
 import { coreEnvSchema, CoreEnvService } from '../../../core/src/env.js';
+import { GitAdapterClient } from '../../../core/src/modules/adapter/git-adapter.client.js';
 import { ContextRepository } from '../../../core/src/modules/database/repositories/context.repository.js';
 import { PrRepository } from '../../../core/src/modules/database/repositories/pr.repository.js';
 import { EventOrchestratorService } from '../../../core/src/services/event-orchestrator.service.js';
@@ -54,6 +56,11 @@ export class CoreWorld extends World {
       GIT_ADAPTER_URL: 'http://adapter:8080',
     });
 
+    const gitAdapterClient = new GitAdapterClient(
+      this.envService.get('GIT_ADAPTER_URL'),
+    );
+    const llm = new LlmFactory(this.envService.data).createLlm();
+
     // 1. Initialize Orchestrator with mock in-process agent executors
     this.orchestrator = new EventOrchestratorService({
       pubsub: this.pubsub as unknown as PubSub,
@@ -84,14 +91,13 @@ export class CoreWorld extends World {
           };
         },
       },
+      gitAdapterClient,
+      llm,
     });
 
     // 2. Build Core Fastify application
     this.app = await buildCoreServer({
-      envService: this.envService,
-      pubsub: this.pubsub as unknown as PubSub,
       databaseService: this.db,
-      prRepository: this.prRepository,
       contextRepository: this.contextRepository,
       orchestrator: this.orchestrator,
       fastifyOptions: { logger: false },
