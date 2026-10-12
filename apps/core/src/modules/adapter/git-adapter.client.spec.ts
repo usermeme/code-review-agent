@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { GitAdapterClient } from './git-adapter.client.js';
 
 describe('GitAdapterClient', () => {
@@ -87,5 +88,45 @@ describe('GitAdapterClient', () => {
       'http://adapter:8080/api/v1/repos/owner/repo/files/src/main.ts?ref=main',
     );
     expect(result).toEqual(mockResponse);
+  });
+
+  it('fetches PR files successfully', async () => {
+    const mockFiles = [
+      {
+        filename: 'src/app.ts',
+        status: 'modified',
+        content: 'const x = 1;',
+      },
+    ];
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue(mockFiles),
+    });
+
+    const result = await client.getPRFiles('owner', 'repo', 5);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://adapter:8080/api/v1/repos/owner/repo/pulls/5/files',
+    );
+    expect(result).toEqual(mockFiles);
+  });
+
+  it('fetches repo tarball successfully', async () => {
+    const mockResponse = {
+      ok: true,
+      status: 200,
+    };
+    global.fetch = vi.fn().mockResolvedValue(mockResponse);
+
+    const result = await client.getRepoTarball(
+      'owner',
+      'repo',
+      'feature-branch',
+    );
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://adapter:8080/api/v1/repos/owner/repo/tarball?ref=feature-branch',
+    );
+    expect(result).toBe(mockResponse);
   });
 });

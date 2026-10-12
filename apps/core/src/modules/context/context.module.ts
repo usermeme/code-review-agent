@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+
 import { ContextRepository } from '../database/repositories/context.repository.js';
 import { contextRoutes } from './context.routes.js';
 

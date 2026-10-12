@@ -1,7 +1,8 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { GithubService } from '../github/github.service.js';
-import { ReviewResultPayload } from 'shared-types';
 import { parsePubSubPushPayload } from 'pubsub';
+import { ReviewResultPayload } from 'shared-types';
+
+import { GithubService } from '../github/github.service.js';
 
 export interface ReviewResultsPushRoutesOptions {
   githubService: GithubService;

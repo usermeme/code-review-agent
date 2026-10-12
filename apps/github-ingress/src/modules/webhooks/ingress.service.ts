@@ -1,11 +1,12 @@
+import { PubSub } from '@google-cloud/pubsub';
 import { Webhooks } from '@octokit/webhooks';
 import { FastifyBaseLogger } from 'fastify';
-import { PubSub } from '@google-cloud/pubsub';
 import { PREventPayload } from 'shared-types';
+
 import type { IngressEnvService } from '../../env.js';
 import {
-  ProcessedWebhookResult,
   GithubWebhookPayload,
+  ProcessedWebhookResult,
 } from './interfaces/webhooks.interface.js';
 
 export interface GithubIngressServiceDependencies {

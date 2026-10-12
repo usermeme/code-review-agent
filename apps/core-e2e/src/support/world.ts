@@ -1,21 +1,22 @@
-import { setWorldConstructor, World, IWorldOptions } from '@cucumber/cucumber';
-import { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { buildCoreServer } from '../../../core/src/app.js';
-import { InMemoryDatabaseService } from './doubles/in-memory-db.service.js';
-import { MockPubSub } from './doubles/mock-pubsub.js';
-import { PrRepository } from '../../../core/src/modules/database/repositories/pr.repository.js';
-import { ContextRepository } from '../../../core/src/modules/database/repositories/context.repository.js';
-import { EventOrchestratorService } from '../../../core/src/services/event-orchestrator.service.js';
 import {
+  Client,
   createClient,
   createRouterTransport,
-  Client,
 } from '@connectrpc/connect';
-import { CoreService } from 'contracts';
+import { IWorldOptions, setWorldConstructor, World } from '@cucumber/cucumber';
 import { PubSub } from '@google-cloud/pubsub';
+import { CoreService } from 'contracts';
 import { EnvService } from 'env';
-import { coreEnvSchema, CoreEnvService } from '../../../core/src/env.js';
+import { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { ReviewResultPayload } from 'shared-types';
+
+import { buildCoreServer } from '../../../core/src/app.js';
+import { coreEnvSchema, CoreEnvService } from '../../../core/src/env.js';
+import { ContextRepository } from '../../../core/src/modules/database/repositories/context.repository.js';
+import { PrRepository } from '../../../core/src/modules/database/repositories/pr.repository.js';
+import { EventOrchestratorService } from '../../../core/src/services/event-orchestrator.service.js';
+import { InMemoryDatabaseService } from './doubles/in-memory-db.service.js';
+import { MockPubSub } from './doubles/mock-pubsub.js';
 
 export class CoreWorld extends World {
   public app!: FastifyInstance;
@@ -40,16 +41,16 @@ export class CoreWorld extends World {
     const topic = this.envService.get('REVIEW_RESULTS_TOPIC');
     return this.pubsub
       .getMessagesByTopic(topic)
-      .map((m) => m.json as ReviewResultPayload);
+      .map((m) => m.json as unknown as ReviewResultPayload);
   }
 
   async initApp(): Promise<void> {
     this.envService = new EnvService(coreEnvSchema, {
       HOST: '0.0.0.0',
       PORT: '8080',
-      PR_EVENTS_SUBSCRIPTION: 'test-pr-events-sub',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
-      REVIEW_MODEL: 'gemini-3.8-flash',
+      LLM_PROVIDER: 'mock',
+      REVIEW_MODEL: 'test-model',
       GIT_ADAPTER_URL: 'http://adapter:8080',
     });
 

@@ -1,10 +1,12 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
 import Fastify, { FastifyInstance } from 'fastify';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { EventOrchestratorService } from '../../services/event-orchestrator.service.js';
 import { prEventsPushRoutes } from './pr-events-push.routes.js';
 
 describe('prEventsPushRoutes', () => {
   let app: FastifyInstance;
-  let mockOrchestrator: any;
+  let mockOrchestrator: { ingestPREvent: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
     mockOrchestrator = {
@@ -17,7 +19,7 @@ describe('prEventsPushRoutes', () => {
 
     app = Fastify({ logger: false });
     await app.register(prEventsPushRoutes, {
-      orchestrator: mockOrchestrator,
+      orchestrator: mockOrchestrator as unknown as EventOrchestratorService,
     });
     await app.ready();
   });

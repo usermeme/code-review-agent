@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+
 import { ContextRepository } from '../database/repositories/context.repository.js';
 
 export interface ContextRoutesOptions {

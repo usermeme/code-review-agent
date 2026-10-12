@@ -1,10 +1,11 @@
+import { PubSub } from '@google-cloud/pubsub';
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import fastifyRawBody from 'fastify-raw-body';
-import { PubSub } from '@google-cloud/pubsub';
+
+import type { IngressEnvService } from './env.js';
+import { healthModule } from './modules/health/health.module.js';
 import { GithubIngressService } from './modules/webhooks/ingress.service.js';
 import { webhooksModule } from './modules/webhooks/webhooks.module.js';
-import { healthModule } from './modules/health/health.module.js';
-import type { IngressEnvService } from './env.js';
 
 export interface BuildServerOptions {
   envService: IngressEnvService;

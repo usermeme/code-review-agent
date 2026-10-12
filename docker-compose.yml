@@ -27,11 +27,6 @@ services:
       - PORT=8080
       - HOST=0.0.0.0
       - GITHUB_TOKEN=dummy-token
-      - REVIEW_RESULTS_SUBSCRIPTION=review-results-sub
-      - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
-      - PUBSUB_PROJECT_ID=local-project
-    depends_on:
-      - pubsub-emulator
 
   core:
     build:
@@ -48,7 +43,6 @@ services:
       - REVIEW_RESULTS_TOPIC=review-results
       - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
-      - PR_EVENTS_SUBSCRIPTION=pr-events-sub
       - GIT_ADAPTER_URL=http://adapter:8080
     depends_on:
       - firestore-emulator

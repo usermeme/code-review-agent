@@ -1,10 +1,12 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
 import Fastify, { FastifyInstance } from 'fastify';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { GithubService } from '../github/github.service.js';
 import { reviewResultsPushRoutes } from './review-results-push.routes.js';
 
 describe('reviewResultsPushRoutes', () => {
   let app: FastifyInstance;
-  let mockGithubService: any;
+  let mockGithubService: { postReview: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
     mockGithubService = {
@@ -16,7 +18,7 @@ describe('reviewResultsPushRoutes', () => {
 
     app = Fastify({ logger: false });
     await app.register(reviewResultsPushRoutes, {
-      githubService: mockGithubService,
+      githubService: mockGithubService as unknown as GithubService,
     });
     await app.ready();
   });

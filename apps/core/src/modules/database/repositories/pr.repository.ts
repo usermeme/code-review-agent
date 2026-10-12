@@ -1,5 +1,6 @@
-import { DatabaseService } from '../interfaces/database.interface.js';
 import { PRState } from 'shared-types';
+
+import { DatabaseService } from '../interfaces/database.interface.js';
 
 export class PrRepository {
   private collection = 'pull_requests';

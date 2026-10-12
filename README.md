@@ -447,21 +447,14 @@ For teams running on a single cloud VM or on-premise Docker host:
 version: '3.8'
 
 services:
-  github-gateway:
-    image: ghcr.io/<owner>/code-review-agent-github-gateway:latest
+  adapter:
+    image: ghcr.io/<owner>/code-review-agent-github-adapter:latest
     restart: always
-    ports:
-      - '80:8080'
     environment:
       - PORT=8080
       - HOST=0.0.0.0
-      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - PR_EVENTS_TOPIC=pr-events
-      - REVIEW_RESULTS_SUBSCRIPTION=review-results-sub
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
-    depends_on:
-      - core
 
   core:
     image: ghcr.io/<owner>/code-review-agent-core:latest
@@ -469,11 +462,10 @@ services:
     environment:
       - PORT=8080
       - HOST=0.0.0.0
-      - PR_EVENTS_SUBSCRIPTION=pr-events-sub
       - REVIEW_RESULTS_TOPIC=review-results
       - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GIT_ADAPTER_URL=http://adapter:8080
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
 ```
 
@@ -534,13 +526,12 @@ Each service strictly validates required variables and fails fast at startup if 
 
 ### GitHub Adapter (`apps/github-adapter`)
 
-| Variable                      | Required | Description                                                                          |
-| :---------------------------- | :------: | :----------------------------------------------------------------------------------- |
-| `PORT`                        |   Yes    | Port to listen on (e.g. `8080`)                                                      |
-| `HOST`                        |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                           |
-| `GITHUB_TOKEN`                |   Yes    | GitHub Personal Access Token (classic with `repo` scope) for diff, search & comments |
-| `REVIEW_RESULTS_SUBSCRIPTION` |   Yes    | Google Cloud Pub/Sub subscription to pull/process review results                     |
-| `GOOGLE_CLOUD_PROJECT`        | Optional | GCP Project ID (auto-detected when running in GCP)                                   |
+| Variable               | Required | Description                                                                          |
+| :--------------------- | :------: | :----------------------------------------------------------------------------------- |
+| `PORT`                 |   Yes    | Port to listen on (e.g. `8080`)                                                      |
+| `HOST`                 |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                           |
+| `GITHUB_TOKEN`         |   Yes    | GitHub Personal Access Token (classic with `repo` scope) for diff, search & comments |
+| `GOOGLE_CLOUD_PROJECT` | Optional | GCP Project ID (auto-detected when running in GCP)                                   |
 
 ### Core Service (`apps/core`)
 
@@ -548,7 +539,6 @@ Each service strictly validates required variables and fails fast at startup if 
 | :------------------------ | :------: | :---------------------------------------------------------------------------------- |
 | `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                                     |
 | `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                          |
-| `PR_EVENTS_SUBSCRIPTION`  |   Yes    | Google Cloud Pub/Sub subscription to pull/process PR events                         |
 | `REVIEW_RESULTS_TOPIC`    |   Yes    | Google Cloud Pub/Sub topic to publish review result events to                       |
 | `REVIEW_MODEL`            |   Yes    | Gemini model identifier (e.g. `gemini-3.8-flash`)                                   |
 | `GIT_ADAPTER_URL`         |   Yes    | URL of Git Provider Adapter for on-demand code queries (e.g. `http://adapter:8080`) |

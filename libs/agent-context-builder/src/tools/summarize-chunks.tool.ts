@@ -1,20 +1,18 @@
-import { FunctionTool } from '@google/adk';
-import { Gemini } from '@google/adk';
-import { z } from 'zod';
+import { type BaseLlm, FunctionTool } from '@google/adk';
 import PQueue from 'p-queue';
+import { z } from 'zod';
+
 import { STATE } from '../constants/state-keys.constant.js';
-import { renderChunk, type Chunk } from '../services/chunker.service.js';
+import { type Chunk, renderChunk } from '../services/chunker.service.js';
 import { generateText } from '../services/generate.service.js';
 
 export interface CreateSummarizeRepoToolPayload {
-  model: string;
+  llm: BaseLlm;
 }
 
 export function createSummarizeRepoTool({
-  model,
+  llm,
 }: CreateSummarizeRepoToolPayload) {
-  const llm = new Gemini({ model });
-
   return new FunctionTool({
     name: 'summarize_chunks',
     description:

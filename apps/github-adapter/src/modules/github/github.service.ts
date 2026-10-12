@@ -1,13 +1,15 @@
 import { Octokit } from '@octokit/rest';
+
+import type { AdapterEnvService } from '../../env.js';
 import {
-  PostReviewOptions,
-  PostReviewResult,
-  PRDiffResult,
   CodeSearchResult,
   FileContentResult,
   GitAdapterContract,
+  PostReviewOptions,
+  PostReviewResult,
+  PRDiffResult,
+  PRFile,
 } from './interfaces/github.interface.js';
-import type { AdapterEnvService } from '../../env.js';
 
 export interface GithubServiceDependencies {
   envService: AdapterEnvService;
@@ -17,10 +19,8 @@ export interface GithubServiceDependencies {
 
 export class GithubService implements GitAdapterContract {
   private octokit: Octokit;
-  private envService: AdapterEnvService;
 
   constructor(deps: GithubServiceDependencies) {
-    this.envService = deps.envService;
     const token = deps.token ?? deps.envService.get('GITHUB_TOKEN');
     this.octokit = deps.octokit ?? new Octokit({ auth: token });
   }
@@ -57,6 +57,85 @@ export class GithubService implements GitAdapterContract {
       diff,
       changedFiles,
     };
+  }
+
+  async getPRFiles(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<PRFile[]> {
+    const filesResponse = await this.octokitClient.rest.pulls.listFiles({
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+
+    const results: PRFile[] = [];
+    for (const file of filesResponse.data) {
+      if (file.status === 'removed') {
+        results.push({
+          filename: file.filename,
+          status: file.status,
+        });
+        continue;
+      }
+
+      let content: string | undefined;
+      try {
+        const fileContent = await this.getFileContent(
+          owner,
+          repo,
+          file.filename,
+        );
+        content = fileContent.content;
+      } catch {
+        content = file.patch;
+      }
+
+      results.push({
+        filename: file.filename,
+        status: file.status,
+        content,
+        patch: file.patch,
+      });
+    }
+
+    return results;
+  }
+
+  async getRepoTarball(
+    owner: string,
+    repo: string,
+    ref?: string,
+  ): Promise<Response> {
+    const targetRef = ref || 'main';
+    const octokitRes =
+      await this.octokitClient.rest.repos.downloadTarballArchive({
+        owner,
+        repo,
+        ref: targetRef,
+        request: {
+          parseSuccessResponseBody: false,
+        },
+      });
+
+    const headers: Record<string, string> = {
+      'content-type':
+        octokitRes.headers['content-type'] || 'application/x-gzip',
+    };
+    if (octokitRes.headers['x-github-commit-sha']) {
+      headers['x-github-commit-sha'] = String(
+        octokitRes.headers['x-github-commit-sha'],
+      );
+    }
+
+    return new Response(
+      octokitRes.data as ConstructorParameters<typeof Response>[0],
+      {
+        status: octokitRes.status,
+        headers,
+      },
+    );
   }
 
   async searchCode(

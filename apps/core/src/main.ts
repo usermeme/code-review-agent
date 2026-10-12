@@ -1,6 +1,7 @@
 import { PubSub } from '@google-cloud/pubsub';
-import { envService } from './env.js';
+
 import { buildCoreServer } from './app.js';
+import { envService } from './env.js';
 
 const host = envService.get('HOST');
 const port = envService.get('PORT');

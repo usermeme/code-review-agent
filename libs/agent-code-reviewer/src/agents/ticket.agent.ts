@@ -1,7 +1,8 @@
-import { LlmAgent, type ReadonlyContext } from '@google/adk';
+import { type BaseLlm, LlmAgent, type ReadonlyContext } from '@google/adk';
 import { z } from 'zod';
-import { ticketReportSchema } from '../schemas/review.schema.js';
+
 import { STATE } from '../constants/state-keys.constant.js';
+import { ticketReportSchema } from '../schemas/review.schema.js';
 
 function instruction(ctx: ReadonlyContext): string {
   const tickets = ctx.state.get(STATE.tickets);
@@ -32,18 +33,16 @@ faithfully; do not invent requirements the ticket does not state. Summarize over
 }
 
 export interface CreateTicketAgentPayload {
-  model: string;
+  llm: BaseLlm;
 }
 
-export function createTicketAgent({
-  model,
-}: CreateTicketAgentPayload): LlmAgent {
+export function createTicketAgent({ llm }: CreateTicketAgentPayload): LlmAgent {
   return new LlmAgent({
     name: 'ticket_comparison_agent',
     description:
       'Checks whether the pull request fully implements every requirement of its linked ticket(s). ' +
       'Call it once per review.',
-    model,
+    model: llm,
     instruction,
     inputSchema: z.object({
       focus: z

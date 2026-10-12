@@ -1,7 +1,9 @@
-import { Given, When, Then } from '@cucumber/cucumber';
 import assert from 'node:assert/strict';
-import { CoreWorld } from '../support/world.js';
+
+import { Given, Then, When } from '@cucumber/cucumber';
 import type { IngestPREventResponse } from 'contracts';
+
+import { CoreWorld } from '../support/world.js';
 
 let lastRpcResponse: IngestPREventResponse;
 

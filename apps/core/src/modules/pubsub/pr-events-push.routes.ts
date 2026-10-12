@@ -1,7 +1,8 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { EventOrchestratorService } from '../../services/event-orchestrator.service.js';
-import { PREventPayload } from 'shared-types';
 import { parsePubSubPushPayload } from 'pubsub';
+import { PREventPayload } from 'shared-types';
+
+import { EventOrchestratorService } from '../../services/event-orchestrator.service.js';
 
 export interface PrEventsPushRoutesOptions {
   orchestrator: EventOrchestratorService;

@@ -1,17 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { PubSub } from '@google-cloud/pubsub';
+import { FastifyBaseLogger } from 'fastify';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { IngressEnvService } from '../../env.js';
 import {
   GithubIngressService,
   GithubIngressServiceDependencies,
 } from './ingress.service.js';
-import { PubSub } from '@google-cloud/pubsub';
-import { IngressEnvService } from '../../env.js';
 
 describe('GithubIngressService', () => {
   let service: GithubIngressService;
-  let mockPubSub: any;
-  let mockTopic: any;
-  let mockEnvService: any;
-  let mockLogger: any;
+  let mockPubSub: { topic: ReturnType<typeof vi.fn> };
+  let mockTopic: { publishMessage: ReturnType<typeof vi.fn> };
+  let mockEnvService: { get: ReturnType<typeof vi.fn> };
+  let mockLogger: {
+    info: ReturnType<typeof vi.fn>;
+    error: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
     mockTopic = {
@@ -33,8 +38,8 @@ describe('GithubIngressService', () => {
     };
 
     const deps: GithubIngressServiceDependencies = {
-      envService: mockEnvService as IngressEnvService,
-      pubsub: mockPubSub as PubSub,
+      envService: mockEnvService as unknown as IngressEnvService,
+      pubsub: mockPubSub as unknown as PubSub,
       webhookSecret: 'test-secret',
     };
 
@@ -61,7 +66,7 @@ describe('GithubIngressService', () => {
     const result = await service.processWebhook(
       { 'x-github-event': 'pull_request' },
       payload,
-      mockLogger,
+      mockLogger as unknown as FastifyBaseLogger,
     );
 
     expect(result.ignored).toBe(false);
@@ -83,7 +88,7 @@ describe('GithubIngressService', () => {
     const result = await service.processWebhook(
       { 'x-github-event': 'fork' },
       {},
-      mockLogger,
+      mockLogger as unknown as FastifyBaseLogger,
     );
     expect(result.ignored).toBe(true);
     expect(mockTopic.publishMessage).not.toHaveBeenCalled();

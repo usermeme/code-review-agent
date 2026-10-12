@@ -1,5 +1,7 @@
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
+
+import { ContextError } from '../constants/errors.constant.js';
 import { STATE } from '../constants/state-keys.constant.js';
 
 export interface RepoContextTarget {
@@ -56,14 +58,16 @@ export function createGetRepoContextTool(
       if (directContext) {
         if (typeof directContext === 'object') {
           sections = directContext;
-        } else {
+        } else if (directContext.trim() && directContext.trim() !== '{}') {
           try {
             sections = JSON.parse(directContext);
           } catch {
             sections = { architecture: directContext };
           }
         }
-      } else if (deps.contextLoader) {
+      }
+
+      if (Object.keys(sections).length === 0 && deps.contextLoader) {
         const loaded = await deps.contextLoader(prKey);
         if (loaded) {
           sections = loaded;
@@ -71,11 +75,23 @@ export function createGetRepoContextTool(
       }
 
       const state = toolContext?.state;
-      state?.set(STATE.ctxArchitecture, sections['architecture'] ?? '');
-      state?.set(STATE.ctxModules, sections['modules'] ?? '');
-      state?.set(STATE.ctxPatterns, sections['patterns'] ?? '');
-      state?.set(STATE.ctxErrorHandling, sections['errorHandling'] ?? '');
-      state?.set(STATE.ctxAgentDocs, sections['agentDocs'] ?? '');
+      state?.set(
+        STATE.ctxArchitecture,
+        sections['architecture'] || ContextError.REPO_CONTEXT_NOT_LOADED,
+      );
+      state?.set(
+        STATE.ctxModules,
+        sections['modules'] || ContextError.REPO_CONTEXT_NOT_LOADED,
+      );
+      state?.set(
+        STATE.ctxPatterns,
+        sections['patterns'] || ContextError.REPO_CONTEXT_NOT_LOADED,
+      );
+      state?.set(
+        STATE.ctxErrorHandling,
+        sections['errorHandling'] || ContextError.REPO_CONTEXT_NOT_LOADED,
+      );
+      state?.set(STATE.ctxAgentDocs, sections['agentDocs'] || '');
 
       return {
         digest: (sections['architecture'] ?? '').slice(0, 2000),

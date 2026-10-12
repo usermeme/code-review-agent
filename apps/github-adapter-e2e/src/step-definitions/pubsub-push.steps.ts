@@ -1,5 +1,7 @@
-import { When, Then, DataTable } from '@cucumber/cucumber';
 import assert from 'node:assert/strict';
+
+import { DataTable, Then, When } from '@cucumber/cucumber';
+
 import { GithubAdapterWorld } from '../support/world.js';
 
 When(

@@ -7,7 +7,7 @@ export interface PRState {
   updatedAt: Date;
   diff?: string;
   changedFiles?: string[];
-  prMeta?: Record<string, any>;
+  prMeta?: Partial<PRMeta> & Record<string, unknown>;
   summary?: string;
   error?: string;
 }
@@ -102,12 +102,20 @@ export interface FileContentResult {
   sha?: string;
 }
 
+export interface PRFile {
+  filename: string;
+  status: string;
+  content?: string;
+  patch?: string;
+}
+
 export interface GitAdapterContract {
   getPRDiff(
     owner: string,
     repo: string,
     prNumber: number,
   ): Promise<PRDiffResult>;
+  getPRFiles(owner: string, repo: string, prNumber: number): Promise<PRFile[]>;
   searchCode(
     owner: string,
     repo: string,
@@ -119,4 +127,5 @@ export interface GitAdapterContract {
     path: string,
     ref?: string,
   ): Promise<FileContentResult>;
+  getRepoTarball(owner: string, repo: string, ref?: string): Promise<Response>;
 }

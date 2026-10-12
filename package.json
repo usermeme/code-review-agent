@@ -33,6 +33,7 @@
     "@types/node": "^26.6.2",
     "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
+    "eslint-plugin-simple-import-sort": "^14.0.0",
     "lefthook": "^2.1.14",
     "nx": "23.2.1",
     "prettier": "~3.9.8",

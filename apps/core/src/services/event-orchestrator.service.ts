@@ -1,16 +1,19 @@
+import type { BaseLlm } from '@google/adk';
 import { PubSub } from '@google-cloud/pubsub';
-import { FastifyBaseLogger } from 'fastify';
-import { PrRepository } from '../modules/database/repositories/pr.repository.js';
-import { ContextRepository } from '../modules/database/repositories/context.repository.js';
 import { IngestPREventRequest, IngestPREventResponse } from 'contracts';
+import { FastifyBaseLogger } from 'fastify';
+import { LlmFactory } from 'llm';
 import {
   ContextReadyPayload,
-  ReviewResultPayload,
-  PREventPayload,
   GitAdapterContract,
+  PREventPayload,
+  ReviewResultPayload,
 } from 'shared-types';
-import { GitAdapterClient } from '../modules/adapter/git-adapter.client.js';
+
 import type { CoreEnvService } from '../env.js';
+import { GitAdapterClient } from '../modules/adapter/git-adapter.client.js';
+import { ContextRepository } from '../modules/database/repositories/context.repository.js';
+import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import type { AgentService } from './agent.service.js';
 
 export interface EventOrchestratorDependencies {
@@ -20,6 +23,7 @@ export interface EventOrchestratorDependencies {
   pubsub: PubSub;
   agentService: AgentService;
   gitAdapterClient?: GitAdapterContract;
+  llm?: BaseLlm;
 }
 
 export class EventOrchestratorService {
@@ -29,6 +33,7 @@ export class EventOrchestratorService {
   private envService: CoreEnvService;
   private agentService: AgentService;
   private gitAdapterClient: GitAdapterContract;
+  private llm: BaseLlm;
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub;
@@ -40,6 +45,8 @@ export class EventOrchestratorService {
     const adapterUrl = deps.envService.get('GIT_ADAPTER_URL');
     this.gitAdapterClient =
       deps.gitAdapterClient ?? new GitAdapterClient(adapterUrl);
+
+    this.llm = deps.llm ?? new LlmFactory(deps.envService.data).createLlm();
   }
 
   async ingestPREvent(
@@ -74,7 +81,8 @@ export class EventOrchestratorService {
         cloneUrl: meta.cloneUrl,
         ref: meta.baseRef,
         isIncrementalUpdate: true,
-        model: this.envService.get('REVIEW_MODEL'),
+        llm: this.llm,
+        gitAdapter: this.gitAdapterClient,
       });
 
       const summary =
@@ -121,8 +129,14 @@ export class EventOrchestratorService {
       const existingContext =
         await this.contextRepository.getContext(baselineKey);
 
+      const isValidContext =
+        existingContext?.summary &&
+        existingContext.summary.trim() !== '' &&
+        existingContext.summary.trim() !== '{}' &&
+        existingContext.summary.trim() !== '{"summary":""}';
+
       const baselineSummary =
-        existingContext?.summary ??
+        (isValidContext ? existingContext.summary : null) ??
         (await this.buildAndSaveBaselineContext({
           baselineKey,
           prKey,
@@ -171,8 +185,9 @@ export class EventOrchestratorService {
           tickets: [],
         },
         {
-          model: this.envService.get('REVIEW_MODEL'),
+          llm: this.llm,
           baselineContext: baselineSummary,
+          gitAdapter: this.gitAdapterClient,
         },
       );
 
@@ -234,8 +249,9 @@ export class EventOrchestratorService {
         tickets: [],
       },
       {
-        model: this.envService.get('REVIEW_MODEL'),
+        llm: this.llm,
         baselineContext: summary,
+        gitAdapter: this.gitAdapterClient,
       },
     );
 
@@ -317,12 +333,25 @@ export class EventOrchestratorService {
         `https://github.com/${params.owner}/${params.repo}.git`,
       ref: params.meta.baseRef || 'main',
       isIncrementalUpdate: false,
-      model: this.envService.get('REVIEW_MODEL'),
+      llm: this.llm,
+      gitAdapter: this.gitAdapterClient,
     });
 
     const summary =
       typeof sections === 'string' ? sections : JSON.stringify(sections);
-    await this.contextRepository.saveContext(params.baselineKey, { summary });
+    const isValid =
+      summary &&
+      summary.trim() !== '' &&
+      summary.trim() !== '{}' &&
+      summary.trim() !== '{"summary":""}';
+
+    if (isValid) {
+      await this.contextRepository.saveContext(params.baselineKey, { summary });
+    } else {
+      params.logger?.warn(
+        `[Core] Baseline context generation returned empty for ${params.baselineKey}. Skipping save to prevent cache poisoning.`,
+      );
+    }
     return summary;
   }
 

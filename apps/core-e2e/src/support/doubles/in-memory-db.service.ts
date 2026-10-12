@@ -1,8 +1,9 @@
 import { FastifyBaseLogger } from 'fastify';
+
 import { DatabaseService } from '../../../../core/src/modules/database/interfaces/database.interface.js';
 
 export class InMemoryDatabaseService implements DatabaseService {
-  private collections = new Map<string, Map<string, any>>();
+  private collections = new Map<string, Map<string, object>>();
 
   async connect(_logger: FastifyBaseLogger): Promise<void> {
     void _logger;

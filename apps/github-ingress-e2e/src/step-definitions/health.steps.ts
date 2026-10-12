@@ -1,5 +1,7 @@
-import { When, Then } from '@cucumber/cucumber';
 import assert from 'node:assert/strict';
+
+import { Then, When } from '@cucumber/cucumber';
+
 import { GithubIngressWorld } from '../support/world.js';
 
 When(

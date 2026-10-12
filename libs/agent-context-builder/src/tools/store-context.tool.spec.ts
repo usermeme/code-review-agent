@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createStoreContextTool } from './store-context.tool.js';
+
 import { STATE } from '../constants/state-keys.constant.js';
+import { createStoreContextTool } from './store-context.tool.js';
 
 describe('storeContextTool', () => {
   it('has correct tool name and description', () => {
@@ -13,20 +14,20 @@ describe('storeContextTool', () => {
     const onStoreContext = vi.fn().mockResolvedValue(undefined);
     const tool = createStoreContextTool({ onStoreContext });
 
-    const stateMap = new Map<string, any>();
+    const stateMap = new Map<string, unknown>();
     const mockCtx = {
       state: {
-        set: (k: string, v: any) => stateMap.set(k, v),
+        set: (k: string, v: unknown) => stateMap.set(k, v),
         get: (k: string) => stateMap.get(k),
       },
-    } as any;
+    } as unknown;
 
     const sections = {
       architecture: 'Microservices architecture with Fastify',
       dependencies: 'Node.js, TypeScript, Vitest',
     };
 
-    const result = await (tool as any).execute(
+    const result = await tool.execute(
       {
         provider: 'github',
         owner: 'test-owner',
@@ -52,15 +53,15 @@ describe('storeContextTool', () => {
     const onStoreContext = vi.fn().mockResolvedValue(undefined);
     const tool = createStoreContextTool({ onStoreContext });
 
-    const stateMap = new Map<string, any>();
+    const stateMap = new Map<string, unknown>();
     const mockCtx = {
       state: {
-        set: (k: string, v: any) => stateMap.set(k, v),
+        set: (k: string, v: unknown) => stateMap.set(k, v),
         get: (k: string) => stateMap.get(k),
       },
-    } as any;
+    } as unknown;
 
-    await (tool as any).execute(
+    await tool.execute(
       {
         provider: 'github',
         owner: 'test-owner',

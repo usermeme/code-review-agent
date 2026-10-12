@@ -1,6 +1,6 @@
 export interface PublishedPubSubMessage {
   topic: string;
-  json: any;
+  json: Record<string, unknown>;
   attributes?: Record<string, string>;
 }
 
@@ -10,21 +10,24 @@ export class MockPubSub {
   topic(topicName: string) {
     return {
       publishMessage: async (options: {
-        json?: any;
+        json?: Record<string, unknown>;
         data?: Buffer;
         attributes?: Record<string, string>;
       }): Promise<string> => {
         let json = options.json;
         if (!json && options.data) {
           try {
-            json = JSON.parse(options.data.toString('utf8'));
+            json = JSON.parse(options.data.toString('utf8')) as Record<
+              string,
+              unknown
+            >;
           } catch {
-            json = options.data.toString('utf8');
+            json = { raw: options.data.toString('utf8') };
           }
         }
         this.messages.push({
           topic: topicName,
-          json,
+          json: json ?? {},
           attributes: options.attributes,
         });
         return `mock-msg-${this.messages.length}`;

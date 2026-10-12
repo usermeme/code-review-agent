@@ -1,11 +1,10 @@
-import { z } from 'zod';
 import { EnvService } from 'env';
+import { z } from 'zod';
 
 export const adapterEnvSchema = z.object({
   HOST: z.string().min(1),
   PORT: z.string().transform(Number),
   GITHUB_TOKEN: z.string().min(1),
-  REVIEW_RESULTS_SUBSCRIPTION: z.string().min(1),
   GOOGLE_CLOUD_PROJECT: z.string().optional(),
 });
 

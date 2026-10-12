@@ -15,15 +15,19 @@ export const STATE = {
   ctxPatterns: 'repoctx:patterns',
   ctxErrorHandling: 'repoctx:errorHandling',
   ctxAgentDocs: 'repoctx:agentDocs',
+  repoRules: 'repo:rules',
+  repoSkills: 'repo:skills',
   reviewResult: 'review:result',
 } as const;
 
 export interface PrMeta {
-  repo: string; // "owner/name"
+  provider?: string;
+  owner?: string;
+  repo: string;
   number: number;
   title: string;
-  body: string;
+  body?: string;
   branch: string;
   author: string;
-  headSha: string;
+  headSha?: string;
 }
