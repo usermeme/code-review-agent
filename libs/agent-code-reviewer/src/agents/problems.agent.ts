@@ -70,7 +70,7 @@ Report uncertain findings too, with an honest "confidence" value (0.0 to 1.0) â€
 
 export interface CreateProblemsAgentPayload {
   skill: ReviewSkill;
-  llm: BaseLlm | string;
+  llm: BaseLlm;
   tools?: BaseTool[];
 }
 

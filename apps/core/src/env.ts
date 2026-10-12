@@ -1,10 +1,5 @@
 import { EnvService } from 'env';
-import {
-  geminiLlmConfigSchema,
-  mockLlmConfigSchema,
-  ollamaLlmConfigSchema,
-  openaiLlmConfigSchema,
-} from 'llm';
+import { geminiLlmConfigSchema, mockLlmConfigSchema } from 'llm';
 import { z } from 'zod';
 
 export const coreBaseEnvSchema = z.object({
@@ -16,8 +11,6 @@ export const coreBaseEnvSchema = z.object({
 
 export const coreEnvSchema = z.discriminatedUnion('LLM_PROVIDER', [
   coreBaseEnvSchema.merge(geminiLlmConfigSchema),
-  coreBaseEnvSchema.merge(openaiLlmConfigSchema),
-  coreBaseEnvSchema.merge(ollamaLlmConfigSchema),
   coreBaseEnvSchema.merge(mockLlmConfigSchema),
 ]);
 

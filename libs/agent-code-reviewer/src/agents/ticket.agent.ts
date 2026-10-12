@@ -33,7 +33,7 @@ faithfully; do not invent requirements the ticket does not state. Summarize over
 }
 
 export interface CreateTicketAgentPayload {
-  llm: BaseLlm | string;
+  llm: BaseLlm;
 }
 
 export function createTicketAgent({ llm }: CreateTicketAgentPayload): LlmAgent {

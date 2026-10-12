@@ -7,7 +7,7 @@ import {
 import { z } from 'zod';
 
 export interface ContextOrchestratorPayload {
-  llm: BaseLlm | string;
+  llm: BaseLlm;
   tools: {
     fetchContext: BaseTool;
     prepareRepo: BaseTool;

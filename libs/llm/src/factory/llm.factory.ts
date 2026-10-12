@@ -1,8 +1,6 @@
 import { type BaseLlm, Gemini } from '@google/adk';
 
 import { MockLlm } from '../providers/mock.llm.js';
-import { OllamaLlm } from '../providers/ollama.llm.js';
-import { OpenAiLlm } from '../providers/openai.llm.js';
 import type { LlmConfig } from '../schemas/llm-config.schema.js';
 
 export interface CreateLlmOptions {
@@ -23,20 +21,6 @@ export class LlmFactory {
           project: this.config.GOOGLE_CLOUD_PROJECT,
         });
       }
-      case 'openai': {
-        return new OpenAiLlm({
-          model: model || 'gpt-4o',
-          apiKey: this.config.OPENAI_API_KEY,
-          baseUrl: this.config.OPENAI_BASE_URL,
-        });
-      }
-      case 'ollama': {
-        return new OllamaLlm({
-          model: model || 'llama3',
-          baseUrl: this.config.OLLAMA_BASE_URL,
-          apiKey: this.config.OLLAMA_API_KEY,
-        });
-      }
       case 'mock': {
         return new MockLlm({
           model: model || 'mock-model',
@@ -50,11 +34,4 @@ export class LlmFactory {
       }
     }
   }
-}
-
-export function createLlm(
-  config: LlmConfig,
-  options?: CreateLlmOptions,
-): BaseLlm {
-  return new LlmFactory(config).createLlm(options);
 }

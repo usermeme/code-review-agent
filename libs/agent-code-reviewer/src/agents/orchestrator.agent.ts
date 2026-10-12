@@ -121,7 +121,7 @@ export interface OrchestratorTools {
 
 export interface CreateOrchestratorPayload {
   tools: OrchestratorTools;
-  llm: BaseLlm | string;
+  llm: BaseLlm;
 }
 
 export function createOrchestrator({

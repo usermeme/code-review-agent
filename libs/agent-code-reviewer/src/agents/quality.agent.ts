@@ -80,7 +80,7 @@ Do not report defects/bugs — a separate agent covers those. Report uncertain f
 
 export interface CreateQualityAgentPayload {
   skill: ReviewSkill;
-  llm: BaseLlm | string;
+  llm: BaseLlm;
   tools?: BaseTool[];
 }
 

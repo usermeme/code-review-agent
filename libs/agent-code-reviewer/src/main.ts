@@ -23,7 +23,7 @@ import {
 } from './tools/store-discussion.tool.js';
 
 export interface RunReviewOptions {
-  llm: BaseLlm | string;
+  llm: BaseLlm;
   baselineContext?: string | Record<string, string>;
   contextLoader?: ContextLoader;
   gitAdapter?: GitAdapterContract;

@@ -20,7 +20,7 @@ export interface BuildContextOptions {
   ref?: string;
   gitAdapter?: GitAdapterContract;
   isIncrementalUpdate?: boolean;
-  llm: BaseLlm | string;
+  llm: BaseLlm;
   contextLoader?: ContextLoader;
   onStoreContext?: (result: {
     provider: string;

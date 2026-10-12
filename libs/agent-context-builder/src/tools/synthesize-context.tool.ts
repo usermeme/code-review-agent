@@ -1,21 +1,16 @@
-import { type BaseLlm, FunctionTool, Gemini } from '@google/adk';
+import { type BaseLlm, FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
 import { STATE } from '../constants/state-keys.constant.js';
 import { generateText } from '../services/generate.service.js';
 
 export interface CreateSynthesizeContextToolPayload {
-  llm: BaseLlm | string;
+  llm: BaseLlm;
 }
 
 export function createSynthesizeContextTool({
-  llm: modelOrLlm,
+  llm,
 }: CreateSynthesizeContextToolPayload) {
-  const llm =
-    typeof modelOrLlm === 'string'
-      ? new Gemini({ model: modelOrLlm })
-      : modelOrLlm;
-
   return new FunctionTool({
     name: 'synthesize_context',
     description:

@@ -1,3 +1,4 @@
+import { MockLlm } from 'llm';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AgentService } from './agent.service.js';
@@ -23,6 +24,8 @@ import { runReview } from 'agent-code-reviewer';
 import { buildContext } from 'agent-context-builder';
 
 describe('AgentService', () => {
+  const mockLlm = new MockLlm();
+
   it('delegates buildContext to agent-context-builder library', async () => {
     const service = new AgentService();
     const result = await service.buildContext({
@@ -32,14 +35,14 @@ describe('AgentService', () => {
       prNumber: 1,
       cloneUrl: 'https://github.com/test-org/test-repo.git',
       ref: 'main',
-      llm: 'test-model',
+      llm: mockLlm,
     });
 
     expect(buildContext).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'test-org',
         repo: 'test-repo',
-        llm: 'test-model',
+        llm: mockLlm,
       }),
     );
     expect(result).toEqual({ architecture: 'Test Architecture' });
@@ -64,7 +67,7 @@ describe('AgentService', () => {
         tickets: [],
       },
       {
-        llm: 'test-model',
+        llm: mockLlm,
       },
     );
 
@@ -73,7 +76,7 @@ describe('AgentService', () => {
         diff: 'diff content',
       }),
       {
-        llm: 'test-model',
+        llm: mockLlm,
       },
     );
     expect(result).toEqual(

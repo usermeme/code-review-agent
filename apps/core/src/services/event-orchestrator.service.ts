@@ -2,7 +2,7 @@ import type { BaseLlm } from '@google/adk';
 import { PubSub } from '@google-cloud/pubsub';
 import { IngestPREventRequest, IngestPREventResponse } from 'contracts';
 import { FastifyBaseLogger } from 'fastify';
-import { createLlm } from 'llm';
+import { LlmFactory } from 'llm';
 import {
   ContextReadyPayload,
   GitAdapterContract,
@@ -46,7 +46,7 @@ export class EventOrchestratorService {
     this.gitAdapterClient =
       deps.gitAdapterClient ?? new GitAdapterClient(adapterUrl);
 
-    this.llm = deps.llm ?? createLlm(deps.envService.data);
+    this.llm = deps.llm ?? new LlmFactory(deps.envService.data).createLlm();
   }
 
   async ingestPREvent(
