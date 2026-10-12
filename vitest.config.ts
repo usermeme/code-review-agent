@@ -5,19 +5,34 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
-      env: path.resolve(__dirname, 'libs/env/src/index.ts'),
-      'shared-types': path.resolve(__dirname, 'libs/shared-types/src/index.ts'),
-      contracts: path.resolve(__dirname, 'libs/contracts/src/index.ts'),
-      'agent-context-builder': path.resolve(
+      '@code-review-agent/env': path.resolve(
+        __dirname,
+        'libs/env/src/index.ts',
+      ),
+      '@code-review-agent/shared-types': path.resolve(
+        __dirname,
+        'libs/shared-types/src/index.ts',
+      ),
+      '@code-review-agent/contracts': path.resolve(
+        __dirname,
+        'libs/contracts/src/index.ts',
+      ),
+      '@code-review-agent/agent-context-builder': path.resolve(
         __dirname,
         'libs/agent-context-builder/src/index.ts',
       ),
-      'agent-code-reviewer': path.resolve(
+      '@code-review-agent/agent-code-reviewer': path.resolve(
         __dirname,
         'libs/agent-code-reviewer/src/index.ts',
       ),
-      llm: path.resolve(__dirname, 'libs/llm/src/index.ts'),
-      pubsub: path.resolve(__dirname, 'libs/pubsub/src/index.ts'),
+      '@code-review-agent/llm': path.resolve(
+        __dirname,
+        'libs/llm/src/index.ts',
+      ),
+      '@code-review-agent/pubsub': path.resolve(
+        __dirname,
+        'libs/pubsub/src/index.ts',
+      ),
     },
   },
   test: {

@@ -1,6 +1,6 @@
+import { parsePubSubPushPayload } from '@code-review-agent/pubsub';
+import { ReviewResultPayload } from '@code-review-agent/shared-types';
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { parsePubSubPushPayload } from 'pubsub';
-import { ReviewResultPayload } from 'shared-types';
 
 import { GithubService } from '../github/github.service.js';
 

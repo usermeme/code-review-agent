@@ -1,7 +1,7 @@
+import { PREventPayload } from '@code-review-agent/shared-types';
 import { PubSub } from '@google-cloud/pubsub';
 import { Webhooks } from '@octokit/webhooks';
 import { FastifyBaseLogger } from 'fastify';
-import { PREventPayload } from 'shared-types';
 
 import type { IngressEnvService } from '../../env.js';
 import {

@@ -1,14 +1,17 @@
-import type { BaseLlm } from '@google/adk';
-import { PubSub } from '@google-cloud/pubsub';
-import { IngestPREventRequest, IngestPREventResponse } from 'contracts';
-import { FastifyBaseLogger } from 'fastify';
-import { LlmFactory } from 'llm';
+import {
+  IngestPREventRequest,
+  IngestPREventResponse,
+} from '@code-review-agent/contracts';
+import { LlmFactory } from '@code-review-agent/llm';
 import {
   ContextReadyPayload,
   GitAdapterContract,
   PREventPayload,
   ReviewResultPayload,
-} from 'shared-types';
+} from '@code-review-agent/shared-types';
+import type { BaseLlm } from '@google/adk';
+import { PubSub } from '@google-cloud/pubsub';
+import { FastifyBaseLogger } from 'fastify';
 
 import type { CoreEnvService } from '../env.js';
 import { GitAdapterClient } from '../modules/adapter/git-adapter.client.js';

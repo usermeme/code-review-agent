@@ -1,4 +1,4 @@
-import { RepositoryContext } from 'shared-types';
+import { RepositoryContext } from '@code-review-agent/shared-types';
 
 import { DatabaseService } from '../interfaces/database.interface.js';
 

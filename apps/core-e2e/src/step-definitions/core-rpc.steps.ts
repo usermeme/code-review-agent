@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
+import type { IngestPREventResponse } from '@code-review-agent/contracts';
 import { Given, Then, When } from '@cucumber/cucumber';
-import type { IngestPREventResponse } from 'contracts';
 
 import { CoreWorld } from '../support/world.js';
 

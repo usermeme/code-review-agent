@@ -1,5 +1,8 @@
+import type {
+  GitAdapterContract,
+  ReviewResultPayload,
+} from '@code-review-agent/shared-types';
 import { type BaseLlm, InMemoryRunner } from '@google/adk';
-import type { GitAdapterContract, ReviewResultPayload } from 'shared-types';
 
 import {
   createOrchestrator,

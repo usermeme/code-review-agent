@@ -1,6 +1,6 @@
+import { parsePubSubPushPayload } from '@code-review-agent/pubsub';
+import { PREventPayload } from '@code-review-agent/shared-types';
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { parsePubSubPushPayload } from 'pubsub';
-import { PREventPayload } from 'shared-types';
 
 import { EventOrchestratorService } from '../../services/event-orchestrator.service.js';
 

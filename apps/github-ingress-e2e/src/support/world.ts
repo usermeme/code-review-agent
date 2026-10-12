@@ -1,10 +1,10 @@
 import crypto from 'node:crypto';
 
+import { EnvService } from '@code-review-agent/env';
+import { PREventPayload } from '@code-review-agent/shared-types';
 import { IWorldOptions, setWorldConstructor, World } from '@cucumber/cucumber';
 import { PubSub } from '@google-cloud/pubsub';
-import { EnvService } from 'env';
 import { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { PREventPayload } from 'shared-types';
 
 import { buildServer as buildIngressServer } from '../../../github-ingress/src/app.js';
 import {

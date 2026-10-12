@@ -1,4 +1,4 @@
-import { PRState } from 'shared-types';
+import { PRState } from '@code-review-agent/shared-types';
 
 import { DatabaseService } from '../interfaces/database.interface.js';
 

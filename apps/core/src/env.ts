@@ -1,5 +1,8 @@
-import { EnvService } from 'env';
-import { geminiLlmConfigSchema, mockLlmConfigSchema } from 'llm';
+import { EnvService } from '@code-review-agent/env';
+import {
+  geminiLlmConfigSchema,
+  mockLlmConfigSchema,
+} from '@code-review-agent/llm';
 import { z } from 'zod';
 
 export const coreBaseEnvSchema = z.object({

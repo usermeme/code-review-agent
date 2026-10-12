@@ -1,4 +1,4 @@
-import { EnvService } from 'env';
+import { EnvService } from '@code-review-agent/env';
 import { z } from 'zod';
 
 export const ingressEnvSchema = z.object({

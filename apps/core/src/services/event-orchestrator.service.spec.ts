@@ -1,7 +1,7 @@
+import { IngestPREventRequest } from '@code-review-agent/contracts';
+import { EnvService } from '@code-review-agent/env';
+import { PREventPayload } from '@code-review-agent/shared-types';
 import { PubSub } from '@google-cloud/pubsub';
-import { IngestPREventRequest } from 'contracts';
-import { EnvService } from 'env';
-import { PREventPayload } from 'shared-types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { coreEnvSchema, CoreEnvService } from '../env.js';

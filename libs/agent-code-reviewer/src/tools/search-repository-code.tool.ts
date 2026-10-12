@@ -1,5 +1,5 @@
+import type { GitAdapterContract } from '@code-review-agent/shared-types';
 import { FunctionTool } from '@google/adk';
-import type { GitAdapterContract } from 'shared-types';
 import { z } from 'zod';
 
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';

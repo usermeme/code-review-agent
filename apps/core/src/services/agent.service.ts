@@ -2,9 +2,12 @@ import {
   type ReviewExecutionInput,
   runReview,
   type RunReviewOptions,
-} from 'agent-code-reviewer';
-import { buildContext, type BuildContextOptions } from 'agent-context-builder';
-import type { ReviewResultPayload } from 'shared-types';
+} from '@code-review-agent/agent-code-reviewer';
+import {
+  buildContext,
+  type BuildContextOptions,
+} from '@code-review-agent/agent-context-builder';
+import type { ReviewResultPayload } from '@code-review-agent/shared-types';
 
 export class AgentService {
   async buildContext(

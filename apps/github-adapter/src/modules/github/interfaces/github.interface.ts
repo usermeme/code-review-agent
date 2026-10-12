@@ -5,7 +5,7 @@ import type {
   GitAdapterContract,
   PRDiffResult,
   PRFile,
-} from 'shared-types';
+} from '@code-review-agent/shared-types';
 
 export type {
   CodeSearchItem,

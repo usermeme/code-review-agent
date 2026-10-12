@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import type { GitAdapterContract } from 'shared-types';
+import type { GitAdapterContract } from '@code-review-agent/shared-types';
 import * as tar from 'tar';
 
 export interface RepoSnapshot {

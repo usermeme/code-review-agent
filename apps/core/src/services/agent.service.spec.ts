@@ -1,15 +1,15 @@
-import { MockLlm } from 'llm';
+import { MockLlm } from '@code-review-agent/llm';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AgentService } from './agent.service.js';
 
-vi.mock('agent-context-builder', () => ({
+vi.mock('@code-review-agent/agent-context-builder', () => ({
   buildContext: vi.fn().mockResolvedValue({
     architecture: 'Test Architecture',
   }),
 }));
 
-vi.mock('agent-code-reviewer', () => ({
+vi.mock('@code-review-agent/agent-code-reviewer', () => ({
   runReview: vi.fn().mockResolvedValue({
     provider: 'github',
     owner: 'test-org',
@@ -20,8 +20,8 @@ vi.mock('agent-code-reviewer', () => ({
   }),
 }));
 
-import { runReview } from 'agent-code-reviewer';
-import { buildContext } from 'agent-context-builder';
+import { runReview } from '@code-review-agent/agent-code-reviewer';
+import { buildContext } from '@code-review-agent/agent-context-builder';
 
 describe('AgentService', () => {
   const mockLlm = new MockLlm();

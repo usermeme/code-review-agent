@@ -1,4 +1,4 @@
-import type { GitAdapterContract } from 'shared-types';
+import type { GitAdapterContract } from '@code-review-agent/shared-types';
 import { describe, expect, it, vi } from 'vitest';
 
 import {

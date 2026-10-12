@@ -1,5 +1,5 @@
+import type { GitAdapterContract } from '@code-review-agent/shared-types';
 import { type BaseLlm, InMemoryRunner } from '@google/adk';
-import type { GitAdapterContract } from 'shared-types';
 
 import { createContextOrchestrator } from './agents/orchestrator.agent.js';
 import {

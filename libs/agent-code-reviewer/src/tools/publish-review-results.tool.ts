@@ -1,5 +1,5 @@
+import type { ReviewResultPayload } from '@code-review-agent/shared-types';
 import { FunctionTool } from '@google/adk';
-import type { ReviewResultPayload } from 'shared-types';
 import { z } from 'zod';
 
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';

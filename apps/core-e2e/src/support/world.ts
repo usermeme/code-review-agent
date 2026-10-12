@@ -1,3 +1,6 @@
+import { CoreService } from '@code-review-agent/contracts';
+import { EnvService } from '@code-review-agent/env';
+import { ReviewResultPayload } from '@code-review-agent/shared-types';
 import {
   Client,
   createClient,
@@ -5,10 +8,7 @@ import {
 } from '@connectrpc/connect';
 import { IWorldOptions, setWorldConstructor, World } from '@cucumber/cucumber';
 import { PubSub } from '@google-cloud/pubsub';
-import { CoreService } from 'contracts';
-import { EnvService } from 'env';
 import { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { ReviewResultPayload } from 'shared-types';
 
 import { buildCoreServer } from '../../../core/src/app.js';
 import { coreEnvSchema, CoreEnvService } from '../../../core/src/env.js';

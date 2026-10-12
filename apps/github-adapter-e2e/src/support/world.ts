@@ -1,6 +1,6 @@
+import { EnvService } from '@code-review-agent/env';
 import { IWorldOptions, setWorldConstructor, World } from '@cucumber/cucumber';
 import { Octokit } from '@octokit/rest';
-import { EnvService } from 'env';
 import { FastifyInstance, LightMyRequestResponse } from 'fastify';
 
 import { buildServer as buildAdapterServer } from '../../../github-adapter/src/app.js';
