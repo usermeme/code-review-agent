@@ -48,9 +48,7 @@ export async function buildContext(
 
   const tools = {
     fetchContext: createFetchContextTool(options.contextLoader),
-    prepareRepo: createPrepareRepoTool({
-      gitAdapter: options.gitAdapter,
-    }),
+    prepareRepo: createPrepareRepoTool({ gitAdapter: options.gitAdapter }),
     summarizeChunks: createSummarizeRepoTool({ llm }),
     synthesizeContext: createSynthesizeContextTool({ llm }),
     storeContext,
@@ -64,9 +62,7 @@ export async function buildContext(
   const runner = new InMemoryRunner({ agent });
   for await (const event of runner.runEphemeral({
     userId: 'core-context-builder',
-    newMessage: {
-      parts: [{ text: JSON.stringify(options) }],
-    },
+    newMessage: { parts: [{ text: JSON.stringify(options) }] },
   })) {
     void event;
   }
