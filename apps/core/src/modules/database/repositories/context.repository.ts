@@ -1,5 +1,6 @@
-import { DatabaseService } from '../interfaces/database.interface.js';
 import { RepositoryContext } from 'shared-types';
+
+import { DatabaseService } from '../interfaces/database.interface.js';
 
 export class ContextRepository {
   private collection = 'repository_contexts';

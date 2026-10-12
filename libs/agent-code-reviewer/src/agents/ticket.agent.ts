@@ -1,7 +1,8 @@
-import { LlmAgent, type ReadonlyContext } from '@google/adk';
+import { type BaseLlm, LlmAgent, type ReadonlyContext } from '@google/adk';
 import { z } from 'zod';
-import { ticketReportSchema } from '../schemas/review.schema.js';
+
 import { STATE } from '../constants/state-keys.constant.js';
+import { ticketReportSchema } from '../schemas/review.schema.js';
 
 function instruction(ctx: ReadonlyContext): string {
   const tickets = ctx.state.get(STATE.tickets);
@@ -32,7 +33,7 @@ faithfully; do not invent requirements the ticket does not state. Summarize over
 }
 
 export interface CreateTicketAgentPayload {
-  model: string;
+  model: BaseLlm | string;
 }
 
 export function createTicketAgent({

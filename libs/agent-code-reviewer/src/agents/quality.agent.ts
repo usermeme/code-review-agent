@@ -1,8 +1,14 @@
-import { LlmAgent, type BaseTool, type ReadonlyContext } from '@google/adk';
+import {
+  type BaseLlm,
+  type BaseTool,
+  LlmAgent,
+  type ReadonlyContext,
+} from '@google/adk';
 import { z } from 'zod';
-import type { ReviewSkill } from '../skills/review.skill.js';
-import { findingsReportSchema } from '../schemas/review.schema.js';
+
 import { STATE } from '../constants/state-keys.constant.js';
+import { findingsReportSchema } from '../schemas/review.schema.js';
+import type { ReviewSkill } from '../skills/review.skill.js';
 
 const instruction =
   (skill: ReviewSkill) =>
@@ -13,10 +19,19 @@ const instruction =
       ctx.state.get<string>(STATE.ctxPatterns) || '(repo context not loaded)';
     const agentDocs = ctx.state.get<string>(STATE.ctxAgentDocs) || '';
     const modules = ctx.state.get<string>(STATE.ctxModules) || '';
+    const repoSkills =
+      ctx.state.get<Array<{ name: string; path: string; description: string }>>(
+        STATE.repoSkills,
+      ) ?? [];
 
     const changedFilesContext = changedFiles
       ? `\nFull content of the changed files:\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
       : '';
+
+    const skillsSection =
+      repoSkills.length > 0
+        ? `\nAvailable repository skills (use fetchRepositoryFile to read the skill instructions if relevant):\n${repoSkills.map((s) => `- ${s.name} (${s.path}): ${s.description}`).join('\n')}\n`
+        : '';
 
     return `You review a pull request for code quality against THIS repository's established conventions.
 
@@ -34,15 +49,15 @@ Internal patterns & conventions (enforce these):
 ${patterns}
 
 Agent docs / contributor guidelines (verbatim from the repo):
-${agentDocs}
-
+${agentDocs || '(none loaded)'}
+${skillsSection}
 Module overview (to know where existing utilities live):
 ${modules}
 
 TOOL USAGE POLICY:
 If tools (searchRepositoryCode, fetchRepositoryFile) are available to you:
 - STRICT BUDGET: Make at most 3 tool calls in total during your review.
-- TARGETED USE ONLY: Use these tools to check if an existing helper/utility or pattern already exists in the repository before claiming code duplication, unneeded reinvention, or missing reuse.
+- TARGETED USE ONLY: Use these tools to check if an existing helper/utility or pattern already exists in the repository, or inspect a specific skill file if relevant, before claiming code duplication, unneeded reinvention, or missing reuse.
 - DO NOT browse the repository generally.
 - If the diff and conventions provide sufficient evidence, do NOT call any tools.
 
@@ -63,7 +78,7 @@ Do not report defects/bugs — a separate agent covers those. Report uncertain f
 
 export interface CreateQualityAgentPayload {
   skill: ReviewSkill;
-  model: string;
+  model: BaseLlm | string;
   tools?: BaseTool[];
 }
 

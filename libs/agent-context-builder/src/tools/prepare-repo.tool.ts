@@ -1,15 +1,16 @@
 import { FunctionTool } from '@google/adk';
+import type { GitAdapterContract } from 'shared-types';
 import { z } from 'zod';
+
 import { STATE } from '../constants/state-keys.constant.js';
+import { collectAgentDocs } from '../services/agent-docs.service.js';
 import { downloadRepoArchive } from '../services/archive.service.js';
 import {
-  collectFiles,
   buildChunks,
+  collectFiles,
   type RepoFile,
 } from '../services/chunker.service.js';
-import { collectAgentDocs } from '../services/agent-docs.service.js';
 import { estimateTokens } from '../services/tokens.util.js';
-import type { GitAdapterContract } from 'shared-types';
 
 export interface PrepareRepoPayload {
   provider: string;

@@ -20,7 +20,8 @@
       "contracts": ["./libs/contracts/src/index.ts"],
       "agent-context-builder": ["./libs/agent-context-builder/src/index.ts"],
       "agent-code-reviewer": ["./libs/agent-code-reviewer/src/index.ts"],
-      "pubsub": ["./libs/pubsub/src/index.ts"]
+      "pubsub": ["./libs/pubsub/src/index.ts"],
+      "llm": ["./libs/llm/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

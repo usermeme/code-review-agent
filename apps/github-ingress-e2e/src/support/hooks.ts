@@ -1,4 +1,5 @@
-import { Before, After } from '@cucumber/cucumber';
+import { After, Before } from '@cucumber/cucumber';
+
 import { GithubIngressWorld } from './world.js';
 
 Before(async function (this: GithubIngressWorld) {

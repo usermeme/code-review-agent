@@ -1,10 +1,11 @@
-import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import { PubSub } from '@google-cloud/pubsub';
-import { GithubService } from './modules/github/github.service.js';
-import { providerRoutes } from './modules/api/provider.routes.js';
-import { pubsubModule } from './modules/pubsub/pubsub.module.js';
-import { healthModule } from './modules/health/health.module.js';
+import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
+
 import type { AdapterEnvService } from './env.js';
+import { providerRoutes } from './modules/api/provider.routes.js';
+import { GithubService } from './modules/github/github.service.js';
+import { healthModule } from './modules/health/health.module.js';
+import { pubsubModule } from './modules/pubsub/pubsub.module.js';
 
 export interface BuildServerOptions {
   envService: AdapterEnvService;

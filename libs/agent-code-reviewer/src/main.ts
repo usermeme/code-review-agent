@@ -1,27 +1,29 @@
-import { InMemoryRunner } from '@google/adk';
+import { type BaseLlm, InMemoryRunner } from '@google/adk';
+import type { GitAdapterContract, ReviewResultPayload } from 'shared-types';
+
 import {
   createOrchestrator,
   type OrchestratorTools,
 } from './agents/orchestrator.agent.js';
-import {
-  createGetRepoContextTool,
-  type ContextLoader,
-} from './tools/get-repo-context.tool.js';
-import { createPublishReviewResultsTool } from './tools/publish-review-results.tool.js';
+import { createFetchRepositoryFileTool } from './tools/fetch-repository-file.tool.js';
 import {
   createGetDiscussionTool,
   type DiscussionSearchFunction,
 } from './tools/get-discussion.tool.js';
 import {
+  type ContextLoader,
+  createGetRepoContextTool,
+} from './tools/get-repo-context.tool.js';
+import { createGetRepoGuidelinesTool } from './tools/get-repo-guidelines.tool.js';
+import { createPublishReviewResultsTool } from './tools/publish-review-results.tool.js';
+import { createSearchRepositoryCodeTool } from './tools/search-repository-code.tool.js';
+import {
   createStoreDiscussionTool,
   type DiscussionStoreFunction,
 } from './tools/store-discussion.tool.js';
-import { createSearchRepositoryCodeTool } from './tools/search-repository-code.tool.js';
-import { createFetchRepositoryFileTool } from './tools/fetch-repository-file.tool.js';
-import type { GitAdapterContract, ReviewResultPayload } from 'shared-types';
 
 export interface RunReviewOptions {
-  model?: string;
+  model: BaseLlm | string;
   baselineContext?: string | Record<string, string>;
   contextLoader?: ContextLoader;
   gitAdapter?: GitAdapterContract;
@@ -43,14 +45,14 @@ export interface ReviewExecutionInput {
   };
   diff: string;
   changedFiles?: string;
-  tickets?: any[];
+  tickets?: unknown[];
 }
 
 export async function runReview(
   input: ReviewExecutionInput,
-  options: RunReviewOptions = {},
+  options: RunReviewOptions,
 ): Promise<ReviewResultPayload> {
-  const model = options.model ?? 'gemini-3.8-flash';
+  const model = options.model;
   let resultPayload: ReviewResultPayload | null = null;
 
   const tools: OrchestratorTools = {
@@ -80,6 +82,11 @@ export async function runReview(
       defaultRepo: input.prMeta.repo,
     }),
     fetchRepositoryFile: createFetchRepositoryFileTool({
+      gitAdapter: options.gitAdapter,
+      defaultOwner: input.prMeta.owner,
+      defaultRepo: input.prMeta.repo,
+    }),
+    getRepoGuidelines: createGetRepoGuidelinesTool({
       gitAdapter: options.gitAdapter,
       defaultOwner: input.prMeta.owner,
       defaultRepo: input.prMeta.repo,

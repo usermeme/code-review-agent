@@ -1,15 +1,16 @@
-import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import { PubSub } from '@google-cloud/pubsub';
+import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
+
+import type { CoreEnvService } from './env.js';
+import { contextModule } from './modules/context/context.module.js';
 import { FirestoreDatabaseService } from './modules/database/firestore.service.js';
 import { DatabaseService } from './modules/database/interfaces/database.interface.js';
-import { PrRepository } from './modules/database/repositories/pr.repository.js';
 import { ContextRepository } from './modules/database/repositories/context.repository.js';
+import { PrRepository } from './modules/database/repositories/pr.repository.js';
+import { healthModule } from './modules/health/health.module.js';
+import { pubsubModule } from './modules/pubsub/pubsub.module.js';
 import { AgentService } from './services/agent.service.js';
 import { EventOrchestratorService } from './services/event-orchestrator.service.js';
-import { healthModule } from './modules/health/health.module.js';
-import { contextModule } from './modules/context/context.module.js';
-import { pubsubModule } from './modules/pubsub/pubsub.module.js';
-import type { CoreEnvService } from './env.js';
 
 export interface BuildCoreServerOptions {
   envService: CoreEnvService;

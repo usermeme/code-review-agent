@@ -1,5 +1,6 @@
 import { Firestore } from '@google-cloud/firestore';
 import { FastifyBaseLogger } from 'fastify';
+
 import { DatabaseService as IDatabaseService } from './interfaces/database.interface.js';
 
 export class FirestoreDatabaseService implements IDatabaseService {

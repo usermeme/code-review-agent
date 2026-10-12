@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import * as tar from 'tar';
+
 import type { GitAdapterContract } from 'shared-types';
+import * as tar from 'tar';
 
 export interface RepoSnapshot {
   dir: string;
@@ -60,10 +61,18 @@ export async function downloadRepoArchive(params: {
       );
     }
 
-    const stream =
-      typeof (response.body as any).getReader === 'function'
-        ? Readable.fromWeb(response.body as any)
-        : (response.body as any);
+    const body = response.body;
+    const isWebStream =
+      typeof body === 'object' &&
+      body !== null &&
+      'getReader' in body &&
+      typeof (body as { getReader?: unknown }).getReader === 'function';
+
+    const stream = isWebStream
+      ? Readable.fromWeb(
+          body as unknown as Parameters<typeof Readable.fromWeb>[0],
+        )
+      : (body as unknown as NodeJS.ReadableStream);
 
     // Extract the tar.gz stream directly into dir, stripping the top-level directory prefix
     await pipeline(

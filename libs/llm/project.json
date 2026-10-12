@@ -1,0 +1,27 @@
+{
+  "name": "llm",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/llm/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p libs/llm/tsconfig.lib.json --noEmit"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint libs/llm"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run libs/llm"
+      }
+    }
+  }
+}

@@ -1,7 +1,8 @@
 import { FunctionTool } from '@google/adk';
-import { z } from 'zod';
-import { STATE } from '../constants/state-keys.constant.js';
 import type { GitAdapterContract } from 'shared-types';
+import { z } from 'zod';
+
+import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
 
 export interface SearchRepositoryCodeToolDependencies {
   gitAdapter?: GitAdapterContract;
@@ -24,9 +25,9 @@ export function createSearchRepositoryCodeTool(
       repo: z.string().optional().describe('Repository name'),
     }),
     execute: async (input, ctx) => {
-      const meta = ctx?.state?.get<Record<string, any>>(STATE.prMeta);
-      const owner = input.owner || meta?.['owner'] || deps.defaultOwner || '';
-      const repo = input.repo || meta?.['repo'] || deps.defaultRepo || '';
+      const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
+      const owner = input.owner || meta?.owner || deps.defaultOwner || '';
+      const repo = input.repo || meta?.repo || deps.defaultRepo || '';
 
       if (!deps.gitAdapter) {
         return {

@@ -1,14 +1,15 @@
-import { setWorldConstructor, World, IWorldOptions } from '@cucumber/cucumber';
-import { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { buildServer as buildAdapterServer } from '../../../github-adapter/src/app.js';
-import { MockOctokit } from './doubles/mock-octokit.js';
-import { GithubService } from '../../../github-adapter/src/modules/github/github.service.js';
+import { IWorldOptions, setWorldConstructor, World } from '@cucumber/cucumber';
 import { Octokit } from '@octokit/rest';
 import { EnvService } from 'env';
+import { FastifyInstance, LightMyRequestResponse } from 'fastify';
+
+import { buildServer as buildAdapterServer } from '../../../github-adapter/src/app.js';
 import {
   adapterEnvSchema,
   AdapterEnvService,
 } from '../../../github-adapter/src/env.js';
+import { GithubService } from '../../../github-adapter/src/modules/github/github.service.js';
+import { MockOctokit } from './doubles/mock-octokit.js';
 
 export class GithubAdapterWorld extends World {
   public app!: FastifyInstance;

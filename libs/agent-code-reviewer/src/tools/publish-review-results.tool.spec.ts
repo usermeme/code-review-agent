@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createPublishReviewResultsTool } from './publish-review-results.tool.js';
+
 import { STATE } from '../constants/state-keys.constant.js';
+import { createPublishReviewResultsTool } from './publish-review-results.tool.js';
 
 describe('publishReviewResultsTool', () => {
   it('has correct tool name and description', () => {
@@ -13,7 +14,7 @@ describe('publishReviewResultsTool', () => {
     const onPublishResult = vi.fn().mockResolvedValue(undefined);
     const tool = createPublishReviewResultsTool({ onPublishResult });
 
-    const stateMap = new Map<string, any>([
+    const stateMap = new Map<string, unknown>([
       [
         STATE.prMeta,
         {
@@ -28,11 +29,11 @@ describe('publishReviewResultsTool', () => {
     const mockCtx = {
       state: {
         get: (key: string) => stateMap.get(key),
-        set: (key: string, val: any) => stateMap.set(key, val),
+        set: (key: string, val: unknown) => stateMap.set(key, val),
       },
-    } as any;
+    } as unknown;
 
-    const result = await (tool as any).execute(
+    const result = await tool.execute(
       {
         summary: 'Critical security issue detected',
         ticketCoverage:
@@ -82,7 +83,7 @@ describe('publishReviewResultsTool', () => {
     const onPublishResult = vi.fn().mockResolvedValue(undefined);
     const tool = createPublishReviewResultsTool({ onPublishResult });
 
-    const stateMap = new Map<string, any>([
+    const stateMap = new Map<string, unknown>([
       [
         STATE.prMeta,
         {
@@ -97,11 +98,11 @@ describe('publishReviewResultsTool', () => {
     const mockCtx = {
       state: {
         get: (key: string) => stateMap.get(key),
-        set: (key: string, val: any) => stateMap.set(key, val),
+        set: (key: string, val: unknown) => stateMap.set(key, val),
       },
-    } as any;
+    } as unknown;
 
-    const result = await (tool as any).execute(
+    const result = await tool.execute(
       {
         summary: 'All checks passed cleanly',
         findings: [],

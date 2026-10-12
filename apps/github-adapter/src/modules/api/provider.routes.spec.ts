@@ -1,12 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Readable } from 'node:stream';
+
 import Fastify, { FastifyInstance } from 'fastify';
-import { providerRoutes } from './provider.routes.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { GithubService } from '../github/github.service.js';
+import { providerRoutes } from './provider.routes.js';
 
 describe('providerRoutes', () => {
   let app: FastifyInstance;
-  let mockGithubService: any;
+  let mockGithubService: Record<string, ReturnType<typeof vi.fn>>;
 
   beforeEach(async () => {
     mockGithubService = {

@@ -1,5 +1,5 @@
-import { envService } from './env.js';
 import { buildServer } from './app.js';
+import { envService } from './env.js';
 
 async function bootstrap() {
   const host = envService.get('HOST');

@@ -1,14 +1,15 @@
-import { InMemoryRunner } from '@google/adk';
+import { type BaseLlm, InMemoryRunner } from '@google/adk';
+import type { GitAdapterContract } from 'shared-types';
+
 import { createContextOrchestrator } from './agents/orchestrator.agent.js';
+import {
+  type ContextLoader,
+  createFetchContextTool,
+} from './tools/fetch-context.tool.js';
 import { createPrepareRepoTool } from './tools/prepare-repo.tool.js';
 import { createStoreContextTool } from './tools/store-context.tool.js';
 import { createSummarizeRepoTool } from './tools/summarize-chunks.tool.js';
 import { createSynthesizeContextTool } from './tools/synthesize-context.tool.js';
-import {
-  createFetchContextTool,
-  type ContextLoader,
-} from './tools/fetch-context.tool.js';
-import type { GitAdapterContract } from 'shared-types';
 
 export interface BuildContextOptions {
   provider: string;
@@ -19,7 +20,7 @@ export interface BuildContextOptions {
   ref?: string;
   gitAdapter?: GitAdapterContract;
   isIncrementalUpdate?: boolean;
-  model?: string;
+  model: BaseLlm | string;
   contextLoader?: ContextLoader;
   onStoreContext?: (result: {
     provider: string;
@@ -33,7 +34,7 @@ export interface BuildContextOptions {
 export async function buildContext(
   options: BuildContextOptions,
 ): Promise<Record<string, string>> {
-  const model = options.model ?? 'gemini-3.8-flash';
+  const model = options.model;
   let resultSections: Record<string, string> = {};
 
   const storeContext = createStoreContextTool({

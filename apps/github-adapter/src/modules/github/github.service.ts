@@ -1,14 +1,15 @@
 import { Octokit } from '@octokit/rest';
+
+import type { AdapterEnvService } from '../../env.js';
 import {
+  CodeSearchResult,
+  FileContentResult,
+  GitAdapterContract,
   PostReviewOptions,
   PostReviewResult,
   PRDiffResult,
   PRFile,
-  CodeSearchResult,
-  FileContentResult,
-  GitAdapterContract,
 } from './interfaces/github.interface.js';
-import type { AdapterEnvService } from '../../env.js';
 
 export interface GithubServiceDependencies {
   envService: AdapterEnvService;

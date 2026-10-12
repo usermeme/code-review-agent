@@ -1,15 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
-import { createPrepareRepoTool } from './prepare-repo.tool.js';
-import { STATE } from '../constants/state-keys.constant.js';
 import type { GitAdapterContract } from 'shared-types';
+import { describe, expect, it, vi } from 'vitest';
+
+import { STATE } from '../constants/state-keys.constant.js';
+import { createPrepareRepoTool } from './prepare-repo.tool.js';
 
 describe('prepareRepoTool', () => {
   it('throws error when gitAdapter dependency is missing', async () => {
     const tool = createPrepareRepoTool({});
-    const mockCtx = { state: new Map() } as any;
+    const mockCtx = {
+      state: new Map(),
+    } as unknown;
 
     await expect(
-      (tool as any).execute(
+      tool.execute(
         {
           provider: 'github',
           owner: 'test-org',
@@ -42,15 +45,15 @@ describe('prepareRepoTool', () => {
       gitAdapter: mockGitAdapter as GitAdapterContract,
     });
 
-    const stateMap = new Map<string, any>();
+    const stateMap = new Map<string, unknown>();
     const mockCtx = {
       state: {
-        set: (k: string, v: any) => stateMap.set(k, v),
+        set: (k: string, v: unknown) => stateMap.set(k, v),
         get: (k: string) => stateMap.get(k),
       },
-    } as any;
+    } as unknown;
 
-    const result = await (tool as any).execute(
+    const result = await tool.execute(
       {
         provider: 'github',
         owner: 'test-org',

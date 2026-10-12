@@ -1,6 +1,7 @@
 import js from '@eslint/js';
-import tseslint from 'typescript-eslint';
 import { defineConfig } from 'eslint/config';
+import simpleImportSort from 'eslint-plugin-simple-import-sort';
+import tseslint from 'typescript-eslint';
 
 export default defineConfig(
   {
@@ -15,6 +16,15 @@ export default defineConfig(
     ],
   },
   js.configs.recommended,
+  {
+    plugins: {
+      'simple-import-sort': simpleImportSort,
+    },
+    rules: {
+      'simple-import-sort/imports': 'error',
+      'simple-import-sort/exports': 'error',
+    },
+  },
   {
     // Type-aware linting for the app and lib code.
     files: ['apps/**/*.ts', 'libs/**/*.ts'],
@@ -39,7 +49,7 @@ export default defineConfig(
       '@typescript-eslint/no-unsafe-argument': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
-      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-explicit-any': 'error',
       // Fire-and-forget is deliberate in the webhook path; require the `void` marker.
       '@typescript-eslint/no-floating-promises': [
         'error',
@@ -55,6 +65,7 @@ export default defineConfig(
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-unused-vars': 'error',
+      '@typescript-eslint/no-explicit-any': 'error',
     },
   },
 );

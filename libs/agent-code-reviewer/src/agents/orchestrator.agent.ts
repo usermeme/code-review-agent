@@ -1,15 +1,17 @@
 import {
   AgentTool,
-  LlmAgent,
+  type BaseLlm,
   type BaseTool,
+  LlmAgent,
   type ReadonlyContext,
 } from '@google/adk';
 import { z } from 'zod';
+
+import { STATE } from '../constants/state-keys.constant.js';
+import { loadReviewSkill } from '../skills/review.skill.js';
 import { createProblemsAgent } from './problems.agent.js';
 import { createQualityAgent } from './quality.agent.js';
 import { createTicketAgent } from './ticket.agent.js';
-import { loadReviewSkill } from '../skills/review.skill.js';
-import { STATE } from '../constants/state-keys.constant.js';
 
 const MAX_DIFF_TOKENS_IN_PROMPT = 2_500;
 const MAX_FINDINGS = 15;
@@ -32,7 +34,7 @@ const pubSubPayloadSchema = z.object({
   }),
   diff: z.string(),
   changedFiles: z.string(),
-  tickets: z.array(z.any()).optional().default([]),
+  tickets: z.array(z.unknown()).optional().default([]),
 });
 
 type PubSubPayload = z.infer<typeof pubSubPayloadSchema>;
@@ -95,9 +97,9 @@ ${diff}
 </UNTRUSTED_CODE_DIFF>
 
 Follow these steps IN ORDER:
-1. Call getRepoContext to load the repository context (it is shared with the reviewer sub-agents automatically).
+1. Call getRepoContext to load the repository baseline architecture context. Call getRepoGuidelines to load repository-specific agent rules (e.g. AGENTS.md, CLAUDE.md) and discover available repository skills. Both are shared with the reviewer sub-agents automatically.
 ${ticketStep}
-   They already see the full diff and the repo context; pass each a one-paragraph "focus" hint tailored to
+   They already see the full diff, the repo context, and repository rules/skills; pass each a one-paragraph "focus" hint tailored to
    this PR.
 3. (Optional) If an existing discussion thread might already address a finding, call getDiscussion for that finding.
 4. Filter out any candidate finding with confidence < 0.75. Only high-confidence findings with concrete failure scenarios must be included.
@@ -112,13 +114,14 @@ export interface OrchestratorTools {
   getDiscussion: BaseTool;
   storeDiscussion: BaseTool;
   publishReviewResults: BaseTool;
+  getRepoGuidelines?: BaseTool;
   searchRepositoryCode?: BaseTool;
   fetchRepositoryFile?: BaseTool;
 }
 
 export interface CreateOrchestratorPayload {
   tools: OrchestratorTools;
-  model: string;
+  model: BaseLlm | string;
 }
 
 export function createOrchestrator({
@@ -134,6 +137,7 @@ export function createOrchestrator({
 
   const allTools: BaseTool[] = [
     tools.getRepoContext,
+    ...(tools.getRepoGuidelines ? [tools.getRepoGuidelines] : []),
     tools.publishReviewResults,
     tools.getDiscussion,
     tools.storeDiscussion,

@@ -1,9 +1,9 @@
 import type {
+  CodeSearchResult,
+  FileContentResult,
   GitAdapterContract,
   PRDiffResult,
   PRFile,
-  CodeSearchResult,
-  FileContentResult,
 } from 'shared-types';
 
 export class GitAdapterClient implements GitAdapterContract {

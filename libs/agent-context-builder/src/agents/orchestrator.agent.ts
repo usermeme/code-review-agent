@@ -1,8 +1,13 @@
-import { LlmAgent, type BaseTool } from '@google/adk';
+import {
+  type BaseLlm,
+  type BaseTool,
+  LlmAgent,
+  type ReadonlyContext,
+} from '@google/adk';
 import { z } from 'zod';
 
 export interface ContextOrchestratorPayload {
-  model: string;
+  model: BaseLlm | string;
   tools: {
     fetchContext: BaseTool;
     prepareRepo: BaseTool;
@@ -23,22 +28,24 @@ export const contextPubSubPayloadSchema = z.object({
   isIncrementalUpdate: z.boolean().optional(),
 });
 
+export type ContextPubSubPayload = z.infer<typeof contextPubSubPayloadSchema>;
+
 type ContextMode = 'baseline_update' | 'full_baseline';
 
-function determineMode(input: any): ContextMode {
+function determineMode(input: Partial<ContextPubSubPayload>): ContextMode {
   if (input.isIncrementalUpdate) {
     return 'baseline_update';
   }
   return 'full_baseline';
 }
 
-function instruction(ctx: any): string {
+function instruction(ctx: ReadonlyContext): string {
   // Extract payload from ADK's Pub/Sub ingress structure
-  let input: any = {};
+  let input: Partial<ContextPubSubPayload> = {};
   const text = ctx.userContent?.parts?.[0]?.text;
   if (text) {
     try {
-      input = JSON.parse(text);
+      input = JSON.parse(text) as Partial<ContextPubSubPayload>;
     } catch {
       // Ignore parsing errors, fallback to empty
     }

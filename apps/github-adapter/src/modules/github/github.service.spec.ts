@@ -1,12 +1,31 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GithubService, GithubServiceDependencies } from './github.service.js';
 import { Octokit } from '@octokit/rest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { AdapterEnvService } from '../../env.js';
+import { GithubService, GithubServiceDependencies } from './github.service.js';
 
 describe('GithubService (Adapter)', () => {
   let service: GithubService;
-  let mockOctokit: any;
-  let mockEnvService: any;
+  let mockOctokit: {
+    rest: {
+      pulls: {
+        get: ReturnType<typeof vi.fn>;
+        listFiles: ReturnType<typeof vi.fn>;
+        createReview: ReturnType<typeof vi.fn>;
+        createReviewComment: ReturnType<typeof vi.fn>;
+      };
+      search: {
+        code: ReturnType<typeof vi.fn>;
+      };
+      repos: {
+        getContent: ReturnType<typeof vi.fn>;
+      };
+      issues: {
+        createComment: ReturnType<typeof vi.fn>;
+      };
+    };
+  };
+  let mockEnvService: { get: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     mockOctokit = {
@@ -34,8 +53,8 @@ describe('GithubService (Adapter)', () => {
     };
 
     const deps: GithubServiceDependencies = {
-      envService: mockEnvService as AdapterEnvService,
-      octokit: mockOctokit as Octokit,
+      envService: mockEnvService as unknown as AdapterEnvService,
+      octokit: mockOctokit as unknown as Octokit,
       token: 'test-token',
     };
 

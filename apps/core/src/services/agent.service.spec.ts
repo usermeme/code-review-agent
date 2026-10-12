@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+
 import { AgentService } from './agent.service.js';
 
 vi.mock('agent-context-builder', () => ({
@@ -18,8 +19,8 @@ vi.mock('agent-code-reviewer', () => ({
   }),
 }));
 
-import { buildContext } from 'agent-context-builder';
 import { runReview } from 'agent-code-reviewer';
+import { buildContext } from 'agent-context-builder';
 
 describe('AgentService', () => {
   it('delegates buildContext to agent-context-builder library', async () => {
@@ -31,12 +32,14 @@ describe('AgentService', () => {
       prNumber: 1,
       cloneUrl: 'https://github.com/test-org/test-repo.git',
       ref: 'main',
+      model: 'test-model',
     });
 
     expect(buildContext).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'test-org',
         repo: 'test-repo',
+        model: 'test-model',
       }),
     );
     expect(result).toEqual({ architecture: 'Test Architecture' });
@@ -44,27 +47,34 @@ describe('AgentService', () => {
 
   it('delegates runReview to agent-code-reviewer library', async () => {
     const service = new AgentService();
-    const result = await service.runReview({
-      prMeta: {
-        provider: 'github',
-        owner: 'test-org',
-        repo: 'test-repo',
-        number: 1,
-        title: 'PR Title',
-        author: 'author',
-        branch: 'main',
-        body: 'PR Body',
+    const result = await service.runReview(
+      {
+        prMeta: {
+          provider: 'github',
+          owner: 'test-org',
+          repo: 'test-repo',
+          number: 1,
+          title: 'PR Title',
+          author: 'author',
+          branch: 'main',
+          body: 'PR Body',
+        },
+        diff: 'diff content',
+        changedFiles: 'main.ts',
+        tickets: [],
       },
-      diff: 'diff content',
-      changedFiles: 'main.ts',
-      tickets: [],
-    });
+      {
+        model: 'test-model',
+      },
+    );
 
     expect(runReview).toHaveBeenCalledWith(
       expect.objectContaining({
         diff: 'diff content',
       }),
-      undefined,
+      {
+        model: 'test-model',
+      },
     );
     expect(result).toEqual(
       expect.objectContaining({

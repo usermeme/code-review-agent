@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
-import { createSearchRepositoryCodeTool } from './search-repository-code.tool.js';
 import type { GitAdapterContract } from 'shared-types';
+import { describe, expect, it, vi } from 'vitest';
+
+import { createSearchRepositoryCodeTool } from './search-repository-code.tool.js';
 
 interface SearchResult {
   totalCount: number;

@@ -7,7 +7,7 @@ export interface PRState {
   updatedAt: Date;
   diff?: string;
   changedFiles?: string[];
-  prMeta?: Record<string, any>;
+  prMeta?: Partial<PRMeta> & Record<string, unknown>;
   summary?: string;
   error?: string;
 }

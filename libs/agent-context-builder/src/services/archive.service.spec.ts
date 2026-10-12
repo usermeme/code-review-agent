@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { parseRepoCoordinates } from './archive.service.js';
 
 describe('archive.service', () => {

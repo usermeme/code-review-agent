@@ -1,5 +1,5 @@
-import { z } from 'zod';
 import { EnvService } from 'env';
+import { z } from 'zod';
 
 export const adapterEnvSchema = z.object({
   HOST: z.string().min(1),

@@ -4,8 +4,8 @@ import { z, ZodType } from 'zod';
  * Type-safe environment manager backed by Zod.
  * Eagerly validates the environment in constructor and exposes typed `get(key)` and `getOrThrow(key)` methods.
  */
-export class EnvService<T extends ZodType<any, any, any>> {
-  private readonly data: z.infer<T>;
+export class EnvService<T extends ZodType> {
+  private readonly _data: z.infer<T>;
 
   constructor(schema: T, source: Record<string, unknown> = process.env) {
     const result = schema.safeParse(source);
@@ -17,7 +17,14 @@ export class EnvService<T extends ZodType<any, any, any>> {
         .join('\n');
       throw new Error(`Environment validation failed:\n${issues}`);
     }
-    this.data = result.data;
+    this._data = result.data;
+  }
+
+  /**
+   * Exposes all validated environment variables as a typed object.
+   */
+  get data(): z.infer<T> {
+    return this._data;
   }
 
   /**
@@ -25,14 +32,14 @@ export class EnvService<T extends ZodType<any, any, any>> {
    * Return type is inferred from the Zod schema.
    */
   get<K extends keyof z.infer<T>>(key: K): z.infer<T>[K] {
-    return this.data[key];
+    return this._data[key];
   }
 
   /**
    * Retrieves a validated environment variable by key, throwing an error if it is null or undefined.
    */
   getOrThrow<K extends keyof z.infer<T>>(key: K): NonNullable<z.infer<T>[K]> {
-    const value = this.data[key];
+    const value = this._data[key];
     if (value === undefined || value === null) {
       throw new Error(`Environment variable "${String(key)}" is not defined.`);
     }

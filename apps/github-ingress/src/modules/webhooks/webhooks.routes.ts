@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+
 import { GithubIngressService } from './ingress.service.js';
 
 export interface WebhooksRoutesOptions {

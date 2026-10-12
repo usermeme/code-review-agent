@@ -1,5 +1,7 @@
-import { FastifyPluginAsync } from 'fastify';
 import { Readable } from 'node:stream';
+
+import { FastifyPluginAsync } from 'fastify';
+
 import { GithubService } from '../github/github.service.js';
 
 export interface ProviderRoutesOptions {
@@ -88,10 +90,18 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
       const sha = upstream.headers.get('x-github-commit-sha') || ref || 'main';
       reply.header('x-commit-sha', sha);
 
-      const stream =
-        typeof (upstream.body as any).getReader === 'function'
-          ? Readable.fromWeb(upstream.body as any)
-          : upstream.body;
+      const body = upstream.body;
+      const isWebStream =
+        typeof body === 'object' &&
+        body !== null &&
+        'getReader' in body &&
+        typeof (body as { getReader?: unknown }).getReader === 'function';
+
+      const stream = isWebStream
+        ? Readable.fromWeb(
+            body as unknown as Parameters<typeof Readable.fromWeb>[0],
+          )
+        : (body as unknown as NodeJS.ReadableStream);
 
       return reply.send(stream);
     } catch (error) {

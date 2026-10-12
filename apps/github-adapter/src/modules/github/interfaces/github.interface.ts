@@ -1,19 +1,19 @@
 import type {
-  PRDiffResult,
-  PRFile,
   CodeSearchItem,
   CodeSearchResult,
   FileContentResult,
   GitAdapterContract,
+  PRDiffResult,
+  PRFile,
 } from 'shared-types';
 
 export type {
-  PRDiffResult,
-  PRFile,
   CodeSearchItem,
   CodeSearchResult,
   FileContentResult,
   GitAdapterContract,
+  PRDiffResult,
+  PRFile,
 };
 
 export interface PostReviewOptions {

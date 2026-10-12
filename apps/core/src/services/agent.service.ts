@@ -1,9 +1,9 @@
-import { buildContext, type BuildContextOptions } from 'agent-context-builder';
 import {
-  runReview,
   type ReviewExecutionInput,
+  runReview,
   type RunReviewOptions,
 } from 'agent-code-reviewer';
+import { buildContext, type BuildContextOptions } from 'agent-context-builder';
 import type { ReviewResultPayload } from 'shared-types';
 
 export class AgentService {
@@ -15,7 +15,7 @@ export class AgentService {
 
   async runReview(
     input: ReviewExecutionInput,
-    options?: RunReviewOptions,
+    options: RunReviewOptions,
   ): Promise<ReviewResultPayload> {
     return runReview(input, options);
   }

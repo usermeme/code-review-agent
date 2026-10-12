@@ -1,6 +1,6 @@
-import { defineConfig } from 'vitest/config';
-
 import path from 'node:path';
+
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   resolve: {
@@ -16,6 +16,7 @@ export default defineConfig({
         __dirname,
         'libs/agent-code-reviewer/src/index.ts',
       ),
+      llm: path.resolve(__dirname, 'libs/llm/src/index.ts'),
       pubsub: path.resolve(__dirname, 'libs/pubsub/src/index.ts'),
     },
   },
@@ -29,6 +30,7 @@ export default defineConfig({
       PR_EVENTS_TOPIC: 'pr-events',
       REVIEW_RESULTS_TOPIC: 'review-results',
       REVIEW_MODEL: 'gemini-2.5-pro',
+      GEMINI_API_KEY: 'test-gemini-key',
       GIT_ADAPTER_URL: 'http://adapter:8080',
     },
   },

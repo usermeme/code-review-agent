@@ -1,7 +1,8 @@
 import { FunctionTool } from '@google/adk';
-import { z } from 'zod';
-import { STATE } from '../constants/state-keys.constant.js';
 import type { GitAdapterContract } from 'shared-types';
+import { z } from 'zod';
+
+import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
 
 const BLOCKED_FILE_EXTENSIONS = [
   '.lock',
@@ -67,10 +68,10 @@ export function createFetchRepositoryFileTool(
       repo: z.string().optional().describe('Repository name'),
     }),
     execute: async (input, ctx) => {
-      const meta = ctx?.state?.get<Record<string, any>>(STATE.prMeta);
-      const owner = input.owner || meta?.['owner'] || deps.defaultOwner || '';
-      const repo = input.repo || meta?.['repo'] || deps.defaultRepo || '';
-      const ref = input.ref || meta?.['branch'];
+      const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
+      const owner = input.owner || meta?.owner || deps.defaultOwner || '';
+      const repo = input.repo || meta?.repo || deps.defaultRepo || '';
+      const ref = input.ref || meta?.branch;
 
       const lowerPath = input.path.toLowerCase();
       if (BLOCKED_FILE_EXTENSIONS.some((ext) => lowerPath.endsWith(ext))) {

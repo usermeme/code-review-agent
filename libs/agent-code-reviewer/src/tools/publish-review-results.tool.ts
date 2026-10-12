@@ -1,7 +1,8 @@
 import { FunctionTool } from '@google/adk';
-import { z } from 'zod';
-import { STATE } from '../constants/state-keys.constant.js';
 import type { ReviewResultPayload } from 'shared-types';
+import { z } from 'zod';
+
+import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
 
 export const findingItemSchema = z.object({
   title: z.string().describe('Short headline of the finding'),
@@ -50,12 +51,12 @@ export function createPublishReviewResultsTool(
         .describe('List of approved review findings to post inline'),
     }),
     execute: async (input, ctx) => {
-      const meta = ctx?.state?.get<Record<string, any>>(STATE.prMeta);
+      const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
 
-      const provider = input.provider || meta?.['provider'] || 'github';
-      const owner = input.owner || meta?.['owner'] || '';
-      const repo = input.repo || meta?.['repo'] || '';
-      const prNumber = input.prNumber || meta?.['number'] || 0;
+      const provider = input.provider || meta?.provider || 'github';
+      const owner = input.owner || meta?.owner || '';
+      const repo = input.repo || meta?.repo || '';
+      const prNumber = input.prNumber || meta?.number || 0;
 
       if (!owner || !repo || !prNumber) {
         throw new Error(

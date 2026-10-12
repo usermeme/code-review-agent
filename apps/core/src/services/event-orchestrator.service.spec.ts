@@ -1,19 +1,49 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { EventOrchestratorService } from './event-orchestrator.service.js';
+import { PubSub } from '@google-cloud/pubsub';
 import { IngestPREventRequest } from 'contracts';
-import { PREventPayload } from 'shared-types';
 import { EnvService } from 'env';
+import { PREventPayload } from 'shared-types';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { coreEnvSchema, CoreEnvService } from '../env.js';
+import { ContextRepository } from '../modules/database/repositories/context.repository.js';
+import { PrRepository } from '../modules/database/repositories/pr.repository.js';
+import { AgentService } from './agent.service.js';
+import {
+  EventOrchestratorDependencies,
+  EventOrchestratorService,
+} from './event-orchestrator.service.js';
 
 describe('EventOrchestratorService', () => {
-  let mockPubSub: any;
-  let mockPrRepo: any;
-  let mockContextRepo: any;
+  let mockPubSub: { topic: ReturnType<typeof vi.fn> };
+  let mockPrRepo: {
+    updatePRStatus: ReturnType<typeof vi.fn>;
+    getPRStatus: ReturnType<typeof vi.fn>;
+  };
+  let mockContextRepo: {
+    getContext: ReturnType<typeof vi.fn>;
+    saveContext: ReturnType<typeof vi.fn>;
+  };
   let testEnvService: CoreEnvService;
-  let publishedMessages: { topic: string; data: any }[];
-  let mockBuildContext: any;
-  let mockRunReview: any;
-  let mockAgentService: any;
+  let publishedMessages: { topic: string; data: Record<string, unknown> }[];
+  let mockBuildContext: ReturnType<typeof vi.fn>;
+  let mockRunReview: ReturnType<typeof vi.fn>;
+  let mockAgentService: {
+    buildContext: ReturnType<typeof vi.fn>;
+    runReview: ReturnType<typeof vi.fn>;
+  };
+
+  function createTestOrchestrator(
+    overrides: Partial<EventOrchestratorDependencies> = {},
+  ): EventOrchestratorService {
+    return new EventOrchestratorService({
+      envService: testEnvService,
+      prRepository: mockPrRepo as unknown as PrRepository,
+      contextRepository: mockContextRepo as unknown as ContextRepository,
+      pubsub: mockPubSub as unknown as PubSub,
+      agentService: mockAgentService as unknown as AgentService,
+      ...overrides,
+    });
+  }
 
   beforeEach(() => {
     testEnvService = new EnvService(coreEnvSchema, {
@@ -21,16 +51,19 @@ describe('EventOrchestratorService', () => {
       PORT: '8080',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
       GIT_ADAPTER_URL: 'http://adapter:8080',
-      REVIEW_MODEL: 'gemini-3.8-flash',
+      LLM_PROVIDER: 'mock',
+      REVIEW_MODEL: 'test-model',
     });
     publishedMessages = [];
     mockPubSub = {
       topic: vi.fn().mockImplementation((topicName: string) => ({
         publishMessage: vi
           .fn()
-          .mockImplementation(async ({ json }: { json: any }) => {
-            publishedMessages.push({ topic: topicName, data: json });
-          }),
+          .mockImplementation(
+            async ({ json }: { json: Record<string, unknown> }) => {
+              publishedMessages.push({ topic: topicName, data: json });
+            },
+          ),
       })),
     };
 
@@ -71,13 +104,7 @@ describe('EventOrchestratorService', () => {
   });
 
   it('builds context and runs review in-process when baseline context is missing', async () => {
-    const orchestrator = new EventOrchestratorService({
-      pubsub: mockPubSub,
-      prRepository: mockPrRepo,
-      contextRepository: mockContextRepo,
-      envService: testEnvService,
-      agentService: mockAgentService,
-    });
+    const orchestrator = createTestOrchestrator();
 
     const req = {
       $typeName: 'core.v1.IngestPREventRequest',
@@ -146,13 +173,7 @@ describe('EventOrchestratorService', () => {
       updatedAt: new Date(),
     });
 
-    const orchestrator = new EventOrchestratorService({
-      pubsub: mockPubSub,
-      prRepository: mockPrRepo,
-      contextRepository: mockContextRepo,
-      envService: testEnvService,
-      agentService: mockAgentService,
-    });
+    const orchestrator = createTestOrchestrator();
 
     const req = {
       $typeName: 'core.v1.IngestPREventRequest',
@@ -198,13 +219,7 @@ describe('EventOrchestratorService', () => {
   });
 
   it('triggers incremental context build when merged PR arrives', async () => {
-    const orchestrator = new EventOrchestratorService({
-      pubsub: mockPubSub,
-      prRepository: mockPrRepo,
-      contextRepository: mockContextRepo,
-      envService: testEnvService,
-      agentService: mockAgentService,
-    });
+    const orchestrator = createTestOrchestrator();
 
     const req = {
       $typeName: 'core.v1.IngestPREventRequest',
@@ -247,13 +262,7 @@ describe('EventOrchestratorService', () => {
   });
 
   it('publishes review results to REVIEW_RESULTS_TOPIC when review results arrive', async () => {
-    const orchestrator = new EventOrchestratorService({
-      pubsub: mockPubSub,
-      prRepository: mockPrRepo,
-      contextRepository: mockContextRepo,
-      envService: testEnvService,
-      agentService: mockAgentService,
-    });
+    const orchestrator = createTestOrchestrator();
 
     await orchestrator.handleReviewResults({
       provider: 'github',
@@ -308,12 +317,7 @@ describe('EventOrchestratorService', () => {
       getRepoTarball: vi.fn(),
     };
 
-    const orchestratorWithAdapter = new EventOrchestratorService({
-      envService: testEnvService,
-      prRepository: mockPrRepo,
-      contextRepository: mockContextRepo,
-      pubsub: mockPubSub,
-      agentService: mockAgentService,
+    const orchestratorWithAdapter = createTestOrchestrator({
       gitAdapterClient: mockAdapterClient,
     });
 

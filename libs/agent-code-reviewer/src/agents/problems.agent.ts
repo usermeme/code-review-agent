@@ -1,8 +1,14 @@
-import { LlmAgent, type BaseTool, type ReadonlyContext } from '@google/adk';
+import {
+  type BaseLlm,
+  type BaseTool,
+  LlmAgent,
+  type ReadonlyContext,
+} from '@google/adk';
 import { z } from 'zod';
-import type { ReviewSkill } from '../skills/review.skill.js';
-import { findingsReportSchema } from '../schemas/review.schema.js';
+
 import { STATE } from '../constants/state-keys.constant.js';
+import { findingsReportSchema } from '../schemas/review.schema.js';
+import type { ReviewSkill } from '../skills/review.skill.js';
 
 const instruction =
   (skill: ReviewSkill) =>
@@ -63,7 +69,7 @@ Report uncertain findings too, with an honest "confidence" value (0.0 to 1.0) â€
 
 export interface CreateProblemsAgentPayload {
   skill: ReviewSkill;
-  model: string;
+  model: BaseLlm | string;
   tools?: BaseTool[];
 }
 
