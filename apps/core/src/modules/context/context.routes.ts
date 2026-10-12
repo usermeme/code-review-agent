@@ -1,3 +1,4 @@
+import type { EndpointPayloadRecord } from '@code-review-agent/endpoints';
 import { FastifyPluginAsync } from 'fastify';
 
 import { ContextRepository } from '../database/repositories/context.repository.js';
@@ -12,8 +13,12 @@ export const contextRoutes: FastifyPluginAsync<ContextRoutesOptions> = async (
 ) => {
   const { contextRepository } = options;
 
-  fastify.get('/:prKey', async (request, reply) => {
-    const { prKey } = request.params as { prKey: string };
+  fastify.get<{
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/context/:prKey']['Params']
+    >;
+  }>('/:prKey', async (request, reply) => {
+    const { prKey } = request.params;
     const context = await contextRepository.getContext(prKey);
 
     if (!context) {

@@ -33,6 +33,14 @@ export default defineConfig({
         __dirname,
         'libs/pubsub/src/index.ts',
       ),
+      '@code-review-agent/endpoints': path.resolve(
+        __dirname,
+        'libs/endpoints/src/index.ts',
+      ),
+      '@code-review-agent/enpoints': path.resolve(
+        __dirname,
+        'libs/endpoints/src/index.ts',
+      ),
     },
   },
   test: {

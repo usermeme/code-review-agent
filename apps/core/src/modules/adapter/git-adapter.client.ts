@@ -1,3 +1,4 @@
+import { ENDPOINTS, interpolatePath } from '@code-review-agent/endpoints';
 import type {
   CodeSearchResult,
   FileContentResult,
@@ -18,7 +19,10 @@ export class GitAdapterClient implements GitAdapterContract {
     repo: string,
     prNumber: number,
   ): Promise<PRDiffResult> {
-    const url = `${this.baseUrl}/api/v1/repos/${owner}/${repo}/pulls/${prNumber}/diff`;
+    const path = interpolatePath(ENDPOINTS.PR_DIFF, {
+      Path: { owner, repo, prNumber },
+    });
+    const url = `${this.baseUrl}${path}`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(
@@ -33,7 +37,10 @@ export class GitAdapterClient implements GitAdapterContract {
     repo: string,
     prNumber: number,
   ): Promise<PRFile[]> {
-    const url = `${this.baseUrl}/api/v1/repos/${owner}/${repo}/pulls/${prNumber}/files`;
+    const path = interpolatePath(ENDPOINTS.PR_FILES, {
+      Path: { owner, repo, prNumber },
+    });
+    const url = `${this.baseUrl}${path}`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(
@@ -48,7 +55,11 @@ export class GitAdapterClient implements GitAdapterContract {
     repo: string,
     query: string,
   ): Promise<CodeSearchResult> {
-    const url = `${this.baseUrl}/api/v1/repos/${owner}/${repo}/search?q=${encodeURIComponent(query)}`;
+    const path = interpolatePath(ENDPOINTS.SEARCH_CODE, {
+      Path: { owner, repo },
+      Query: { q: query },
+    });
+    const url = `${this.baseUrl}${path}`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(
@@ -64,8 +75,11 @@ export class GitAdapterClient implements GitAdapterContract {
     path: string,
     ref?: string,
   ): Promise<FileContentResult> {
-    const query = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-    const url = `${this.baseUrl}/api/v1/repos/${owner}/${repo}/files/${path}${query}`;
+    const interpolated = interpolatePath(ENDPOINTS.FILE_CONTENT, {
+      Path: { owner, repo, path },
+      Query: ref ? { ref } : undefined,
+    });
+    const url = `${this.baseUrl}${interpolated}`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(
@@ -80,8 +94,11 @@ export class GitAdapterClient implements GitAdapterContract {
     repo: string,
     ref?: string,
   ): Promise<Response> {
-    const query = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-    const url = `${this.baseUrl}/api/v1/repos/${owner}/${repo}/tarball${query}`;
+    const path = interpolatePath(ENDPOINTS.TARBALL, {
+      Path: { owner, repo },
+      Query: ref ? { ref } : undefined,
+    });
+    const url = `${this.baseUrl}${path}`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error(

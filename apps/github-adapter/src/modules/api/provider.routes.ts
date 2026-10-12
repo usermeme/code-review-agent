@@ -1,5 +1,6 @@
 import { Readable } from 'node:stream';
 
+import type { EndpointPayloadRecord } from '@code-review-agent/endpoints';
 import { FastifyPluginAsync } from 'fastify';
 
 import { GithubService } from '../github/github.service.js';
@@ -16,7 +17,9 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
 
   // 1. Fetch PR Diff & Changed Files
   fastify.get<{
-    Params: { owner: string; repo: string; number: string };
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/pulls/:number/diff']['Params']
+    >;
   }>('/repos/:owner/:repo/pulls/:number/diff', async (request, reply) => {
     const { owner, repo, number } = request.params;
     const prNumber = parseInt(number, 10);
@@ -35,7 +38,9 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
 
   // 2. Fetch PR Files with Content
   fastify.get<{
-    Params: { owner: string; repo: string; number: string };
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/pulls/:number/files']['Params']
+    >;
   }>('/repos/:owner/:repo/pulls/:number/files', async (request, reply) => {
     const { owner, repo, number } = request.params;
     const prNumber = parseInt(number, 10);
@@ -54,8 +59,12 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
 
   // 3. Search Code in Repository
   fastify.get<{
-    Params: { owner: string; repo: string };
-    Querystring: { q?: string };
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/search']['Params']
+    >;
+    Querystring: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/search']['Query']
+    >;
   }>('/repos/:owner/:repo/search', async (request, reply) => {
     const { owner, repo } = request.params;
     const query = request.query.q;
@@ -74,8 +83,12 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
 
   // 4. Download Repository Tarball Archive
   fastify.get<{
-    Params: { owner: string; repo: string };
-    Querystring: { ref?: string };
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/tarball']['Params']
+    >;
+    Querystring: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/tarball']['Query']
+    >;
   }>('/repos/:owner/:repo/tarball', async (request, reply) => {
     const { owner, repo } = request.params;
     const ref = request.query.ref;
@@ -112,8 +125,12 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
 
   // 5. Get File Content
   fastify.get<{
-    Params: { owner: string; repo: string; '*': string };
-    Querystring: { ref?: string };
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/files/:path']['Params']
+    >;
+    Querystring: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/files/:path']['Query']
+    >;
   }>('/repos/:owner/:repo/files/*', async (request, reply) => {
     const { owner, repo } = request.params;
     const path = request.params['*'];
