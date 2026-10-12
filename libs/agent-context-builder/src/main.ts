@@ -34,7 +34,6 @@ export interface BuildContextOptions {
 export async function buildContext(
   options: BuildContextOptions,
 ): Promise<Record<string, string>> {
-  const llm = options.llm;
   let resultSections: Record<string, string> = {};
 
   const storeContext = createStoreContextTool({
@@ -49,13 +48,13 @@ export async function buildContext(
   const tools = {
     fetchContext: createFetchContextTool(options.contextLoader),
     prepareRepo: createPrepareRepoTool({ gitAdapter: options.gitAdapter }),
-    summarizeChunks: createSummarizeRepoTool({ llm }),
-    synthesizeContext: createSynthesizeContextTool({ llm }),
+    summarizeChunks: createSummarizeRepoTool({ llm: options.llm }),
+    synthesizeContext: createSynthesizeContextTool({ llm: options.llm }),
     storeContext,
   };
 
   const agent = createContextOrchestrator({
-    llm,
+    llm: options.llm,
     tools,
   });
 
