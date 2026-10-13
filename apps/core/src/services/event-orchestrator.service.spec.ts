@@ -1,3 +1,4 @@
+import { ReviewNotSubmittedError } from '@code-review-agent/agent-code-reviewer';
 import { EnvService } from '@code-review-agent/env';
 import type {
   GitAdapterContract,
@@ -171,13 +172,31 @@ describe('EventOrchestratorService', () => {
       expect(mockAgentService.buildRepoContext).not.toHaveBeenCalled();
       expect(mockAgentService.runReview).toHaveBeenCalledWith(
         expect.objectContaining({
-          prMeta: expect.objectContaining({ number: 42 }),
-        }),
-        expect.objectContaining({
-          baselineContext: expect.objectContaining({
-            architecture: 'microservices',
+          prMeta: expect.objectContaining({
+            owner: 'test-org',
+            number: 42,
+            baseRef: 'develop',
           }),
+          context: BASELINE,
         }),
+      );
+    });
+
+    it('marks the PR failed, without retrying, when the reviewer submits nothing', async () => {
+      mockContextRepo.get.mockResolvedValue(BASELINE);
+      mockAgentService.runReview.mockRejectedValue(
+        new ReviewNotSubmittedError('github:test-org:test-repo:42'),
+      );
+
+      const res = await createTestOrchestrator().ingestPREvent(
+        prEvent('opened'),
+      );
+
+      expect(res).toMatchObject({ success: false, status: 'failed' });
+      expect(publishedMessages).toHaveLength(0);
+      expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({ status: 'failed' }),
       );
     });
 
@@ -199,7 +218,6 @@ describe('EventOrchestratorService', () => {
           diff: 'fetched-diff-content',
           changedFiles: 'fetched-file.ts',
         }),
-        expect.any(Object),
       );
     });
   });

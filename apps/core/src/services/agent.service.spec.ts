@@ -54,6 +54,8 @@ describe('AgentService', () => {
   it('passes its own dependencies to runReview', async () => {
     const input = {
       prMeta: {
+        provider: 'github',
+        owner: 'test-org',
         repo: 'test-repo',
         number: 42,
         title: 't',
@@ -61,9 +63,10 @@ describe('AgentService', () => {
         branch: 'b',
       },
       diff: 'diff',
+      context: null,
     };
 
-    await service.runReview(input, {});
+    await service.runReview(input);
 
     expect(runReview).toHaveBeenCalledWith(input, { llm, gitAdapter });
   });

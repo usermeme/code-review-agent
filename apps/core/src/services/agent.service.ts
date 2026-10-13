@@ -1,7 +1,6 @@
 import {
   type ReviewExecutionInput,
   runReview,
-  type RunReviewOptions,
 } from '@code-review-agent/agent-code-reviewer';
 import {
   buildRepoContext,
@@ -31,11 +30,8 @@ export class AgentService {
     return buildRepoContext(input, { ...this.deps, logger });
   }
 
-  async runReview(
-    input: ReviewExecutionInput,
-    options: Omit<RunReviewOptions, 'llm' | 'gitAdapter'>,
-  ): Promise<ReviewResultPayload> {
-    return runReview(input, { ...options, ...this.deps });
+  async runReview(input: ReviewExecutionInput): Promise<ReviewResultPayload> {
+    return runReview(input, this.deps);
   }
 }
 

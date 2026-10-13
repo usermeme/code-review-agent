@@ -1,3 +1,4 @@
+import { ReviewNotSubmittedError } from '@code-review-agent/agent-code-reviewer';
 import {
   IngestPREventRequest,
   IngestPREventResponse,
@@ -5,6 +6,7 @@ import {
 import {
   GitAdapterContract,
   PREventPayload,
+  type PRMeta,
   type RepoContext,
   type RepoRef,
   ReviewResultPayload,
@@ -19,6 +21,14 @@ import { GitAdapterClient } from '../modules/adapter/git-adapter.client.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import type { AgentRunner } from './agent.service.js';
+
+interface PullRequestToReview {
+  repoRef: RepoRef;
+  prNumber: number;
+  meta: Pick<PRMeta, 'title' | 'author' | 'branch' | 'body' | 'baseRef'>;
+  diff: string;
+  changedFiles: string[];
+}
 
 export interface EventOrchestratorDependencies {
   envService: CoreEnvService;
@@ -110,52 +120,17 @@ export class EventOrchestratorService {
         (await this.contextRepository.get(toRepoKey(repoRef))) ??
         (await this.buildBaseline(repoRef, meta.baseRef, logger));
 
-      // Run review in-process
-      logger?.info(
-        `[Core] Baseline context ready. Running review for ${prKey} in-process.`,
-      );
-      await this.prRepository.updatePRStatus(prKey, {
-        provider,
-        owner,
-        repo,
-        prNumber,
-        status: 'reviewing',
-        diff,
-        changedFiles,
-      });
-
-      const changedFilesStr = Array.isArray(changedFiles)
-        ? changedFiles.join('\n')
-        : (changedFiles ?? '');
-
-      const reviewResult = await this.agentService.runReview(
+      return this.reviewPullRequest(
         {
-          prMeta: {
-            provider,
-            owner,
-            repo,
-            number: prNumber,
-            title: meta.title,
-            author: meta.author,
-            branch: meta.branch,
-            body: meta.body,
-          },
+          repoRef,
+          prNumber,
+          meta,
           diff,
-          changedFiles: changedFilesStr,
-          tickets: [],
+          changedFiles: Array.isArray(changedFiles) ? changedFiles : [],
         },
-        {
-          baselineContext: toReviewerContext(context),
-        },
+        context,
+        logger,
       );
-
-      await this.handleReviewResults(reviewResult, logger);
-
-      return {
-        success: true,
-        status: 'reviewing',
-        message: 'Review completed and results published',
-      } as IngestPREventResponse;
     }
 
     return {
@@ -190,6 +165,54 @@ export class EventOrchestratorService {
       });
       throw error;
     }
+  }
+
+  private async reviewPullRequest(
+    pr: PullRequestToReview,
+    context: RepoContext | null,
+    logger?: FastifyBaseLogger,
+  ): Promise<IngestPREventResponse> {
+    const { repoRef, prNumber, meta } = pr;
+    const prKey = toPrKey(repoRef, prNumber);
+    logger?.info(`[Core] Running review for ${prKey}.`);
+    await this.prRepository.updatePRStatus(prKey, {
+      ...repoRef,
+      prNumber,
+      status: 'reviewing',
+      diff: pr.diff,
+      changedFiles: pr.changedFiles,
+    });
+
+    try {
+      const reviewResult = await this.agentService.runReview({
+        prMeta: { ...repoRef, number: prNumber, ...meta },
+        diff: pr.diff,
+        changedFiles: pr.changedFiles.join('\n'),
+        tickets: [],
+        context,
+      });
+      await this.handleReviewResults(reviewResult, logger);
+    } catch (error) {
+      if (!(error instanceof ReviewNotSubmittedError)) throw error;
+      // Not retryable: a redelivery would pay for another full review that
+      // fails the same way. Record it and acknowledge the message.
+      logger?.error(`[Core] ${error.message}`);
+      await this.prRepository.updatePRStatus(prKey, {
+        status: 'failed',
+        error: error.message,
+      });
+      return {
+        success: false,
+        status: 'failed',
+        message: error.message,
+      } as IngestPREventResponse;
+    }
+
+    return {
+      success: true,
+      status: 'reviewing',
+      message: 'Review completed and results published',
+    } as IngestPREventResponse;
   }
 
   /**
@@ -266,14 +289,4 @@ export class EventOrchestratorService {
       json: payload,
     });
   }
-}
-
-/** Shape the reviewer's getRepoContext tool currently reads. */
-function toReviewerContext(context: RepoContext): Record<string, string> {
-  return {
-    ...context.sections,
-    agentDocs: context.agentDocs
-      .map((doc) => `### ${doc.path}\n\n${doc.content}`)
-      .join('\n\n---\n\n'),
-  };
 }
