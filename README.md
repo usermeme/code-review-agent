@@ -82,7 +82,7 @@ code-review-agent/
 │   ├── core/                   # Domain logic, Firestore persistence & in-process ADK orchestration
 │   └── core-e2e/               # Cucumber/Gherkin BDD integration tests for Core
 ├── libs/
-│   ├── agent-context-builder/  # ADK agent library for repo indexing & baseline context
+│   ├── agent-context-builder/  # Deterministic pipeline building & updating repo context (LLM summarize + synthesize)
 │   ├── agent-code-reviewer/    # ADK agent library for diff review & inline findings
 │   ├── pubsub/                 # Abstract Pub/Sub consumer & push envelope parsing utilities
 │   ├── env/                    # Type-safe environment manager with eager Zod schema validation
