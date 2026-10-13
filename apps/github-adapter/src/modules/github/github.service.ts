@@ -265,21 +265,34 @@ export class GithubService implements GitAdapterContract {
     // Post inline comments if commit_id is available
     if (commit_id && comments && comments.length > 0) {
       for (const comment of comments) {
+        const base = {
+          owner,
+          repo,
+          pull_number: prNumber,
+          body: comment.body,
+          path: comment.path,
+          line: comment.line,
+          side: 'RIGHT' as const,
+          commit_id,
+        };
+        const isRange =
+          comment.startLine !== undefined && comment.startLine < comment.line;
         try {
-          await this.octokitClient.rest.pulls.createReviewComment({
-            owner,
-            repo,
-            pull_number: prNumber,
-            body: comment.body,
-            path: comment.path,
-            line: comment.line,
-            side: 'RIGHT',
-            ...(comment.startLine && comment.startLine < comment.line
-              ? { start_line: comment.startLine, start_side: 'RIGHT' as const }
-              : {}),
-            commit_id,
-          });
+          await this.octokitClient.rest.pulls.createReviewComment(
+            isRange
+              ? { ...base, start_line: comment.startLine, start_side: 'RIGHT' }
+              : base,
+          );
         } catch (error) {
+          if (isRange) {
+            // GitHub rejects ranges that span hunks; anchor to the last line instead.
+            try {
+              await this.octokitClient.rest.pulls.createReviewComment(base);
+              continue;
+            } catch {
+              // fall through to the log below
+            }
+          }
           console.error(
             `Failed to post comment to ${comment.path}:${comment.line}`,
             error,

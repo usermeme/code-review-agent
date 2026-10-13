@@ -175,6 +175,33 @@ describe('GithubService (Adapter)', () => {
     );
   });
 
+  it('falls back to a single-line comment when GitHub rejects a line range', async () => {
+    mockOctokit.rest.pulls.get.mockResolvedValue({
+      data: { head: { sha: 'sha1' } },
+    });
+    mockOctokit.rest.pulls.createReview.mockResolvedValue({ data: { id: 1 } });
+    mockOctokit.rest.pulls.createReviewComment
+      .mockRejectedValueOnce(new Error('422 line range spans hunks'))
+      .mockResolvedValueOnce({});
+
+    await service.postReview({
+      owner: 'owner',
+      repo: 'repo',
+      prNumber: 1,
+      summary: 'summary',
+      comments: [{ path: 'a.ts', line: 12, startLine: 3, body: 'issue' }],
+    });
+
+    expect(mockOctokit.rest.pulls.createReviewComment).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ start_line: 3, line: 12 }),
+    );
+    expect(mockOctokit.rest.pulls.createReviewComment).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ start_line: expect.anything() }),
+    );
+    expect(mockOctokit.rest.pulls.createReviewComment).toHaveBeenCalledTimes(2);
+  });
+
   it('downloads repo tarball archive', async () => {
     const mockData = new Uint8Array([1, 2, 3]);
     mockOctokit.rest.repos.downloadTarballArchive.mockResolvedValue({
