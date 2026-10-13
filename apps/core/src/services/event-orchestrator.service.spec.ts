@@ -350,6 +350,29 @@ describe('EventOrchestratorService', () => {
       );
     });
 
+    it('hands a parked PR back for retry when its review fails transiently', async () => {
+      mockContextRepo.get.mockResolvedValue(BASELINE);
+      mockAgentService.runReview.mockRejectedValueOnce(new Error('Gemini 503'));
+      const orchestrator = createTestOrchestrator();
+
+      await expect(
+        orchestrator.handleContextBuildRequest(baselineJob),
+      ).rejects.toThrow('Gemini 503');
+      expect(mockPrRepo.updatePRStatus).toHaveBeenLastCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({ status: 'building_context' }),
+      );
+
+      await orchestrator.handleContextBuildRequest(baselineJob);
+
+      expect(mockPrRepo.claimPendingReview).toHaveBeenCalledTimes(2);
+      expect(mockAgentService.runReview).toHaveBeenCalledTimes(2);
+      expect(mockPrRepo.updatePRStatus).toHaveBeenLastCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({ status: 'completed' }),
+      );
+    });
+
     it('throws ContextBuildInProgressError without building when another instance holds the lease', async () => {
       mockLeaseRepo.tryAcquire.mockResolvedValue(false);
 

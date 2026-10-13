@@ -309,23 +309,33 @@ export class EventOrchestratorService {
       return;
     }
     const pending = await this.prRepository.getPRStatus(prKey);
-    await this.reviewPullRequest(
-      {
-        repoRef,
-        prNumber,
-        meta: {
-          title: pending?.prMeta?.title ?? '',
-          author: pending?.prMeta?.author ?? '',
-          branch: pending?.prMeta?.branch ?? '',
-          body: pending?.prMeta?.body,
-          baseRef: pending?.prMeta?.baseRef,
+    try {
+      await this.reviewPullRequest(
+        {
+          repoRef,
+          prNumber,
+          meta: {
+            title: pending?.prMeta?.title ?? '',
+            author: pending?.prMeta?.author ?? '',
+            branch: pending?.prMeta?.branch ?? '',
+            body: pending?.prMeta?.body,
+            baseRef: pending?.prMeta?.baseRef,
+          },
+          diff: pending?.diff ?? '',
+          changedFiles: pending?.changedFiles ?? [],
         },
-        diff: pending?.diff ?? '',
-        changedFiles: pending?.changedFiles ?? [],
-      },
-      context,
-      logger,
-    );
+        context,
+        logger,
+      );
+    } catch (error) {
+      // A transient failure (LLM 5xx, publish error) must stay retryable:
+      // hand the PR back so the redelivered job can claim it again.
+      await this.prRepository.updatePRStatus(prKey, {
+        status: 'building_context',
+        error: String(error),
+      });
+      throw error;
+    }
   }
 
   private async reviewPullRequest(
