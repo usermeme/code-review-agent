@@ -5,8 +5,8 @@ Feature: Adapter Pub/Sub Push Review Results
 
   Scenario: PubSub pushes review results to Adapter
     When PubSub pushes review results for "usermeme/test-repo" PR #50 with summary "Push review completed" and comments:
-      | path        | position | body                      |
-      | src/util.ts | 5        | Improve naming convention |
+      | path        | line | body                      |
+      | src/util.ts | 5    | Improve naming convention |
     Then the push request responds with HTTP 200
     And review summary is posted to GitHub PR #50 containing "Push review completed"
     And inline comment is posted to GitHub PR #50 at "src/util.ts" line 5

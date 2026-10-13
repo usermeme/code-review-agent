@@ -66,7 +66,8 @@ describe('publishReviewResultsTool', () => {
       comments: [
         {
           path: 'src/db.ts',
-          position: 12,
+          line: 12,
+          startLine: 10,
           body: '### [CRITICAL] SQL Injection Vulnerability\n\nUnsanitized user input concatenated into query string.\n\n```suggestion\ndb.query("SELECT * FROM users WHERE id = ?", [id])\n```',
         },
       ],

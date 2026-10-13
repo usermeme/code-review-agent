@@ -127,7 +127,7 @@ describe('EventOrchestratorService', () => {
         repo: 'test-repo',
         prNumber: 42,
         summary: 'Automated review passed',
-        comments: [{ path: 'src/main.ts', position: 5, body: 'Looks fine' }],
+        comments: [{ path: 'src/main.ts', line: 5, body: 'Looks fine' }],
       }),
     };
   });
@@ -259,7 +259,7 @@ describe('EventOrchestratorService', () => {
       repo: 'test-repo',
       prNumber: 42,
       summary: 'Looks great!',
-      comments: [{ path: 'src/file.ts', position: 10, body: 'Refactor' }],
+      comments: [{ path: 'src/file.ts', line: 10, body: 'Refactor' }],
     });
 
     expect(publishedMessages).toEqual([

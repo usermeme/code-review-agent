@@ -259,12 +259,16 @@ export class GithubService implements GitAdapterContract {
             pull_number: prNumber,
             body: comment.body,
             path: comment.path,
-            line: comment.position,
+            line: comment.line,
+            side: 'RIGHT',
+            ...(comment.startLine && comment.startLine < comment.line
+              ? { start_line: comment.startLine, start_side: 'RIGHT' as const }
+              : {}),
             commit_id,
           });
         } catch (error) {
           console.error(
-            `Failed to post comment to ${comment.path}:${comment.position}`,
+            `Failed to post comment to ${comment.path}:${comment.line}`,
             error,
           );
         }

@@ -80,7 +80,7 @@ export class CoreWorld extends World {
             comments: [
               {
                 path: 'src/main.ts',
-                position: 1,
+                line: 1,
                 body: 'Automated inline review comment',
               },
             ],

@@ -75,7 +75,8 @@ export function createPublishReviewResultsTool(
         }
         return {
           path: f.path,
-          position: f.endLine || f.startLine || 1,
+          line: f.endLine,
+          ...(f.startLine < f.endLine ? { startLine: f.startLine } : {}),
           body: commentBody,
         };
       });

@@ -32,7 +32,7 @@ describe('reviewResultsPushRoutes', () => {
     comments: [
       {
         path: 'src/main.ts',
-        position: 10,
+        line: 10,
         body: 'Consider extracting this logic.',
       },
     ],
@@ -66,7 +66,7 @@ describe('reviewResultsPushRoutes', () => {
       comments: [
         {
           path: 'src/main.ts',
-          position: 10,
+          line: 10,
           body: 'Consider extracting this logic.',
         },
       ],

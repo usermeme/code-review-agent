@@ -5,6 +5,7 @@ import type {
   GitAdapterContract,
   PRDiffResult,
   PRFile,
+  ReviewCommentPayload,
 } from '@code-review-agent/shared-types';
 
 export type {
@@ -22,7 +23,7 @@ export interface PostReviewOptions {
   prNumber: number;
   summary?: string;
   ticketCoverage?: string;
-  comments: { path: string; position?: number; line?: number; body: string }[];
+  comments: ReviewCommentPayload[];
 }
 
 export interface PostReviewResult {

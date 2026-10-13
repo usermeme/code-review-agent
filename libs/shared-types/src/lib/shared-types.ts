@@ -96,8 +96,10 @@ export interface PREventPayload {
 
 export interface ReviewCommentPayload {
   path: string;
-  position?: number;
-  line?: number;
+  /** Line on the new side of the diff the comment anchors to (the range end). */
+  line: number;
+  /** First line of a multi-line range; omitted for single-line comments. */
+  startLine?: number;
   body: string;
 }
 
