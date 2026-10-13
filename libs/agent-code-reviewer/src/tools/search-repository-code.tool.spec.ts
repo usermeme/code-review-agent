@@ -23,9 +23,11 @@ describe('searchRepositoryCode tool', () => {
     } as unknown as GitAdapterContract;
 
     const tool = createSearchRepositoryCodeTool({
-      gitAdapter: mockGitAdapter,
-      defaultOwner: 'test-owner',
-      defaultRepo: 'test-repo',
+      scope: {
+        gitAdapter: mockGitAdapter,
+        owner: 'test-owner',
+        repo: 'test-repo',
+      },
     });
 
     const result = (await tool.execute(
@@ -42,18 +44,26 @@ describe('searchRepositoryCode tool', () => {
     expect(result.items).toHaveLength(2);
   });
 
-  it('handles missing gitAdapter gracefully', async () => {
+  it('only searches the PR repository, whatever the model passes', async () => {
+    const searchCode = vi.fn().mockResolvedValue({ totalCount: 0, items: [] });
     const tool = createSearchRepositoryCodeTool({
-      defaultOwner: 'test-owner',
-      defaultRepo: 'test-repo',
+      scope: {
+        gitAdapter: { searchCode } as unknown as GitAdapterContract,
+        owner: 'test-owner',
+        repo: 'test-repo',
+      },
     });
 
-    const result = (await tool.execute(
-      { query: 'test' },
+    await tool.execute(
+      { query: 'secret', owner: 'other-org', repo: 'private' },
       undefined,
-    )) as SearchResult;
-    expect(result.totalCount).toBe(0);
-    expect(result.message).toContain('Git adapter is not configured');
+    );
+
+    expect(searchCode).toHaveBeenCalledWith(
+      'test-owner',
+      'test-repo',
+      'secret',
+    );
   });
 
   it('handles searchCode error gracefully', async () => {
@@ -63,9 +73,11 @@ describe('searchRepositoryCode tool', () => {
     } as unknown as GitAdapterContract;
 
     const tool = createSearchRepositoryCodeTool({
-      gitAdapter: mockGitAdapter,
-      defaultOwner: 'test-owner',
-      defaultRepo: 'test-repo',
+      scope: {
+        gitAdapter: mockGitAdapter,
+        owner: 'test-owner',
+        repo: 'test-repo',
+      },
     });
 
     const result = (await tool.execute(

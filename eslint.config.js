@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import nx from '@nx/eslint-plugin';
 import { defineConfig } from 'eslint/config';
 import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import tseslint from 'typescript-eslint';
@@ -54,6 +55,44 @@ export default defineConfig(
       '@typescript-eslint/no-floating-promises': [
         'error',
         { ignoreVoid: true },
+      ],
+    },
+  },
+  {
+    // Dependency direction between projects (tags live in each project.json):
+    // agents never import each other or apps, and shared/util libs stay leaves.
+    // e2e projects are exempt: they build the real app from its sources.
+    files: ['apps/**/*.ts', 'libs/**/*.ts'],
+    ignores: ['apps/*-e2e/**'],
+    plugins: { '@nx': nx },
+    rules: {
+      '@nx/enforce-module-boundaries': [
+        'error',
+        {
+          allow: [],
+          depConstraints: [
+            {
+              sourceTag: 'type:app',
+              onlyDependOnLibsWithTags: [
+                'type:agent',
+                'type:util',
+                'type:shared',
+              ],
+            },
+            {
+              sourceTag: 'type:agent',
+              onlyDependOnLibsWithTags: ['type:util', 'type:shared'],
+            },
+            {
+              sourceTag: 'type:util',
+              onlyDependOnLibsWithTags: ['type:util', 'type:shared'],
+            },
+            {
+              sourceTag: 'type:shared',
+              onlyDependOnLibsWithTags: ['type:shared'],
+            },
+          ],
+        },
       ],
     },
   },

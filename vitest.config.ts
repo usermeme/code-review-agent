@@ -37,10 +37,6 @@ export default defineConfig({
         __dirname,
         'libs/endpoints/src/index.ts',
       ),
-      '@code-review-agent/enpoints': path.resolve(
-        __dirname,
-        'libs/endpoints/src/index.ts',
-      ),
     },
   },
   test: {

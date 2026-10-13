@@ -1,8 +1,7 @@
-import type { GitAdapterContract } from '@code-review-agent/shared-types';
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
-import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
+import type { RepoScope } from './repo-scope.js';
 
 const BLOCKED_FILE_EXTENSIONS = [
   '.lock',
@@ -29,15 +28,14 @@ const MAX_LINES = 250;
 const MAX_CHARACTERS = 15_000;
 
 export interface FetchRepositoryFileToolDependencies {
-  gitAdapter?: GitAdapterContract;
-  defaultOwner?: string;
-  defaultRepo?: string;
+  scope: RepoScope;
   cache?: Map<string, string>;
 }
 
 export function createFetchRepositoryFileTool(
-  deps: FetchRepositoryFileToolDependencies = {},
+  deps: FetchRepositoryFileToolDependencies,
 ) {
+  const { gitAdapter, owner, repo } = deps.scope;
   const fileCache = deps.cache ?? new Map<string, string>();
 
   return new FunctionTool({
@@ -62,16 +60,11 @@ export function createFetchRepositoryFileTool(
         .string()
         .optional()
         .describe(
-          'Git ref, commit SHA, or branch (defaults to base or target branch)',
+          'Git ref, commit SHA, or branch (defaults to the PR head branch)',
         ),
-      owner: z.string().optional().describe('Repository owner'),
-      repo: z.string().optional().describe('Repository name'),
     }),
-    execute: async (input, ctx) => {
-      const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-      const owner = input.owner || meta?.owner || deps.defaultOwner || '';
-      const repo = input.repo || meta?.repo || deps.defaultRepo || '';
-      const ref = input.ref || meta?.branch;
+    execute: async (input) => {
+      const ref = input.ref || deps.scope.headRef;
 
       const lowerPath = input.path.toLowerCase();
       if (BLOCKED_FILE_EXTENSIONS.some((ext) => lowerPath.endsWith(ext))) {
@@ -80,24 +73,12 @@ export function createFetchRepositoryFileTool(
         };
       }
 
-      if (!deps.gitAdapter) {
-        return {
-          error: 'Git adapter is not configured for file retrieval.',
-        };
-      }
-
-      if (!owner || !repo) {
-        return {
-          error: 'Repository owner and name are required.',
-        };
-      }
-
       const cacheKey = `${owner}:${repo}:${ref || 'default'}:${input.path}`;
       let rawContent = fileCache.get(cacheKey);
 
       if (!rawContent) {
         try {
-          const fileResult = await deps.gitAdapter.getFileContent(
+          const fileResult = await gitAdapter.getFileContent(
             owner,
             repo,
             input.path,

@@ -5,10 +5,6 @@ import {
   EndpointPayload,
   EndpointPayloadRecord,
   ENDPOINTS,
-  EndointPayloadRecord,
-  Enpoint,
-  EnpointPayload,
-  EnpointPayloadRecord,
   interpolatePath,
 } from './endpoints.js';
 
@@ -146,8 +142,11 @@ describe('endpoints library', () => {
         '/api/v1/repos/:owner/:repo/files/:path',
       );
       expect(ENDPOINTS.TARBALL).toBe('/api/v1/repos/:owner/:repo/tarball');
-      expect(ENDPOINTS.CONTEXT).toBe('/api/v1/context/:prKey');
+      expect(ENDPOINTS.CONTEXT).toBe('/api/v1/context/:repoKey');
       expect(ENDPOINTS.PUBSUB_PR_EVENTS).toBe('/api/v1/pubsub/pr-events');
+      expect(ENDPOINTS.PUBSUB_CONTEXT_BUILDS).toBe(
+        '/api/v1/pubsub/context-builds',
+      );
       expect(ENDPOINTS.PUBSUB_REVIEW_RESULTS).toBe(
         '/api/v1/pubsub/review-results',
       );
@@ -156,12 +155,9 @@ describe('endpoints library', () => {
       expect(ENDPOINTS.LIVEZ).toBe('/livez');
     });
 
-    it('verifies type definitions and aliases', () => {
-      expectTypeOf<Enpoint>().toEqualTypeOf<Endpoint>();
+    it('verifies type definitions', () => {
       expectTypeOf<EndpointPayload>().toBeObject();
-      expectTypeOf<EnpointPayload>().toEqualTypeOf<EndpointPayload>();
-      expectTypeOf<EndointPayloadRecord>().toEqualTypeOf<EndpointPayloadRecord>();
-      expectTypeOf<EnpointPayloadRecord>().toEqualTypeOf<EndpointPayloadRecord>();
+      expectTypeOf<Endpoint>().toEqualTypeOf<keyof EndpointPayloadRecord>();
     });
   });
 });

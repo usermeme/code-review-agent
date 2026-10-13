@@ -17,14 +17,13 @@ export type DiscussionSearchFunction = (
 ) => Promise<DiscussionHit[]>;
 
 export interface GetDiscussionToolDependencies {
-  searchDiscussions?: DiscussionSearchFunction;
-  defaultRepo?: string;
+  searchDiscussions: DiscussionSearchFunction;
+  /** `owner/repo` of the PR under review; the model cannot pick another. */
+  repo: string;
   limit?: number;
 }
 
-export function createGetDiscussionTool(
-  deps: GetDiscussionToolDependencies = {},
-) {
+export function createGetDiscussionTool(deps: GetDiscussionToolDependencies) {
   const limit = deps.limit ?? 5;
 
   return new FunctionTool({
@@ -34,25 +33,14 @@ export function createGetDiscussionTool(
       'threads, and previously posted bot findings). Use it to check whether the team has already ' +
       'discussed, accepted, or rejected feedback similar to a candidate finding.',
     parameters: z.object({
-      repo: z
-        .string()
-        .optional()
-        .describe(
-          'The repository to search in (e.g. owner/repo). If not provided, relies on the Core default.',
-        ),
       query: z
         .string()
         .describe(
           'Natural-language description of the finding or topic to look up',
         ),
     }),
-    execute: async ({ repo: queryRepo, query }) => {
-      const targetRepo = queryRepo || deps.defaultRepo || '';
-      if (!deps.searchDiscussions) {
-        return [];
-      }
-
-      const hits = await deps.searchDiscussions(targetRepo, query, limit);
+    execute: async ({ query }) => {
+      const hits = await deps.searchDiscussions(deps.repo, query, limit);
       return hits.map((hit) => ({
         author: hit.author,
         source: hit.source,

@@ -14,7 +14,7 @@ The repository is organized as an **Nx Monorepo**:
 apps/
   gateway/                # Fastify gateway receiving git webhooks and orchestrating pipelines
   gateway-e2e/            # Cucumber / BDD end-to-end test suite for the gateway
-  agent-context-builder/  # Google ADK agent preparing codebase baseline and incremental context
+  agent-context-builder/  # Deterministic pipeline building baseline and incremental repo context
   agent-code-reviewer/    # Google ADK agent executing multi-agent code analysis and posting reviews
 libs/
   shared-types/           # Shared TypeScript interfaces (payload contracts, PR state, etc.)

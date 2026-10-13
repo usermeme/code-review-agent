@@ -1,34 +1,83 @@
-import { IngestPREventRequest } from '@code-review-agent/contracts';
+import { ReviewNotSubmittedError } from '@code-review-agent/agent-code-reviewer';
 import { EnvService } from '@code-review-agent/env';
-import { PREventPayload } from '@code-review-agent/shared-types';
+import type {
+  GitAdapterContract,
+  PREventPayload,
+  RepoContext,
+} from '@code-review-agent/shared-types';
 import { PubSub } from '@google-cloud/pubsub';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { coreEnvSchema, CoreEnvService } from '../env.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
+import { LeaseRepository } from '../modules/database/repositories/lease.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import { AgentService } from './agent.service.js';
 import {
+  ContextBuildInProgressError,
   EventOrchestratorDependencies,
   EventOrchestratorService,
 } from './event-orchestrator.service.js';
 
+const SECTIONS = {
+  architecture: 'In-process architecture',
+  modules: 'core, gateway',
+  patterns: 'repositories',
+  errorHandling: 'rethrow',
+};
+
+const BASELINE: RepoContext = {
+  repoKey: 'github:test-org:test-repo',
+  sections: { ...SECTIONS, architecture: 'microservices' },
+  agentDocs: [{ path: 'AGENTS.md', content: 'Use pnpm.' }],
+  updatedAt: new Date('2026-01-01'),
+};
+
+function prEvent(
+  action: string,
+  overrides: Partial<PREventPayload['prMeta']> = {},
+  diff = 'diff --git a/file.ts ...',
+): PREventPayload {
+  return {
+    prMeta: {
+      provider: 'github',
+      owner: 'test-org',
+      repo: 'test-repo',
+      prNumber: 42,
+      title: 'Feature X',
+      author: 'developer',
+      branch: 'feat/x',
+      body: 'Details',
+      htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+      baseRef: 'develop',
+      action,
+      isIncrementalUpdate: action === 'closed',
+      ...overrides,
+    },
+    diff,
+    changedFiles: diff ? ['file.ts'] : [],
+  };
+}
+
 describe('EventOrchestratorService', () => {
+  let testEnvService: CoreEnvService;
+  let publishedMessages: { topic: string; data: Record<string, unknown> }[];
   let mockPubSub: { topic: ReturnType<typeof vi.fn> };
   let mockPrRepo: {
     updatePRStatus: ReturnType<typeof vi.fn>;
     getPRStatus: ReturnType<typeof vi.fn>;
+    claimPendingReview: ReturnType<typeof vi.fn>;
+  };
+  let mockLeaseRepo: {
+    tryAcquire: ReturnType<typeof vi.fn>;
+    release: ReturnType<typeof vi.fn>;
   };
   let mockContextRepo: {
-    getContext: ReturnType<typeof vi.fn>;
-    saveContext: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
+    save: ReturnType<typeof vi.fn>;
   };
-  let testEnvService: CoreEnvService;
-  let publishedMessages: { topic: string; data: Record<string, unknown> }[];
-  let mockBuildContext: ReturnType<typeof vi.fn>;
-  let mockRunReview: ReturnType<typeof vi.fn>;
   let mockAgentService: {
-    buildContext: ReturnType<typeof vi.fn>;
+    buildRepoContext: ReturnType<typeof vi.fn>;
     runReview: ReturnType<typeof vi.fn>;
   };
 
@@ -39,6 +88,7 @@ describe('EventOrchestratorService', () => {
       envService: testEnvService,
       prRepository: mockPrRepo as unknown as PrRepository,
       contextRepository: mockContextRepo as unknown as ContextRepository,
+      leaseRepository: mockLeaseRepo as unknown as LeaseRepository,
       pubsub: mockPubSub as unknown as PubSub,
       agentService: mockAgentService as unknown as AgentService,
       ...overrides,
@@ -50,6 +100,7 @@ describe('EventOrchestratorService', () => {
       HOST: '0.0.0.0',
       PORT: '8080',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
+      CONTEXT_BUILD_TOPIC: 'test-context-builds',
       GIT_ADAPTER_URL: 'http://adapter:8080',
       LLM_PROVIDER: 'mock',
       REVIEW_MODEL: 'test-model',
@@ -66,291 +117,355 @@ describe('EventOrchestratorService', () => {
           ),
       })),
     };
-
     mockPrRepo = {
       updatePRStatus: vi.fn().mockResolvedValue(undefined),
       getPRStatus: vi.fn().mockResolvedValue(null),
+      claimPendingReview: vi.fn().mockResolvedValue(true),
     };
-
+    mockLeaseRepo = {
+      tryAcquire: vi.fn().mockResolvedValue(true),
+      release: vi.fn().mockResolvedValue(undefined),
+    };
     mockContextRepo = {
-      getContext: vi.fn().mockResolvedValue(null),
-      saveContext: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockResolvedValue(null),
+      save: vi.fn().mockResolvedValue(undefined),
     };
+    mockAgentService = {
+      buildRepoContext: vi.fn().mockResolvedValue({
+        sections: SECTIONS,
+        agentDocs: [],
+        headSha: 'abc123',
+      }),
+      runReview: vi.fn().mockResolvedValue({
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        prNumber: 42,
+        summary: 'Automated review passed',
+        comments: [{ path: 'src/main.ts', line: 5, body: 'Looks fine' }],
+      }),
+    };
+  });
 
-    mockBuildContext = vi.fn().mockResolvedValue({
-      architecture: 'In-process architecture',
-      modules: 'core, gateway',
+  const contextBuildMessages = () =>
+    publishedMessages.filter((m) => m.topic === 'test-context-builds');
+
+  describe('review actions', () => {
+    it('parks the PR and queues a baseline build when the repo has no context', async () => {
+      const res = await createTestOrchestrator().ingestPREvent(
+        prEvent('opened'),
+      );
+
+      expect(res).toMatchObject({ success: true, status: 'queued' });
+      expect(mockAgentService.buildRepoContext).not.toHaveBeenCalled();
+      expect(mockAgentService.runReview).not.toHaveBeenCalled();
+      expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({
+          status: 'building_context',
+          diff: 'diff --git a/file.ts ...',
+          prMeta: expect.objectContaining({
+            title: 'Feature X',
+            baseRef: 'develop',
+          }),
+        }),
+      );
+      expect(contextBuildMessages()).toEqual([
+        {
+          topic: 'test-context-builds',
+          data: {
+            provider: 'github',
+            owner: 'test-org',
+            repo: 'test-repo',
+            mode: 'baseline',
+            ref: 'develop',
+            pendingPrNumber: 42,
+          },
+        },
+      ]);
     });
 
-    mockRunReview = vi.fn().mockResolvedValue({
+    it('reviews right away with the stored baseline', async () => {
+      mockContextRepo.get.mockResolvedValue(BASELINE);
+
+      const res = await createTestOrchestrator().ingestPREvent(
+        prEvent('opened'),
+      );
+
+      expect(res).toMatchObject({ success: true, status: 'reviewing' });
+      expect(contextBuildMessages()).toHaveLength(0);
+      expect(mockAgentService.runReview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prMeta: expect.objectContaining({
+            owner: 'test-org',
+            number: 42,
+            baseRef: 'develop',
+          }),
+          context: BASELINE,
+        }),
+      );
+      expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({ status: 'completed' }),
+      );
+    });
+
+    it('marks the PR failed, without retrying, when the reviewer submits nothing', async () => {
+      mockContextRepo.get.mockResolvedValue(BASELINE);
+      mockAgentService.runReview.mockRejectedValue(
+        new ReviewNotSubmittedError('github:test-org:test-repo:42'),
+      );
+
+      const res = await createTestOrchestrator().ingestPREvent(
+        prEvent('opened'),
+      );
+
+      expect(res).toMatchObject({ success: false, status: 'failed' });
+      expect(publishedMessages).toHaveLength(0);
+      expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({ status: 'failed' }),
+      );
+    });
+
+    it('fetches diff and changed files from the git adapter when the event has none', async () => {
+      mockContextRepo.get.mockResolvedValue(BASELINE);
+      const getPRDiff = vi.fn().mockResolvedValue({
+        diff: 'fetched-diff-content',
+        changedFiles: ['fetched-file.ts'],
+      });
+      const gitAdapterClient = { getPRDiff } as unknown as GitAdapterContract;
+
+      await createTestOrchestrator({ gitAdapterClient }).ingestPREvent(
+        prEvent('opened', {}, ''),
+      );
+
+      expect(getPRDiff).toHaveBeenCalledWith('test-org', 'test-repo', 42);
+      expect(mockAgentService.runReview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          diff: 'fetched-diff-content',
+          changedFiles: 'fetched-file.ts',
+        }),
+      );
+    });
+  });
+
+  describe('merged PRs', () => {
+    it('queues an incremental update when the repo has a baseline', async () => {
+      mockContextRepo.get.mockResolvedValue(BASELINE);
+
+      const res = await createTestOrchestrator().ingestPREvent(
+        prEvent('closed'),
+      );
+
+      expect(res).toMatchObject({ success: true, status: 'queued' });
+      expect(contextBuildMessages()).toEqual([
+        {
+          topic: 'test-context-builds',
+          data: {
+            provider: 'github',
+            owner: 'test-org',
+            repo: 'test-repo',
+            mode: 'incremental',
+            prNumber: 42,
+          },
+        },
+      ]);
+      expect(mockAgentService.buildRepoContext).not.toHaveBeenCalled();
+    });
+
+    it('ignores the merge when the repo has no baseline yet', async () => {
+      const res = await createTestOrchestrator().ingestPREvent(
+        prEvent('closed'),
+      );
+
+      expect(res).toMatchObject({ success: true, status: 'ignored' });
+      expect(contextBuildMessages()).toHaveLength(0);
+    });
+  });
+
+  describe('context build jobs', () => {
+    const baselineJob = {
       provider: 'github',
       owner: 'test-org',
       repo: 'test-repo',
-      prNumber: 42,
-      summary: 'Automated review passed',
-      comments: [
-        {
-          path: 'src/main.ts',
-          position: 5,
-          body: 'Code looks clean',
+      mode: 'baseline',
+      ref: 'develop',
+      pendingPrNumber: 42,
+    } as const;
+    const incrementalJob = {
+      provider: 'github',
+      owner: 'test-org',
+      repo: 'test-repo',
+      mode: 'incremental',
+      prNumber: 7,
+    } as const;
+
+    it('builds the baseline under the repo lease, then reviews the waiting PR', async () => {
+      mockPrRepo.getPRStatus.mockResolvedValue({
+        status: 'reviewing',
+        diff: 'stored-diff',
+        changedFiles: ['a.ts'],
+        prMeta: {
+          title: 'Feature X',
+          author: 'dev',
+          branch: 'feat/x',
+          baseRef: 'develop',
         },
-      ],
-    });
+      });
 
-    mockAgentService = {
-      buildContext: mockBuildContext,
-      runReview: mockRunReview,
-    };
-  });
+      await createTestOrchestrator().handleContextBuildRequest(baselineJob);
 
-  it('builds context and runs review in-process when baseline context is missing', async () => {
-    const orchestrator = createTestOrchestrator();
-
-    const req = {
-      $typeName: 'core.v1.IngestPREventRequest',
-      prMeta: {
-        $typeName: 'core.v1.PRMeta',
-        provider: 'github',
-        owner: 'test-org',
-        repo: 'test-repo',
-        prNumber: 42,
-        action: 'opened',
-        title: 'Feature X',
-        author: 'developer',
-        branch: 'feat/x',
-        body: 'Details',
-        htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
-        cloneUrl: 'https://github.com/test-org/test-repo.git',
-        baseRef: 'main',
-        isIncrementalUpdate: false,
-      },
-      diff: 'diff --git a/file.ts ...',
-      changedFiles: ['file.ts'],
-    } as unknown as IngestPREventRequest;
-
-    const res = await orchestrator.ingestPREvent(req);
-
-    expect(res.status).toBe('reviewing');
-    expect(res.success).toBe(true);
-    expect(mockBuildContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        owner: 'test-org',
-        repo: 'test-repo',
-        isIncrementalUpdate: false,
-      }),
-    );
-    expect(mockContextRepo.saveContext).toHaveBeenCalledWith(
-      'github:test-org:test-repo:0',
-      expect.objectContaining({
-        summary: expect.stringContaining('In-process architecture'),
-      }),
-    );
-    expect(mockRunReview).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prMeta: expect.objectContaining({
+      expect(mockLeaseRepo.tryAcquire).toHaveBeenCalledWith(
+        'context-build:github:test-org:test-repo',
+        expect.any(String),
+        expect.any(Number),
+      );
+      expect(mockAgentService.buildRepoContext).toHaveBeenCalledWith(
+        {
+          mode: 'baseline',
           owner: 'test-org',
           repo: 'test-repo',
-          number: 42,
+          ref: 'develop',
+        },
+        undefined,
+      );
+      expect(mockContextRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repoKey: 'github:test-org:test-repo',
+          headSha: 'abc123',
         }),
-      }),
-      expect.objectContaining({
-        baselineContext: expect.stringContaining('In-process architecture'),
-      }),
-    );
-    expect(publishedMessages).toHaveLength(1);
-    expect(publishedMessages[0].topic).toBe('test-review-results-topic');
-    expect(publishedMessages[0].data.prNumber).toBe(42);
-    expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
-      'github:test-org:test-repo:42',
-      expect.objectContaining({ status: 'completed' }),
-    );
-  });
-
-  it('triggers review directly in-process when baseline context exists', async () => {
-    mockContextRepo.getContext.mockResolvedValue({
-      prKey: 'github:test-org:test-repo:0',
-      summary: JSON.stringify({ architecture: 'microservices' }),
-      updatedAt: new Date(),
+      );
+      expect(mockLeaseRepo.release).toHaveBeenCalled();
+      expect(mockPrRepo.claimPendingReview).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42',
+      );
+      expect(mockAgentService.runReview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          diff: 'stored-diff',
+          changedFiles: 'a.ts',
+          prMeta: expect.objectContaining({ number: 42, title: 'Feature X' }),
+          context: expect.objectContaining({ sections: SECTIONS }),
+        }),
+      );
     });
 
-    const orchestrator = createTestOrchestrator();
+    it('hands a parked PR back for retry when its review fails transiently', async () => {
+      mockContextRepo.get.mockResolvedValue(BASELINE);
+      mockAgentService.runReview.mockRejectedValueOnce(new Error('Gemini 503'));
+      const orchestrator = createTestOrchestrator();
 
-    const req = {
-      $typeName: 'core.v1.IngestPREventRequest',
-      prMeta: {
-        $typeName: 'core.v1.PRMeta',
-        provider: 'github',
-        owner: 'test-org',
-        repo: 'test-repo',
-        prNumber: 42,
-        action: 'opened',
-        title: 'Feature X',
-        author: 'developer',
-        branch: 'feat/x',
-        body: 'Details',
-        htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
-        cloneUrl: '',
-        baseRef: 'main',
-        isIncrementalUpdate: false,
-      },
-      diff: 'diff --git a/file.ts ...',
-      changedFiles: ['file.ts'],
-    } as unknown as IngestPREventRequest;
+      await expect(
+        orchestrator.handleContextBuildRequest(baselineJob),
+      ).rejects.toThrow('Gemini 503');
+      expect(mockPrRepo.updatePRStatus).toHaveBeenLastCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({ status: 'building_context' }),
+      );
 
-    const res = await orchestrator.ingestPREvent(req);
+      await orchestrator.handleContextBuildRequest(baselineJob);
 
-    expect(res.status).toBe('reviewing');
-    expect(res.success).toBe(true);
-    expect(mockBuildContext).not.toHaveBeenCalled();
-    expect(mockRunReview).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prMeta: expect.objectContaining({ number: 42 }),
-      }),
-      expect.objectContaining({
-        baselineContext: expect.stringContaining('microservices'),
-      }),
-    );
-    expect(publishedMessages).toHaveLength(1);
-    expect(publishedMessages[0].topic).toBe('test-review-results-topic');
-    expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
-      'github:test-org:test-repo:42',
-      expect.objectContaining({ status: 'completed' }),
-    );
+      expect(mockPrRepo.claimPendingReview).toHaveBeenCalledTimes(2);
+      expect(mockAgentService.runReview).toHaveBeenCalledTimes(2);
+      expect(mockPrRepo.updatePRStatus).toHaveBeenLastCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({ status: 'completed' }),
+      );
+    });
+
+    it('throws ContextBuildInProgressError without building when another instance holds the lease', async () => {
+      mockLeaseRepo.tryAcquire.mockResolvedValue(false);
+
+      await expect(
+        createTestOrchestrator().handleContextBuildRequest(baselineJob),
+      ).rejects.toBeInstanceOf(ContextBuildInProgressError);
+      expect(mockAgentService.buildRepoContext).not.toHaveBeenCalled();
+      expect(mockLeaseRepo.release).not.toHaveBeenCalled();
+    });
+
+    it('releases the lease when the build fails', async () => {
+      mockAgentService.buildRepoContext.mockRejectedValue(
+        new Error('LLM down'),
+      );
+
+      await expect(
+        createTestOrchestrator().handleContextBuildRequest(baselineJob),
+      ).rejects.toThrow('LLM down');
+      expect(mockLeaseRepo.release).toHaveBeenCalled();
+      expect(mockAgentService.runReview).not.toHaveBeenCalled();
+    });
+
+    it('on redelivery reuses the saved baseline and does not review the PR twice', async () => {
+      mockContextRepo.get.mockResolvedValue(BASELINE);
+      mockPrRepo.claimPendingReview.mockResolvedValue(false);
+
+      await createTestOrchestrator().handleContextBuildRequest(baselineJob);
+
+      expect(mockAgentService.buildRepoContext).not.toHaveBeenCalled();
+      expect(mockAgentService.runReview).not.toHaveBeenCalled();
+    });
+
+    it('folds a merged PR into the baseline and records it', async () => {
+      mockContextRepo.get.mockResolvedValue(BASELINE);
+
+      await createTestOrchestrator().handleContextBuildRequest(incrementalJob);
+
+      expect(mockAgentService.buildRepoContext).toHaveBeenCalledWith(
+        {
+          mode: 'incremental',
+          owner: 'test-org',
+          repo: 'test-repo',
+          prNumber: 7,
+          existing: BASELINE,
+        },
+        undefined,
+      );
+      expect(mockContextRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ sections: SECTIONS, lastAppliedPrNumber: 7 }),
+      );
+    });
+
+    it('skips a merged PR that was already applied', async () => {
+      mockContextRepo.get.mockResolvedValue({
+        ...BASELINE,
+        lastAppliedPrNumber: 7,
+      });
+
+      await createTestOrchestrator().handleContextBuildRequest(incrementalJob);
+
+      expect(mockAgentService.buildRepoContext).not.toHaveBeenCalled();
+    });
+
+    it('acknowledges an incremental job whose baseline is gone instead of failing it', async () => {
+      await expect(
+        createTestOrchestrator().handleContextBuildRequest(incrementalJob),
+      ).resolves.toBeUndefined();
+      expect(mockAgentService.buildRepoContext).not.toHaveBeenCalled();
+    });
   });
 
-  it('triggers incremental context build when merged PR arrives', async () => {
-    const orchestrator = createTestOrchestrator();
-
-    const req = {
-      $typeName: 'core.v1.IngestPREventRequest',
-      prMeta: {
-        $typeName: 'core.v1.PRMeta',
-        provider: 'github',
-        owner: 'test-org',
-        repo: 'test-repo',
-        prNumber: 42,
-        action: 'closed',
-        title: 'Feature X',
-        author: 'developer',
-        branch: 'feat/x',
-        body: 'Details',
-        htmlUrl: '',
-        cloneUrl: '',
-        baseRef: 'main',
-        isIncrementalUpdate: true,
-      },
-      diff: '',
-      changedFiles: [],
-    } as unknown as IngestPREventRequest;
-
-    const res = await orchestrator.ingestPREvent(req);
-
-    expect(res.status).toBe('queued');
-    expect(mockBuildContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        isIncrementalUpdate: true,
-        prNumber: 42,
-      }),
-    );
-    expect(mockContextRepo.saveContext).toHaveBeenCalledWith(
-      'github:test-org:test-repo:0',
-      expect.objectContaining({
-        summary: expect.stringContaining('In-process architecture'),
-      }),
-    );
-    expect(mockRunReview).not.toHaveBeenCalled();
-  });
-
-  it('publishes review results to REVIEW_RESULTS_TOPIC when review results arrive', async () => {
-    const orchestrator = createTestOrchestrator();
-
-    await orchestrator.handleReviewResults({
+  it('publishes review results to REVIEW_RESULTS_TOPIC', async () => {
+    await createTestOrchestrator().handleReviewResults({
       provider: 'github',
       owner: 'test-org',
       repo: 'test-repo',
       prNumber: 42,
       summary: 'Looks great!',
-      ticketCoverage: 'All acceptance criteria met.',
-      comments: [
-        {
-          path: 'src/file.ts',
-          position: 10,
-          body: 'Consider refactoring this helper',
-        },
-      ],
+      comments: [{ path: 'src/file.ts', line: 10, body: 'Refactor' }],
     });
 
-    expect(publishedMessages).toHaveLength(1);
-    expect(publishedMessages[0].topic).toBe('test-review-results-topic');
-    expect(publishedMessages[0].data).toEqual(
-      expect.objectContaining({
-        provider: 'github',
-        owner: 'test-org',
-        repo: 'test-repo',
-        prNumber: 42,
-        summary: 'Looks great!',
-        ticketCoverage: 'All acceptance criteria met.',
-        comments: expect.arrayContaining([
-          expect.objectContaining({
-            path: 'src/file.ts',
-            position: 10,
-            body: 'Consider refactoring this helper',
-          }),
-        ]),
-      }),
-    );
+    expect(publishedMessages).toEqual([
+      {
+        topic: 'test-review-results-topic',
+        data: expect.objectContaining({
+          prNumber: 42,
+          summary: 'Looks great!',
+        }),
+      },
+    ]);
     expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
       'github:test-org:test-repo:42',
       expect.objectContaining({ status: 'completed' }),
-    );
-  });
-
-  it('fetches diff and changed files from gitAdapterClient when incoming diff is empty', async () => {
-    const mockAdapterClient = {
-      getPRDiff: vi.fn().mockResolvedValue({
-        diff: 'fetched-diff-content',
-        changedFiles: ['fetched-file.ts'],
-      }),
-      getPRFiles: vi.fn(),
-      searchCode: vi.fn(),
-      getFileContent: vi.fn(),
-      getRepoTarball: vi.fn(),
-    };
-
-    const orchestratorWithAdapter = createTestOrchestrator({
-      gitAdapterClient: mockAdapterClient,
-    });
-
-    const req: PREventPayload = {
-      prMeta: {
-        provider: 'github',
-        owner: 'test-org',
-        repo: 'test-repo',
-        prNumber: 42,
-        title: 'Feature PR',
-        author: 'developer',
-        branch: 'feat/test',
-        htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
-        action: 'opened',
-      },
-      diff: '',
-      changedFiles: [],
-    };
-
-    const result = await orchestratorWithAdapter.ingestPREvent(req);
-
-    expect(result.success).toBe(true);
-    expect(mockAdapterClient.getPRDiff).toHaveBeenCalledWith(
-      'test-org',
-      'test-repo',
-      42,
-    );
-    expect(mockRunReview).toHaveBeenCalledWith(
-      expect.objectContaining({
-        diff: 'fetched-diff-content',
-        changedFiles: 'fetched-file.ts',
-      }),
-      expect.any(Object),
     );
   });
 });

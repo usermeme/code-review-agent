@@ -10,13 +10,6 @@ export type EndpointPayload<
   Body?: TBody;
 };
 
-export type EnpointPayload<
-  TParams = Record<string, unknown>,
-  TPath = Record<string, string | number>,
-  TQuery = Record<string, unknown>,
-  TBody = unknown,
-> = EndpointPayload<TParams, TPath, TQuery, TBody>;
-
 export interface EndpointPayloadRecord {
   '/api/v1/repos/:owner/:repo/': {
     Path: {
@@ -117,12 +110,12 @@ export interface EndpointPayloadRecord {
   };
 
   // Core context lookup endpoint
-  '/api/v1/context/:prKey': {
+  '/api/v1/context/:repoKey': {
     Path: {
-      prKey: string;
+      repoKey: string;
     };
     Params?: {
-      prKey: string;
+      repoKey: string;
     };
   };
 
@@ -131,6 +124,9 @@ export interface EndpointPayloadRecord {
     Body?: unknown;
   };
   '/api/v1/pubsub/review-results': {
+    Body?: unknown;
+  };
+  '/api/v1/pubsub/context-builds': {
     Body?: unknown;
   };
 
@@ -144,11 +140,7 @@ export interface EndpointPayloadRecord {
   '/livez': Record<string, never>;
 }
 
-export type EndointPayloadRecord = EndpointPayloadRecord;
-export type EnpointPayloadRecord = EndpointPayloadRecord;
-
 export type Endpoint = keyof EndpointPayloadRecord;
-export type Enpoint = Endpoint;
 
 export const ENDPOINTS = {
   REPO_ROOT: '/api/v1/repos/:owner/:repo/',
@@ -159,9 +151,10 @@ export const ENDPOINTS = {
   SEARCH_CODE: '/api/v1/repos/:owner/:repo/search',
   FILE_CONTENT: '/api/v1/repos/:owner/:repo/files/:path',
   TARBALL: '/api/v1/repos/:owner/:repo/tarball',
-  CONTEXT: '/api/v1/context/:prKey',
+  CONTEXT: '/api/v1/context/:repoKey',
   PUBSUB_PR_EVENTS: '/api/v1/pubsub/pr-events',
   PUBSUB_REVIEW_RESULTS: '/api/v1/pubsub/review-results',
+  PUBSUB_CONTEXT_BUILDS: '/api/v1/pubsub/context-builds',
   WEBHOOKS: '/api/v1/webhooks',
   HEALTHZ: '/healthz',
   LIVEZ: '/livez',

@@ -17,17 +17,18 @@ export const STATE = {
   ctxAgentDocs: 'repoctx:agentDocs',
   repoRules: 'repo:rules',
   repoSkills: 'repo:skills',
-  reviewResult: 'review:result',
 } as const;
 
 export interface PrMeta {
-  provider?: string;
-  owner?: string;
+  provider: string;
+  owner: string;
   repo: string;
   number: number;
   title: string;
   body?: string;
+  /** PR head branch. */
   branch: string;
+  /** PR base branch. */
+  baseRef?: string;
   author: string;
-  headSha?: string;
 }

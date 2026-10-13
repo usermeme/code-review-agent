@@ -26,8 +26,7 @@
       ],
       "@code-review-agent/pubsub": ["./libs/pubsub/src/index.ts"],
       "@code-review-agent/llm": ["./libs/llm/src/index.ts"],
-      "@code-review-agent/endpoints": ["./libs/endpoints/src/index.ts"],
-      "@code-review-agent/enpoints": ["./libs/endpoints/src/index.ts"]
+      "@code-review-agent/endpoints": ["./libs/endpoints/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

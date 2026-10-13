@@ -29,12 +29,33 @@ export class GithubService implements GitAdapterContract {
     return this.octokit;
   }
 
+  /**
+   * All files of a PR. The endpoint pages at 100 and lists at most 3000
+   * files; a single call only returned the first 30, so larger PRs were
+   * silently cut short.
+   */
+  private async listAllPrFiles(owner: string, repo: string, prNumber: number) {
+    const perPage = 100;
+    const files = [];
+    for (let page = 1; ; page++) {
+      const { data } = await this.octokitClient.rest.pulls.listFiles({
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: perPage,
+        page,
+      });
+      files.push(...data);
+      if (data.length < perPage) return files;
+    }
+  }
+
   async getPRDiff(
     owner: string,
     repo: string,
     prNumber: number,
   ): Promise<PRDiffResult> {
-    const [diffResponse, filesResponse] = await Promise.all([
+    const [diffResponse, files] = await Promise.all([
       this.octokitClient.rest.pulls.get({
         owner,
         repo,
@@ -43,15 +64,11 @@ export class GithubService implements GitAdapterContract {
           format: 'diff',
         },
       }),
-      this.octokitClient.rest.pulls.listFiles({
-        owner,
-        repo,
-        pull_number: prNumber,
-      }),
+      this.listAllPrFiles(owner, repo, prNumber),
     ]);
 
     const diff = diffResponse.data as unknown as string;
-    const changedFiles = filesResponse.data.map((file) => file.filename);
+    const changedFiles = files.map((file) => file.filename);
 
     return {
       diff,
@@ -64,14 +81,10 @@ export class GithubService implements GitAdapterContract {
     repo: string,
     prNumber: number,
   ): Promise<PRFile[]> {
-    const filesResponse = await this.octokitClient.rest.pulls.listFiles({
-      owner,
-      repo,
-      pull_number: prNumber,
-    });
+    const files = await this.listAllPrFiles(owner, repo, prNumber);
 
     const results: PRFile[] = [];
-    for (const file of filesResponse.data) {
+    for (const file of files) {
       if (file.status === 'removed') {
         results.push({
           filename: file.filename,
@@ -252,19 +265,36 @@ export class GithubService implements GitAdapterContract {
     // Post inline comments if commit_id is available
     if (commit_id && comments && comments.length > 0) {
       for (const comment of comments) {
+        const base = {
+          owner,
+          repo,
+          pull_number: prNumber,
+          body: comment.body,
+          path: comment.path,
+          line: comment.line,
+          side: 'RIGHT' as const,
+          commit_id,
+        };
+        const isRange =
+          comment.startLine !== undefined && comment.startLine < comment.line;
         try {
-          await this.octokitClient.rest.pulls.createReviewComment({
-            owner,
-            repo,
-            pull_number: prNumber,
-            body: comment.body,
-            path: comment.path,
-            line: comment.position,
-            commit_id,
-          });
+          await this.octokitClient.rest.pulls.createReviewComment(
+            isRange
+              ? { ...base, start_line: comment.startLine, start_side: 'RIGHT' }
+              : base,
+          );
         } catch (error) {
+          if (isRange) {
+            // GitHub rejects ranges that span hunks; anchor to the last line instead.
+            try {
+              await this.octokitClient.rest.pulls.createReviewComment(base);
+              continue;
+            } catch {
+              // fall through to the log below
+            }
+          }
           console.error(
-            `Failed to post comment to ${comment.path}:${comment.position}`,
+            `Failed to post comment to ${comment.path}:${comment.line}`,
             error,
           );
         }

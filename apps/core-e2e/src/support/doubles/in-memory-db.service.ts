@@ -20,11 +20,15 @@ export class InMemoryDatabaseService implements DatabaseService {
       col = new Map();
       this.collections.set(collection, col);
     }
+    // Mirror Firestore's ignoreUndefinedProperties: undefined fields are skipped.
+    const defined = Object.fromEntries(
+      Object.entries(data).filter(([, value]) => value !== undefined),
+    );
     if (merge && col.has(docId)) {
       const existing = col.get(docId);
-      col.set(docId, { ...existing, ...data });
+      col.set(docId, { ...existing, ...defined });
     } else {
-      col.set(docId, { ...data });
+      col.set(docId, defined);
     }
   }
 
@@ -34,6 +38,20 @@ export class InMemoryDatabaseService implements DatabaseService {
       return null;
     }
     return col.get(docId) as T;
+  }
+
+  /** Atomic like Firestore's transaction: there is no await between read and write. */
+  async updateIf<T extends object>(
+    collection: string,
+    docId: string,
+    decide: (current: T | null) => Partial<T> | null,
+  ): Promise<boolean> {
+    const current = (this.collections.get(collection)?.get(docId) ??
+      null) as T | null;
+    const patch = decide(current);
+    if (!patch) return false;
+    await this.setDocument<T>(collection, docId, patch, true);
+    return true;
   }
 
   clear(): void {

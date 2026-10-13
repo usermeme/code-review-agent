@@ -7,11 +7,13 @@ import { CoreWorld } from '../support/world.js';
 
 let lastRpcResponse: IngestPREventResponse;
 
+const repoKeyOf = (repoFullName: string) =>
+  `github:${repoFullName.replace('/', ':')}`;
+
 Given(
   'repository {string} has no baseline context',
   async function (this: CoreWorld, repoFullName: string) {
-    const key = `github:${repoFullName.replace('/', ':')}:0`;
-    const doc = await this.contextRepository.getContext(key);
+    const doc = await this.contextRepository.get(repoKeyOf(repoFullName));
     assert.equal(doc, null);
   },
 );
@@ -19,9 +21,16 @@ Given(
 Given(
   'repository {string} has a baseline context with architecture {string}',
   async function (this: CoreWorld, repoFullName: string, architecture: string) {
-    const key = `github:${repoFullName.replace('/', ':')}:0`;
-    await this.contextRepository.saveContext(key, {
-      summary: JSON.stringify({ architecture }),
+    await this.contextRepository.save({
+      repoKey: repoKeyOf(repoFullName),
+      sections: {
+        architecture,
+        modules: 'modules',
+        patterns: 'patterns',
+        errorHandling: 'errors',
+      },
+      agentDocs: [],
+      updatedAt: new Date(),
     });
   },
 );
@@ -29,9 +38,26 @@ Given(
 Then(
   'repository {string} has a baseline context in the database',
   async function (this: CoreWorld, repoFullName: string) {
-    const key = `github:${repoFullName.replace('/', ':')}:0`;
-    const doc = await this.contextRepository.getContext(key);
+    const key = repoKeyOf(repoFullName);
+    const doc = await this.contextRepository.get(key);
     assert(doc !== null, `Expected baseline context for ${key} to exist in DB`);
+  },
+);
+
+Then(
+  'repository {string} still has no baseline context',
+  async function (this: CoreWorld, repoFullName: string) {
+    const doc = await this.contextRepository.get(repoKeyOf(repoFullName));
+    assert.equal(doc, null);
+  },
+);
+
+Then(
+  'the baseline context of {string} has merged PR #{int} applied',
+  async function (this: CoreWorld, repoFullName: string, prNumber: number) {
+    const doc = await this.contextRepository.get(repoKeyOf(repoFullName));
+    assert(doc !== null, 'Expected a baseline context');
+    assert.equal(doc.lastAppliedPrNumber, prNumber);
   },
 );
 
@@ -115,6 +141,14 @@ When(
         isIncrementalUpdate: false,
       },
     });
+  },
+);
+
+Then(
+  'the IngestPREvent RPC response status is {string}',
+  function (expectedStatus: string) {
+    assert(lastRpcResponse, 'No RPC response received');
+    assert.equal(lastRpcResponse.status, expectedStatus);
   },
 );
 

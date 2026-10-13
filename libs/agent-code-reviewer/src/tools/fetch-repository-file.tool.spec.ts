@@ -23,9 +23,11 @@ describe('fetchRepositoryFile tool', () => {
 
     const cache = new Map<string, string>();
     const tool = createFetchRepositoryFileTool({
-      gitAdapter: mockGitAdapter,
-      defaultOwner: 'test-owner',
-      defaultRepo: 'test-repo',
+      scope: {
+        gitAdapter: mockGitAdapter,
+        owner: 'test-owner',
+        repo: 'test-repo',
+      },
       cache,
     });
 
@@ -50,8 +52,11 @@ describe('fetchRepositoryFile tool', () => {
 
   it('blocks lockfiles and binary files', async () => {
     const tool = createFetchRepositoryFileTool({
-      defaultOwner: 'test-owner',
-      defaultRepo: 'test-repo',
+      scope: {
+        gitAdapter: {} as GitAdapterContract,
+        owner: 'test-owner',
+        repo: 'test-repo',
+      },
     });
 
     const result = (await tool.execute(
@@ -71,9 +76,11 @@ describe('fetchRepositoryFile tool', () => {
     } as unknown as GitAdapterContract;
 
     const tool = createFetchRepositoryFileTool({
-      gitAdapter: mockGitAdapter,
-      defaultOwner: 'test-owner',
-      defaultRepo: 'test-repo',
+      scope: {
+        gitAdapter: mockGitAdapter,
+        owner: 'test-owner',
+        repo: 'test-repo',
+      },
     });
 
     const result = (await tool.execute(

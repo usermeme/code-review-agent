@@ -50,9 +50,11 @@ More content...`;
     } as unknown as GitAdapterContract;
 
     const tool = createGetRepoGuidelinesTool({
-      gitAdapter: mockGitAdapter,
-      defaultOwner: 'test-owner',
-      defaultRepo: 'test-repo',
+      scope: {
+        gitAdapter: mockGitAdapter,
+        owner: 'test-owner',
+        repo: 'test-repo',
+      },
     });
 
     const stateMap = new Map<string, unknown>();
@@ -84,18 +86,28 @@ More content...`;
     );
   });
 
-  it('handles missing gitAdapter gracefully', async () => {
+  it('reads rules from the base branch, not the PR head', async () => {
+    const getFileContent = vi.fn().mockRejectedValue(new Error('not found'));
     const tool = createGetRepoGuidelinesTool({
-      defaultOwner: 'test-owner',
-      defaultRepo: 'test-repo',
+      scope: {
+        gitAdapter: {
+          getFileContent,
+          searchCode: vi.fn().mockResolvedValue({ totalCount: 0, items: [] }),
+        } as unknown as GitAdapterContract,
+        owner: 'test-owner',
+        repo: 'test-repo',
+        headRef: 'feature/edits-claude-md',
+        baseRef: 'main',
+      },
     });
 
-    const result = (await tool.execute(
-      {},
-      undefined,
-    )) as GetRepoGuidelinesResult;
-    expect(result.rules).toBe('');
-    expect(result.skills).toHaveLength(0);
-    expect(result.message).toContain('Git adapter is not configured');
+    await tool.execute({}, undefined);
+
+    expect(getFileContent).toHaveBeenCalledWith(
+      'test-owner',
+      'test-repo',
+      'AGENTS.md',
+      'main',
+    );
   });
 });

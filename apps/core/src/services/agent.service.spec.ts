@@ -1,11 +1,14 @@
-import { MockLlm } from '@code-review-agent/llm';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AgentService } from './agent.service.js';
-
 vi.mock('@code-review-agent/agent-context-builder', () => ({
-  buildContext: vi.fn().mockResolvedValue({
-    architecture: 'Test Architecture',
+  buildRepoContext: vi.fn().mockResolvedValue({
+    sections: {
+      architecture: 'a',
+      modules: 'm',
+      patterns: 'p',
+      errorHandling: 'e',
+    },
+    agentDocs: [],
   }),
 }));
 
@@ -14,75 +17,57 @@ vi.mock('@code-review-agent/agent-code-reviewer', () => ({
     provider: 'github',
     owner: 'test-org',
     repo: 'test-repo',
-    prNumber: 1,
-    summary: 'Test summary',
+    prNumber: 42,
+    summary: 'ok',
     comments: [],
   }),
 }));
 
 import { runReview } from '@code-review-agent/agent-code-reviewer';
-import { buildContext } from '@code-review-agent/agent-context-builder';
+import { buildRepoContext } from '@code-review-agent/agent-context-builder';
+import type { GitAdapterContract } from '@code-review-agent/shared-types';
+import type { BaseLlm } from '@google/adk';
+
+import { AgentService } from './agent.service.js';
 
 describe('AgentService', () => {
-  const mockLlm = new MockLlm();
+  const llm = { model: 'test-model' } as BaseLlm;
+  const gitAdapter = {} as GitAdapterContract;
+  const service = new AgentService({ llm, gitAdapter });
 
-  it('delegates buildContext to agent-context-builder library', async () => {
-    const service = new AgentService();
-    const result = await service.buildContext({
-      provider: 'github',
+  it('passes its own dependencies to buildRepoContext, separate from the input', async () => {
+    const input = {
+      mode: 'baseline',
       owner: 'test-org',
       repo: 'test-repo',
-      prNumber: 1,
-      cloneUrl: 'https://github.com/test-org/test-repo.git',
-      ref: 'main',
-      llm: mockLlm,
-    });
+    } as const;
 
-    expect(buildContext).toHaveBeenCalledWith(
-      expect.objectContaining({
-        owner: 'test-org',
-        repo: 'test-repo',
-        llm: mockLlm,
-      }),
-    );
-    expect(result).toEqual({ architecture: 'Test Architecture' });
+    await service.buildRepoContext(input);
+
+    expect(buildRepoContext).toHaveBeenCalledWith(input, {
+      llm,
+      gitAdapter,
+      logger: undefined,
+    });
   });
 
-  it('delegates runReview to agent-code-reviewer library', async () => {
-    const service = new AgentService();
-    const result = await service.runReview(
-      {
-        prMeta: {
-          provider: 'github',
-          owner: 'test-org',
-          repo: 'test-repo',
-          number: 1,
-          title: 'PR Title',
-          author: 'author',
-          branch: 'main',
-          body: 'PR Body',
-        },
-        diff: 'diff content',
-        changedFiles: 'main.ts',
-        tickets: [],
+  it('passes its own dependencies to runReview', async () => {
+    const input = {
+      prMeta: {
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        number: 42,
+        title: 't',
+        author: 'a',
+        branch: 'b',
       },
-      {
-        llm: mockLlm,
-      },
-    );
+      diff: 'diff',
+      context: null,
+    };
 
-    expect(runReview).toHaveBeenCalledWith(
-      expect.objectContaining({
-        diff: 'diff content',
-      }),
-      {
-        llm: mockLlm,
-      },
-    );
-    expect(result).toEqual(
-      expect.objectContaining({
-        summary: 'Test summary',
-      }),
-    );
+    await service.runReview(input);
+
+    expect(runReview).toHaveBeenCalledWith(input, { llm, gitAdapter });
   });
 });

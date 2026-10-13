@@ -1,8 +1,8 @@
-import type { GitAdapterContract } from '@code-review-agent/shared-types';
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
-import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
+import { STATE } from '../constants/state-keys.constant.js';
+import type { RepoScope } from './repo-scope.js';
 
 export interface RepoSkillSummary {
   name: string;
@@ -18,9 +18,7 @@ export interface GetRepoGuidelinesResult {
 }
 
 export interface GetRepoGuidelinesToolDependencies {
-  gitAdapter?: GitAdapterContract;
-  defaultOwner?: string;
-  defaultRepo?: string;
+  scope: RepoScope;
 }
 
 const CANDIDATE_RULE_FILES = [
@@ -61,48 +59,25 @@ export function parseSkillFrontmatter(content: string): {
 }
 
 export function createGetRepoGuidelinesTool(
-  deps: GetRepoGuidelinesToolDependencies = {},
+  deps: GetRepoGuidelinesToolDependencies,
 ) {
+  // Rules come from the base branch: the PR's own edits to AGENTS.md/CLAUDE.md
+  // are part of the change under review, not instructions for reviewing it.
+  const { gitAdapter, owner, repo, baseRef: ref } = deps.scope;
+
   return new FunctionTool({
     name: 'getRepoGuidelines',
     description:
       'Fetches the repository agent rules (e.g. AGENTS.md, CLAUDE.md) and discovers available repository skills (e.g. in .agents/skills). Returns rules and a skills catalogue.',
-    parameters: z.object({
-      owner: z.string().optional().describe('Repository owner'),
-      repo: z.string().optional().describe('Repository name'),
-      ref: z.string().optional().describe('Git branch or ref'),
-    }),
-    execute: async (input, ctx): Promise<GetRepoGuidelinesResult> => {
-      const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-      const owner = input.owner || meta?.owner || deps.defaultOwner || '';
-      const repo = input.repo || meta?.repo || deps.defaultRepo || '';
-      const ref = input.ref || meta?.branch;
-
-      if (!deps.gitAdapter) {
-        return {
-          rules: '',
-          ruleSources: [],
-          skills: [],
-          message: 'Git adapter is not configured.',
-        };
-      }
-
-      if (!owner || !repo) {
-        return {
-          rules: '',
-          ruleSources: [],
-          skills: [],
-          message: 'Owner and repo are required.',
-        };
-      }
-
+    parameters: z.object({}),
+    execute: async (_input, ctx): Promise<GetRepoGuidelinesResult> => {
       // 1. Fetch candidate rule files
       const collectedRules: string[] = [];
       const ruleSources: string[] = [];
 
       for (const fileName of CANDIDATE_RULE_FILES) {
         try {
-          const res = await deps.gitAdapter.getFileContent(
+          const res = await gitAdapter.getFileContent(
             owner,
             repo,
             fileName,
@@ -121,7 +96,7 @@ export function createGetRepoGuidelinesTool(
       const skills: RepoSkillSummary[] = [];
 
       try {
-        const searchResult = await deps.gitAdapter.searchCode(
+        const searchResult = await gitAdapter.searchCode(
           owner,
           repo,
           'filename:SKILL.md',
@@ -133,7 +108,7 @@ export function createGetRepoGuidelinesTool(
 
         for (const file of skillFiles) {
           try {
-            const skillContent = await deps.gitAdapter.getFileContent(
+            const skillContent = await gitAdapter.getFileContent(
               owner,
               repo,
               file.path,
