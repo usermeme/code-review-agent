@@ -10,13 +10,6 @@ export type EndpointPayload<
   Body?: TBody;
 };
 
-export type EnpointPayload<
-  TParams = Record<string, unknown>,
-  TPath = Record<string, string | number>,
-  TQuery = Record<string, unknown>,
-  TBody = unknown,
-> = EndpointPayload<TParams, TPath, TQuery, TBody>;
-
 export interface EndpointPayloadRecord {
   '/api/v1/repos/:owner/:repo/': {
     Path: {
@@ -147,11 +140,7 @@ export interface EndpointPayloadRecord {
   '/livez': Record<string, never>;
 }
 
-export type EndointPayloadRecord = EndpointPayloadRecord;
-export type EnpointPayloadRecord = EndpointPayloadRecord;
-
 export type Endpoint = keyof EndpointPayloadRecord;
-export type Enpoint = Endpoint;
 
 export const ENDPOINTS = {
   REPO_ROOT: '/api/v1/repos/:owner/:repo/',

@@ -5,10 +5,6 @@ import {
   EndpointPayload,
   EndpointPayloadRecord,
   ENDPOINTS,
-  EndointPayloadRecord,
-  Enpoint,
-  EnpointPayload,
-  EnpointPayloadRecord,
   interpolatePath,
 } from './endpoints.js';
 
@@ -159,12 +155,9 @@ describe('endpoints library', () => {
       expect(ENDPOINTS.LIVEZ).toBe('/livez');
     });
 
-    it('verifies type definitions and aliases', () => {
-      expectTypeOf<Enpoint>().toEqualTypeOf<Endpoint>();
+    it('verifies type definitions', () => {
       expectTypeOf<EndpointPayload>().toBeObject();
-      expectTypeOf<EnpointPayload>().toEqualTypeOf<EndpointPayload>();
-      expectTypeOf<EndointPayloadRecord>().toEqualTypeOf<EndpointPayloadRecord>();
-      expectTypeOf<EnpointPayloadRecord>().toEqualTypeOf<EndpointPayloadRecord>();
+      expectTypeOf<Endpoint>().toEqualTypeOf<keyof EndpointPayloadRecord>();
     });
   });
 });
