@@ -144,6 +144,14 @@ When(
   },
 );
 
+Then(
+  'the IngestPREvent RPC response status is {string}',
+  function (expectedStatus: string) {
+    assert(lastRpcResponse, 'No RPC response received');
+    assert.equal(lastRpcResponse.status, expectedStatus);
+  },
+);
+
 Then('the IngestPREvent RPC response is accepted', function () {
   assert(lastRpcResponse, 'No RPC response received');
   assert.equal(lastRpcResponse.success, true);

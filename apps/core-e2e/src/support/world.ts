@@ -13,6 +13,7 @@ import { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildCoreServer } from '../../../core/src/app.js';
 import { coreEnvSchema, CoreEnvService } from '../../../core/src/env.js';
 import { ContextRepository } from '../../../core/src/modules/database/repositories/context.repository.js';
+import { LeaseRepository } from '../../../core/src/modules/database/repositories/lease.repository.js';
 import { PrRepository } from '../../../core/src/modules/database/repositories/pr.repository.js';
 import { EventOrchestratorService } from '../../../core/src/services/event-orchestrator.service.js';
 import { InMemoryDatabaseService } from './doubles/in-memory-db.service.js';
@@ -24,6 +25,7 @@ export class CoreWorld extends World {
   public pubsub: MockPubSub;
   public prRepository: PrRepository;
   public contextRepository: ContextRepository;
+  public leaseRepository: LeaseRepository;
   public orchestrator!: EventOrchestratorService;
   public envService!: CoreEnvService;
   public coreRpcClient!: Client<typeof CoreService>;
@@ -35,6 +37,7 @@ export class CoreWorld extends World {
     this.pubsub = new MockPubSub();
     this.prRepository = new PrRepository(this.db);
     this.contextRepository = new ContextRepository(this.db);
+    this.leaseRepository = new LeaseRepository(this.db);
   }
 
   get postedReviews(): ReviewResultPayload[] {
@@ -49,6 +52,7 @@ export class CoreWorld extends World {
       HOST: '0.0.0.0',
       PORT: '8080',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
+      CONTEXT_BUILD_TOPIC: 'test-context-builds-topic',
       LLM_PROVIDER: 'mock',
       REVIEW_MODEL: 'test-model',
       GIT_ADAPTER_URL: 'http://adapter:8080',
@@ -59,6 +63,7 @@ export class CoreWorld extends World {
       pubsub: this.pubsub as unknown as PubSub,
       prRepository: this.prRepository,
       contextRepository: this.contextRepository,
+      leaseRepository: this.leaseRepository,
       envService: this.envService,
       agentService: {
         buildRepoContext: async (input) => ({

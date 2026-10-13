@@ -31,4 +31,19 @@ export class FirestoreDatabaseService implements IDatabaseService {
     }
     return doc.data() as T;
   }
+
+  async updateIf<T extends object>(
+    collection: string,
+    docId: string,
+    decide: (current: T | null) => Partial<T> | null,
+  ): Promise<boolean> {
+    const docRef = this.firestore.collection(collection).doc(docId);
+    return this.firestore.runTransaction(async (tx) => {
+      const snapshot = await tx.get(docRef);
+      const patch = decide(snapshot.exists ? (snapshot.data() as T) : null);
+      if (!patch) return false;
+      tx.set(docRef, patch, { merge: true });
+      return true;
+    });
+  }
 }

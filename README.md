@@ -40,6 +40,13 @@ sequenceDiagram
     Bus->>Core: 4. Push Subscription POST /api/v1/pubsub/pr-events
     Note over Core: Request stays OPEN during review.<br/>Cloud Run CPU stays 100%.
 
+    opt Repo has no baseline context yet
+        Core->>Bus: Publish build job (context-builds topic), PR parked as building_context
+        Core-->>Bus: HTTP 200 OK (ACK pr-events)
+        Bus->>Core: Push Subscription POST /api/v1/pubsub/context-builds
+        Note over Core: Builds the baseline under a per-repo lease<br/>(503 while another build holds it → retried),<br/>saves it, then reviews the parked PR
+    end
+
     opt Fetch PR Diff & Search Code
         Core->>Adapter: 5. Internal REST: GET /api/v1/repos/:owner/:repo/pulls/:number/diff
         Adapter-->>Core: Returns diff & changed files
@@ -225,8 +232,9 @@ jobs:
             --memory 2Gi \
             --cpu 2 \
             --no-cpu-throttling \
+            --timeout 3600 \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,CONTEXT_BUILD_TOPIC=context-builds,REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
       # 2. Deploy GitHub Adapter (Private Provider Adapter)
       - name: Deploy GitHub Adapter
@@ -273,7 +281,38 @@ jobs:
             --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --ack-deadline=600
 
-          # 2. Review Results Push Subscription to Adapter
+          # 2. Context Build Push Subscription to Core
+          # A build can outlive the 600s ack deadline; redeliveries then get 503
+          # (repo lease held) and back off. Failed builds retry up to 5 times
+          # before landing in the dead-letter topic.
+          gcloud pubsub subscriptions create context-builds-sub \
+            --topic=context-builds \
+            --push-endpoint="${CORE_URL}/api/v1/pubsub/context-builds" \
+            --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --ack-deadline=600 \
+            --min-retry-delay=60s \
+            --max-retry-delay=600s \
+            --dead-letter-topic=context-builds-dlq \
+            --max-delivery-attempts=5 || \
+          gcloud pubsub subscriptions update context-builds-sub \
+            --push-endpoint="${CORE_URL}/api/v1/pubsub/context-builds" \
+            --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+            --ack-deadline=600 \
+            --min-retry-delay=60s \
+            --max-retry-delay=600s \
+            --dead-letter-topic=context-builds-dlq \
+            --max-delivery-attempts=5
+
+          # Dead-lettering runs as the Pub/Sub service agent: it must publish
+          # to the DLQ topic and ack on the source subscription.
+          PROJECT_NUMBER=$(gcloud projects describe "${{ env.GCP_PROJECT_ID }}" --format='value(projectNumber)')
+          PUBSUB_AGENT="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
+          gcloud pubsub topics add-iam-policy-binding context-builds-dlq \
+            --member="${PUBSUB_AGENT}" --role=roles/pubsub.publisher
+          gcloud pubsub subscriptions add-iam-policy-binding context-builds-sub \
+            --member="${PUBSUB_AGENT}" --role=roles/pubsub.subscriber
+
+          # 3. Review Results Push Subscription to Adapter
           gcloud pubsub subscriptions create review-results-sub \
             --topic=review-results \
             --push-endpoint="${ADAPTER_URL}/api/v1/pubsub/review-results" \
@@ -322,7 +361,7 @@ fi
 
 # 3. Create Pub/Sub Topics
 echo "Creating Pub/Sub topics..."
-for TOPIC in pr-events review-results; do
+for TOPIC in pr-events review-results context-builds context-builds-dlq; do
   if ! gcloud pubsub topics describe "${TOPIC}" &>/dev/null; then
     gcloud pubsub topics create "${TOPIC}"
     echo "Created topic: ${TOPIC}"
@@ -413,6 +452,8 @@ resource "google_pubsub_topic" "topics" {
   for_each = toset([
     "pr-events",
     "review-results",
+    "context-builds",
+    "context-builds-dlq",
   ])
   name       = each.key
   depends_on = [google_project_service.apis]
@@ -463,6 +504,7 @@ services:
       - PORT=8080
       - HOST=0.0.0.0
       - REVIEW_RESULTS_TOPIC=review-results
+      - CONTEXT_BUILD_TOPIC=context-builds
       - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GIT_ADAPTER_URL=http://adapter:8080
@@ -487,14 +529,15 @@ Please generate the complete, production-ready repository with the following fil
 
 1. `.github/workflows/deploy.yml`:
    - Deploys both services to Google Cloud Run in this order: Core, Gateway.
-   - Configures the 2 Pub/Sub pull subscriptions:
+   - Configures the 3 Pub/Sub push subscriptions:
      - `pr-events-sub` (subscribes to `pr-events` topic)
+     - `context-builds-sub` (subscribes to `context-builds` topic, dead-letters to `context-builds-dlq`)
      - `review-results-sub` (subscribes to `review-results` topic)
 
 2. `scripts/setup-gcp-infra.sh`:
    - Idempotent bash script to enable GCP APIs (`run`, `pubsub`, `firestore`, `iam`).
    - Creates Firestore native database `(default)`.
-   - Creates the 2 Pub/Sub topics: `pr-events`, `review-results`.
+   - Creates the 4 Pub/Sub topics: `pr-events`, `review-results`, `context-builds`, `context-builds-dlq`.
    - Provisions `code-review-agent-sa` service account with `roles/datastore.user`, `roles/pubsub.publisher`, `roles/pubsub.subscriber`, and `roles/run.invoker`.
 
 3. `terraform/main.tf`, `terraform/variables.tf`, `terraform/outputs.tf`:
@@ -540,6 +583,7 @@ Each service strictly validates required variables and fails fast at startup if 
 | `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                                     |
 | `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                          |
 | `REVIEW_RESULTS_TOPIC`    |   Yes    | Google Cloud Pub/Sub topic to publish review result events to                       |
+| `CONTEXT_BUILD_TOPIC`     | Optional | Pub/Sub topic for context-build jobs (default `context-builds`)                     |
 | `REVIEW_MODEL`            |   Yes    | Gemini model identifier (e.g. `gemini-3.8-flash`)                                   |
 | `GIT_ADAPTER_URL`         |   Yes    | URL of Git Provider Adapter for on-demand code queries (e.g. `http://adapter:8080`) |
 | `GEMINI_API_KEY`          | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)          |

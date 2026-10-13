@@ -133,6 +133,9 @@ export interface EndpointPayloadRecord {
   '/api/v1/pubsub/review-results': {
     Body?: unknown;
   };
+  '/api/v1/pubsub/context-builds': {
+    Body?: unknown;
+  };
 
   // Webhooks ingress endpoint
   '/api/v1/webhooks': {
@@ -162,6 +165,7 @@ export const ENDPOINTS = {
   CONTEXT: '/api/v1/context/:repoKey',
   PUBSUB_PR_EVENTS: '/api/v1/pubsub/pr-events',
   PUBSUB_REVIEW_RESULTS: '/api/v1/pubsub/review-results',
+  PUBSUB_CONTEXT_BUILDS: '/api/v1/pubsub/context-builds',
   WEBHOOKS: '/api/v1/webhooks',
   HEALTHZ: '/healthz',
   LIVEZ: '/livez',

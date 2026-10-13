@@ -8,6 +8,7 @@ import { contextModule } from './modules/context/context.module.js';
 import { FirestoreDatabaseService } from './modules/database/firestore.service.js';
 import { DatabaseService } from './modules/database/interfaces/database.interface.js';
 import { ContextRepository } from './modules/database/repositories/context.repository.js';
+import { LeaseRepository } from './modules/database/repositories/lease.repository.js';
 import { PrRepository } from './modules/database/repositories/pr.repository.js';
 import { healthModule } from './modules/health/health.module.js';
 import { pubsubModule } from './modules/pubsub/pubsub.module.js';
@@ -55,6 +56,7 @@ export async function buildCoreServer(
       pubsub: options.pubsub,
       prRepository,
       contextRepository,
+      leaseRepository: new LeaseRepository(databaseService),
       agentService,
       gitAdapterClient,
     });

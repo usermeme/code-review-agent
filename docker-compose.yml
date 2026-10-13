@@ -41,6 +41,7 @@ services:
       - PUBSUB_EMULATOR_HOST=pubsub-emulator:8085
       - PUBSUB_PROJECT_ID=local-project
       - REVIEW_RESULTS_TOPIC=review-results
+      - CONTEXT_BUILD_TOPIC=context-builds
       - REVIEW_MODEL=gemini-3.8-flash
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
       - GIT_ADAPTER_URL=http://adapter:8080
@@ -72,10 +73,14 @@ services:
         echo 'Creating PubSub topics...';
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/pr-events;
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/review-results;
+        curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/topics/context-builds;
         echo 'Creating PubSub push subscriptions...';
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/subscriptions/pr-events-sub \
           -H 'Content-Type: application/json' \
           -d '{\"topic\":\"projects/local-project/topics/pr-events\",\"pushConfig\":{\"pushEndpoint\":\"http://core:8080/api/v1/pubsub/pr-events\"}}';
+        curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/subscriptions/context-builds-sub \
+          -H 'Content-Type: application/json' \
+          -d '{\"topic\":\"projects/local-project/topics/context-builds\",\"ackDeadlineSeconds\":600,\"pushConfig\":{\"pushEndpoint\":\"http://core:8080/api/v1/pubsub/context-builds\"}}';
         curl -s -X PUT http://pubsub-emulator:8085/v1/projects/local-project/subscriptions/review-results-sub \
           -H 'Content-Type: application/json' \
           -d '{\"topic\":\"projects/local-project/topics/review-results\",\"pushConfig\":{\"pushEndpoint\":\"http://adapter:8080/api/v1/pubsub/review-results\"}}';

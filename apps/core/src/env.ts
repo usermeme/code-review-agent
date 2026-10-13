@@ -10,6 +10,8 @@ export const coreBaseEnvSchema = z.object({
   PORT: z.string().transform(Number),
   GIT_ADAPTER_URL: z.string().min(1),
   REVIEW_RESULTS_TOPIC: z.string().min(1),
+  /** Topic for context-build jobs, consumed by POST /api/v1/pubsub/context-builds. */
+  CONTEXT_BUILD_TOPIC: z.string().min(1).default('context-builds'),
 });
 
 export const coreEnvSchema = z.discriminatedUnion('LLM_PROVIDER', [

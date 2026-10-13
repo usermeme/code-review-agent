@@ -1,6 +1,4 @@
-import assert from 'node:assert/strict';
-
-import { Then, When } from '@cucumber/cucumber';
+import { When } from '@cucumber/cucumber';
 
 import { CoreWorld } from '../support/world.js';
 
@@ -49,8 +47,3 @@ When(
     });
   },
 );
-
-Then('the push request responds with HTTP 200', function (this: CoreWorld) {
-  assert(this.lastResponse, 'Expected a response from push request');
-  assert.equal(this.lastResponse.statusCode, 200);
-});

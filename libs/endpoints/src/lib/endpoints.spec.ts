@@ -148,6 +148,9 @@ describe('endpoints library', () => {
       expect(ENDPOINTS.TARBALL).toBe('/api/v1/repos/:owner/:repo/tarball');
       expect(ENDPOINTS.CONTEXT).toBe('/api/v1/context/:repoKey');
       expect(ENDPOINTS.PUBSUB_PR_EVENTS).toBe('/api/v1/pubsub/pr-events');
+      expect(ENDPOINTS.PUBSUB_CONTEXT_BUILDS).toBe(
+        '/api/v1/pubsub/context-builds',
+      );
       expect(ENDPOINTS.PUBSUB_REVIEW_RESULTS).toBe(
         '/api/v1/pubsub/review-results',
       );
