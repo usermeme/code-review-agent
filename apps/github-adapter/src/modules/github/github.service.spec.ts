@@ -156,6 +156,25 @@ describe('GithubService (Adapter)', () => {
     });
   });
 
+  it('reads every page of PR files, not just the first', async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      filename: `src/file-${i}.ts`,
+      status: 'removed',
+    }));
+    mockOctokit.rest.pulls.listFiles
+      .mockResolvedValueOnce({ data: page1 })
+      .mockResolvedValueOnce({
+        data: [{ filename: 'src/last.ts', status: 'removed' }],
+      });
+
+    const result = await service.getPRFiles('owner', 'repo', 1);
+
+    expect(result).toHaveLength(101);
+    expect(mockOctokit.rest.pulls.listFiles).toHaveBeenLastCalledWith(
+      expect.objectContaining({ per_page: 100, page: 2 }),
+    );
+  });
+
   it('downloads repo tarball archive', async () => {
     const mockData = new Uint8Array([1, 2, 3]);
     mockOctokit.rest.repos.downloadTarballArchive.mockResolvedValue({
