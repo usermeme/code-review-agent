@@ -61,12 +61,15 @@ export class CoreWorld extends World {
       contextRepository: this.contextRepository,
       envService: this.envService,
       agentService: {
-        buildContext: async (options) => {
-          return {
-            architecture: `Architecture for ${options.repo}`,
+        buildRepoContext: async (input) => ({
+          sections: {
+            architecture: `Architecture for ${input.repo}`,
             modules: 'core, gateway',
-          };
-        },
+            patterns: 'repositories wrap Firestore',
+            errorHandling: 'errors are logged and rethrown',
+          },
+          agentDocs: [],
+        }),
         runReview: async (input) => {
           return {
             provider: input.prMeta.provider || 'github',

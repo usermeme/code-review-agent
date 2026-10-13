@@ -15,10 +15,17 @@ Feature: Core IngestPREvent Service
     And a review result message is published to topic "test-review-results-topic" with repo "test-repo" and prNumber 12
     And the PR status for "github:usermeme:test-repo:12" is marked as "completed"
 
-  Scenario: Triggering incremental context update when PR is merged
+  Scenario: Merged PR is folded into the existing baseline context
+    Given repository "usermeme/test-repo" has a baseline context with architecture "Event-driven system"
     When Gateway calls IngestPREvent for merged PR "usermeme/test-repo" PR #15
     Then the IngestPREvent RPC response is accepted
-    And repository "usermeme/test-repo" has a baseline context in the database
+    And the baseline context of "usermeme/test-repo" has merged PR #15 applied
+
+  Scenario: Merged PR without a baseline context does not create one
+    Given repository "usermeme/test-repo" has no baseline context
+    When Gateway calls IngestPREvent for merged PR "usermeme/test-repo" PR #16
+    Then the IngestPREvent RPC response is accepted
+    And repository "usermeme/test-repo" still has no baseline context
 
   Scenario: Triggering manual review via issue comment
     Given repository "usermeme/test-repo" has a baseline context with architecture "Event-driven system"

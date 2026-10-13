@@ -146,7 +146,7 @@ describe('endpoints library', () => {
         '/api/v1/repos/:owner/:repo/files/:path',
       );
       expect(ENDPOINTS.TARBALL).toBe('/api/v1/repos/:owner/:repo/tarball');
-      expect(ENDPOINTS.CONTEXT).toBe('/api/v1/context/:prKey');
+      expect(ENDPOINTS.CONTEXT).toBe('/api/v1/context/:repoKey');
       expect(ENDPOINTS.PUBSUB_PR_EVENTS).toBe('/api/v1/pubsub/pr-events');
       expect(ENDPOINTS.PUBSUB_REVIEW_RESULTS).toBe(
         '/api/v1/pubsub/review-results',

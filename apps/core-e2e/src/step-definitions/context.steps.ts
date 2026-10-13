@@ -27,29 +27,13 @@ Then(
 );
 
 Then(
-  'the returned context contains summary with architecture {string}',
+  'the returned context has architecture {string}',
   function (this: CoreWorld, architecture: string) {
     assert(this.lastResponse, 'No HTTP response received');
-    const json = this.lastResponse.json();
-    assert(json, 'Response body could not be parsed as JSON');
-    assert(json.summary, 'Response JSON does not contain summary');
-
-    let summaryObj = json.summary;
-    if (typeof summaryObj === 'string') {
-      try {
-        summaryObj = JSON.parse(summaryObj);
-      } catch {
-        // Leave as string if not JSON
-      }
-    }
-
-    if (typeof summaryObj === 'object' && summaryObj !== null) {
-      assert.equal(summaryObj.architecture, architecture);
-    } else {
-      assert.fail(
-        `Summary is neither object nor parseable JSON: ${json.summary}`,
-      );
-    }
+    const json = this.lastResponse.json<{
+      sections?: { architecture?: string };
+    }>();
+    assert.equal(json.sections?.architecture, architecture);
   },
 );
 

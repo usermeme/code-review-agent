@@ -2,14 +2,15 @@ import {
   IngestPREventRequest,
   IngestPREventResponse,
 } from '@code-review-agent/contracts';
-import { LlmFactory } from '@code-review-agent/llm';
 import {
-  ContextReadyPayload,
   GitAdapterContract,
   PREventPayload,
+  type RepoContext,
+  type RepoRef,
   ReviewResultPayload,
+  toPrKey,
+  toRepoKey,
 } from '@code-review-agent/shared-types';
-import type { BaseLlm } from '@google/adk';
 import { PubSub } from '@google-cloud/pubsub';
 import { FastifyBaseLogger } from 'fastify';
 
@@ -17,16 +18,15 @@ import type { CoreEnvService } from '../env.js';
 import { GitAdapterClient } from '../modules/adapter/git-adapter.client.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
-import type { AgentService } from './agent.service.js';
+import type { AgentRunner } from './agent.service.js';
 
 export interface EventOrchestratorDependencies {
   envService: CoreEnvService;
   prRepository: PrRepository;
   contextRepository: ContextRepository;
   pubsub: PubSub;
-  agentService: AgentService;
+  agentService: AgentRunner;
   gitAdapterClient?: GitAdapterContract;
-  llm?: BaseLlm;
 }
 
 export class EventOrchestratorService {
@@ -34,9 +34,8 @@ export class EventOrchestratorService {
   private prRepository: PrRepository;
   private contextRepository: ContextRepository;
   private envService: CoreEnvService;
-  private agentService: AgentService;
+  private agentService: AgentRunner;
   private gitAdapterClient: GitAdapterContract;
-  private llm: BaseLlm;
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub;
@@ -48,8 +47,6 @@ export class EventOrchestratorService {
     const adapterUrl = deps.envService.get('GIT_ADAPTER_URL');
     this.gitAdapterClient =
       deps.gitAdapterClient ?? new GitAdapterClient(adapterUrl);
-
-    this.llm = deps.llm ?? new LlmFactory(deps.envService.data).createLlm();
   }
 
   async ingestPREvent(
@@ -66,36 +63,17 @@ export class EventOrchestratorService {
     }
 
     const { provider, owner, repo, prNumber, action } = meta;
-    const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
-    const baselineKey = `${provider}:${owner}:${repo}:0`;
+    const repoRef: RepoRef = { provider, owner, repo };
+    const prKey = toPrKey(repoRef, prNumber);
 
     logger?.info(`[Core] Ingesting PR event: ${action} for ${prKey}`);
 
-    // If PR is merged, trigger incremental context update in-process
     if (action === 'closed' && meta.isIncrementalUpdate) {
-      logger?.info(
-        `[Core] PR merged event for ${prKey}. Triggering incremental context build.`,
-      );
-      const sections = await this.agentService.buildContext({
-        provider,
-        owner,
-        repo,
-        prNumber,
-        cloneUrl: meta.cloneUrl,
-        ref: meta.baseRef,
-        isIncrementalUpdate: true,
-        llm: this.llm,
-        gitAdapter: this.gitAdapterClient,
-      });
-
-      const summary =
-        typeof sections === 'string' ? sections : JSON.stringify(sections);
-      await this.contextRepository.saveContext(baselineKey, { summary });
-
+      await this.applyMergedPr(repoRef, prNumber, logger);
       return {
         success: true,
         status: 'queued',
-        message: 'Incremental context build completed for merged PR',
+        message: 'Merged PR processed for incremental context update',
       } as IngestPREventResponse;
     }
 
@@ -128,30 +106,9 @@ export class EventOrchestratorService {
         }
       }
 
-      // Check if baseline context exists in Firestore
-      const existingContext =
-        await this.contextRepository.getContext(baselineKey);
-
-      const isValidContext =
-        existingContext?.summary &&
-        existingContext.summary.trim() !== '' &&
-        existingContext.summary.trim() !== '{}' &&
-        existingContext.summary.trim() !== '{"summary":""}';
-
-      const baselineSummary =
-        (isValidContext ? existingContext.summary : null) ??
-        (await this.buildAndSaveBaselineContext({
-          baselineKey,
-          prKey,
-          provider,
-          owner,
-          repo,
-          prNumber,
-          meta,
-          diff,
-          changedFiles,
-          logger,
-        }));
+      const context =
+        (await this.contextRepository.get(toRepoKey(repoRef))) ??
+        (await this.buildBaseline(repoRef, meta.baseRef, logger));
 
       // Run review in-process
       logger?.info(
@@ -188,9 +145,7 @@ export class EventOrchestratorService {
           tickets: [],
         },
         {
-          llm: this.llm,
-          baselineContext: baselineSummary,
-          gitAdapter: this.gitAdapterClient,
+          baselineContext: toReviewerContext(context),
         },
       );
 
@@ -208,57 +163,6 @@ export class EventOrchestratorService {
       status: 'ignored',
       message: `Ignored action: ${action}`,
     } as IngestPREventResponse;
-  }
-
-  async handleContextReady(
-    payload: ContextReadyPayload,
-    logger?: FastifyBaseLogger,
-  ): Promise<void> {
-    const { provider, owner, repo, prNumber, summary } = payload;
-    const baselineKey = `${provider}:${owner}:${repo}:0`;
-
-    logger?.info(`[Core] Context is ready. Saving to baseline: ${baselineKey}`);
-    await this.contextRepository.saveContext(baselineKey, { summary });
-
-    if (prNumber === 0) {
-      logger?.info(`[Core] Baseline context updated for repo: ${baselineKey}`);
-      return;
-    }
-
-    const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
-    const pendingPR = await this.prRepository.getPRStatus(prKey);
-
-    logger?.info(`[Core] Triggering code review for ${prKey}`);
-    await this.prRepository.updatePRStatus(prKey, { status: 'reviewing' });
-
-    const changedFilesStr = Array.isArray(pendingPR?.changedFiles)
-      ? pendingPR.changedFiles.join('\n')
-      : (pendingPR?.changedFiles ?? '');
-
-    const reviewResult = await this.agentService.runReview(
-      {
-        prMeta: {
-          provider,
-          owner,
-          repo,
-          number: prNumber,
-          title: pendingPR?.prMeta?.['title'] || '',
-          author: pendingPR?.prMeta?.['author'] || '',
-          branch: pendingPR?.prMeta?.['branch'] || '',
-          body: pendingPR?.prMeta?.['body'] || '',
-        },
-        diff: pendingPR?.diff || '',
-        changedFiles: changedFilesStr,
-        tickets: [],
-      },
-      {
-        llm: this.llm,
-        baselineContext: summary,
-        gitAdapter: this.gitAdapterClient,
-      },
-    );
-
-    await this.handleReviewResults(reviewResult, logger);
   }
 
   async handleReviewResults(
@@ -288,74 +192,70 @@ export class EventOrchestratorService {
     }
   }
 
-  private async buildAndSaveBaselineContext(params: {
-    baselineKey: string;
-    prKey: string;
-    provider: string;
-    owner: string;
-    repo: string;
-    prNumber: number;
-    meta: {
-      title?: string;
-      author?: string;
-      branch?: string;
-      body?: string;
-      cloneUrl?: string;
-      baseRef?: string;
-    };
-    diff: string;
-    changedFiles?: string[];
-    logger?: FastifyBaseLogger;
-  }): Promise<string> {
-    params.logger?.info(
-      `[Core] No baseline context found for ${params.baselineKey}. Building context in-process.`,
-    );
-    await this.prRepository.updatePRStatus(params.prKey, {
-      provider: params.provider,
-      owner: params.owner,
-      repo: params.repo,
-      prNumber: params.prNumber,
-      status: 'queued',
-      diff: params.diff,
-      changedFiles: params.changedFiles,
-      prMeta: {
-        title: params.meta.title,
-        author: params.meta.author,
-        branch: params.meta.branch,
-        body: params.meta.body,
-      },
-    });
-
-    const sections = await this.agentService.buildContext({
-      provider: params.provider,
-      owner: params.owner,
-      repo: params.repo,
-      prNumber: params.prNumber,
-      cloneUrl:
-        params.meta.cloneUrl ||
-        `https://github.com/${params.owner}/${params.repo}.git`,
-      ref: params.meta.baseRef || 'main',
-      isIncrementalUpdate: false,
-      llm: this.llm,
-      gitAdapter: this.gitAdapterClient,
-    });
-
-    const summary =
-      typeof sections === 'string' ? sections : JSON.stringify(sections);
-    const isValid =
-      summary &&
-      summary.trim() !== '' &&
-      summary.trim() !== '{}' &&
-      summary.trim() !== '{"summary":""}';
-
-    if (isValid) {
-      await this.contextRepository.saveContext(params.baselineKey, { summary });
-    } else {
-      params.logger?.warn(
-        `[Core] Baseline context generation returned empty for ${params.baselineKey}. Skipping save to prevent cache poisoning.`,
+  /**
+   * Folds a merged PR into the repo's baseline. Without a baseline there is
+   * nothing to merge into — the next reviewed PR builds a full one — so the
+   * update is skipped rather than writing a context built from the PR alone.
+   */
+  private async applyMergedPr(
+    repoRef: RepoRef,
+    prNumber: number,
+    logger?: FastifyBaseLogger,
+  ): Promise<void> {
+    const repoKey = toRepoKey(repoRef);
+    const existing = await this.contextRepository.get(repoKey);
+    if (!existing) {
+      logger?.info(
+        `[Core] No baseline context for ${repoKey}; skipping incremental update for merged PR #${prNumber}.`,
       );
+      return;
     }
-    return summary;
+    if (existing.lastAppliedPrNumber === prNumber) {
+      logger?.info(
+        `[Core] Merged PR #${prNumber} is already applied to ${repoKey}; skipping.`,
+      );
+      return;
+    }
+
+    const updated = await this.agentService.buildRepoContext(
+      {
+        mode: 'incremental',
+        owner: repoRef.owner,
+        repo: repoRef.repo,
+        prNumber,
+        existing,
+      },
+      logger,
+    );
+    await this.contextRepository.save({
+      ...existing,
+      sections: updated.sections,
+      agentDocs: updated.agentDocs,
+      lastAppliedPrNumber: prNumber,
+      updatedAt: new Date(),
+    });
+  }
+
+  private async buildBaseline(
+    repoRef: RepoRef,
+    ref: string | undefined,
+    logger?: FastifyBaseLogger,
+  ): Promise<RepoContext> {
+    const repoKey = toRepoKey(repoRef);
+    logger?.info(`[Core] No baseline context for ${repoKey}; building it.`);
+    const built = await this.agentService.buildRepoContext(
+      { mode: 'baseline', owner: repoRef.owner, repo: repoRef.repo, ref },
+      logger,
+    );
+    const context: RepoContext = {
+      repoKey,
+      sections: built.sections,
+      agentDocs: built.agentDocs,
+      headSha: built.headSha,
+      updatedAt: new Date(),
+    };
+    await this.contextRepository.save(context);
+    return context;
   }
 
   private async publishReviewResults(
@@ -366,4 +266,14 @@ export class EventOrchestratorService {
       json: payload,
     });
   }
+}
+
+/** Shape the reviewer's getRepoContext tool currently reads. */
+function toReviewerContext(context: RepoContext): Record<string, string> {
+  return {
+    ...context.sections,
+    agentDocs: context.agentDocs
+      .map((doc) => `### ${doc.path}\n\n${doc.content}`)
+      .join('\n\n---\n\n'),
+  };
 }

@@ -15,11 +15,10 @@ export const contextRoutes: FastifyPluginAsync<ContextRoutesOptions> = async (
 
   fastify.get<{
     Params: NonNullable<
-      EndpointPayloadRecord['/api/v1/context/:prKey']['Params']
+      EndpointPayloadRecord['/api/v1/context/:repoKey']['Params']
     >;
-  }>('/:prKey', async (request, reply) => {
-    const { prKey } = request.params;
-    const context = await contextRepository.getContext(prKey);
+  }>('/:repoKey', async (request, reply) => {
+    const context = await contextRepository.get(request.params.repoKey);
 
     if (!context) {
       return reply.code(404).send({ error: 'Context not found' });

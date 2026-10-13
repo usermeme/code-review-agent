@@ -1,4 +1,4 @@
-import { RepositoryContext } from '@code-review-agent/shared-types';
+import type { RepoContext } from '@code-review-agent/shared-types';
 
 import { DatabaseService } from '../interfaces/database.interface.js';
 
@@ -7,18 +7,16 @@ export class ContextRepository {
 
   constructor(private db: DatabaseService) {}
 
-  async saveContext(
-    prKey: string,
-    contextData: Omit<RepositoryContext, 'prKey' | 'updatedAt'>,
-  ): Promise<void> {
-    await this.db.setDocument<RepositoryContext>(this.collection, prKey, {
-      prKey,
-      ...contextData,
-      updatedAt: new Date(),
-    });
+  async save(context: RepoContext): Promise<void> {
+    await this.db.setDocument<RepoContext>(
+      this.collection,
+      context.repoKey,
+      context,
+      false,
+    );
   }
 
-  async getContext(prKey: string): Promise<RepositoryContext | null> {
-    return this.db.getDocument<RepositoryContext>(this.collection, prKey);
+  async get(repoKey: string): Promise<RepoContext | null> {
+    return this.db.getDocument<RepoContext>(this.collection, repoKey);
   }
 }

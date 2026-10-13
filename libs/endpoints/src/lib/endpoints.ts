@@ -117,12 +117,12 @@ export interface EndpointPayloadRecord {
   };
 
   // Core context lookup endpoint
-  '/api/v1/context/:prKey': {
+  '/api/v1/context/:repoKey': {
     Path: {
-      prKey: string;
+      repoKey: string;
     };
     Params?: {
-      prKey: string;
+      repoKey: string;
     };
   };
 
@@ -159,7 +159,7 @@ export const ENDPOINTS = {
   SEARCH_CODE: '/api/v1/repos/:owner/:repo/search',
   FILE_CONTENT: '/api/v1/repos/:owner/:repo/files/:path',
   TARBALL: '/api/v1/repos/:owner/:repo/tarball',
-  CONTEXT: '/api/v1/context/:prKey',
+  CONTEXT: '/api/v1/context/:repoKey',
   PUBSUB_PR_EVENTS: '/api/v1/pubsub/pr-events',
   PUBSUB_REVIEW_RESULTS: '/api/v1/pubsub/review-results',
   WEBHOOKS: '/api/v1/webhooks',

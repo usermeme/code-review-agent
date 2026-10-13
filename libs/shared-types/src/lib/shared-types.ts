@@ -12,19 +12,65 @@ export interface PRState {
   error?: string;
 }
 
-export interface ContextReadyPayload {
+export interface RepoRef {
   provider: string;
   owner: string;
   repo: string;
-  prNumber: number;
-  summary: string;
 }
 
-export interface RepositoryContext {
-  prKey: string;
-  summary: string;
+/** `provider:owner:repo` — the storage key of a repository's context. */
+export function toRepoKey(ref: RepoRef): string {
+  return `${ref.provider}:${ref.owner}:${ref.repo}`;
+}
+
+/** `provider:owner:repo:prNumber` — the storage key of a pull request. */
+export function toPrKey(ref: RepoRef, prNumber: number): string {
+  return `${toRepoKey(ref)}:${prNumber}`;
+}
+
+/** LLM-written sections of a repository context document. */
+export interface RepoContextSections {
+  architecture: string;
+  modules: string;
+  patterns: string;
+  errorHandling: string;
+}
+
+/** Convention docs (AGENTS.md, CLAUDE.md, ...) kept verbatim, never summarized. */
+export interface AgentDoc {
+  path: string;
+  content: string;
+}
+
+export interface RepoContextContent {
+  sections: RepoContextSections;
+  agentDocs: AgentDoc[];
+}
+
+export interface RepoContext extends RepoContextContent {
+  repoKey: string;
+  /** Commit the baseline was built from, when the provider reports it. */
+  headSha?: string;
+  /** Last merged PR folded in by an incremental update (dedupes redelivery). */
+  lastAppliedPrNumber?: number;
   updatedAt: Date;
 }
+
+/** Message on the context-build topic, consumed by core's push route. */
+export type ContextBuildRequest = RepoRef &
+  (
+    | {
+        mode: 'baseline';
+        ref?: string;
+        /** PR waiting for this baseline; reviewed once the build is saved. */
+        pendingPrNumber?: number;
+      }
+    | {
+        mode: 'incremental';
+        /** The merged PR whose changes get folded into the baseline. */
+        prNumber: number;
+      }
+  );
 
 export interface PRMeta {
   provider: string;
