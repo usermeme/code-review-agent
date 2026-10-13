@@ -26,6 +26,7 @@
     "@eslint/js": "^10.0.1",
     "@google/adk-devtools": "^2.1.0",
     "@nx/esbuild": "23.2.1",
+    "@nx/eslint-plugin": "23.2.1",
     "@nx/js": "23.2.1",
     "@nx/node": "^23.2.1",
     "@nx/workspace": "23.2.1",

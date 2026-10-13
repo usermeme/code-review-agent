@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/agent-context-builder/src",
   "projectType": "library",
-  "tags": [],
+  "tags": ["type:agent"],
   "targets": {
     "typecheck": {
       "executor": "nx:run-commands",
