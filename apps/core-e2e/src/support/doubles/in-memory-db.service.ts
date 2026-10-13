@@ -20,11 +20,15 @@ export class InMemoryDatabaseService implements DatabaseService {
       col = new Map();
       this.collections.set(collection, col);
     }
+    // Mirror Firestore's ignoreUndefinedProperties: undefined fields are skipped.
+    const defined = Object.fromEntries(
+      Object.entries(data).filter(([, value]) => value !== undefined),
+    );
     if (merge && col.has(docId)) {
       const existing = col.get(docId);
-      col.set(docId, { ...existing, ...data });
+      col.set(docId, { ...existing, ...defined });
     } else {
-      col.set(docId, { ...data });
+      col.set(docId, defined);
     }
   }
 

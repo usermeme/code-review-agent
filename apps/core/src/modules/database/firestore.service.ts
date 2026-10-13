@@ -7,7 +7,9 @@ export class FirestoreDatabaseService implements IDatabaseService {
   private firestore: Firestore;
 
   constructor() {
-    this.firestore = new Firestore();
+    // Optional fields (headSha, PR body, baseRef, ...) are often undefined;
+    // Firestore rejects such writes unless told to skip them.
+    this.firestore = new Firestore({ ignoreUndefinedProperties: true });
   }
 
   async connect(logger: FastifyBaseLogger): Promise<void> {
