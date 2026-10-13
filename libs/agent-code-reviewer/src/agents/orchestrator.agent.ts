@@ -1,3 +1,4 @@
+import { estimateTokens } from '@code-review-agent/llm';
 import {
   AgentTool,
   type BaseLlm,
@@ -15,10 +16,6 @@ import { createTicketAgent } from './ticket.agent.js';
 
 const MAX_DIFF_TOKENS_IN_PROMPT = 2_500;
 const MAX_FINDINGS = 15;
-
-function estimateTokens(text: string) {
-  return Math.ceil(text.length / 4);
-}
 
 // Define the payload expected from the Pub/Sub event
 const pubSubPayloadSchema = z.object({

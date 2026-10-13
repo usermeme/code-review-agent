@@ -1,10 +1,10 @@
+import { generateText } from '@code-review-agent/llm';
 import { type BaseLlm, FunctionTool } from '@google/adk';
 import PQueue from 'p-queue';
 import { z } from 'zod';
 
 import { STATE } from '../constants/state-keys.constant.js';
 import { type Chunk, renderChunk } from '../services/chunker.service.js';
-import { generateText } from '../services/generate.service.js';
 
 export interface CreateSummarizeRepoToolPayload {
   llm: BaseLlm;

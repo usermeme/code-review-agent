@@ -1,3 +1,4 @@
+import { estimateTokens } from '@code-review-agent/llm';
 import type { GitAdapterContract } from '@code-review-agent/shared-types';
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
@@ -10,7 +11,6 @@ import {
   collectFiles,
   type RepoFile,
 } from '../services/chunker.service.js';
-import { estimateTokens } from '../services/tokens.util.js';
 
 export interface PrepareRepoPayload {
   provider: string;

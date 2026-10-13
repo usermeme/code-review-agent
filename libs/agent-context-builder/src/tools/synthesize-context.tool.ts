@@ -1,8 +1,8 @@
+import { generateText } from '@code-review-agent/llm';
 import { type BaseLlm, FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
 import { STATE } from '../constants/state-keys.constant.js';
-import { generateText } from '../services/generate.service.js';
 
 export interface CreateSynthesizeContextToolPayload {
   llm: BaseLlm;
