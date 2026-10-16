@@ -4,13 +4,14 @@
   "image": "mcr.microsoft.com/devcontainers/typescript-node:24",
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1.1.1": {},
-    "ghcr.io/usermeme/devcontainer-features/dotfiles:1": {},
-    "ghcr.io/usermeme/devcontainer-features/pnpm:1": {
+    "ghcr.io/usermeme/devcontainer-features/opencode:1.2.0": {},
+    "ghcr.io/usermeme/devcontainer-features/cline:1.0.0": {},
+    "ghcr.io/usermeme/devcontainer-features/dotfiles:1.2.0": {},
+    "ghcr.io/usermeme/devcontainer-features/antigravity:1.2.0": {},
+    "ghcr.io/usermeme/devcontainer-features/pnpm:1.2.0": {
       "runInstall": true
     },
-    "ghcr.io/usermeme/devcontainer-features/antigravity:1": {},
-    "ghcr.io/usermeme/devcontainer-features/neovim:1": {},
-    "ghcr.io/usermeme/devcontainer-features/node-modules-volume:1": {}
+    "ghcr.io/usermeme/devcontainer-features/node-modules-volume:1.2.0": {}
   },
 
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
