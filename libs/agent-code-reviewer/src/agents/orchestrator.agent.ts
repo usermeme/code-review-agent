@@ -193,11 +193,16 @@ function createSubAgentGuard(onFailure?: (agents: string[]) => void): {
   return {
     after: ({ tool, response }) => {
       if (SUB_AGENT_NAMES.has(tool.name)) {
+        // The tool-call limiter short-circuits an over-limit sub-agent call
+        // with an {error} response without running it; that must not count
+        // as (or clear) a success, or a failed sub-agent could be laundered
+        // into a publishable review by one more blocked retry.
         succeeded.set(
           tool.name,
           typeof response === 'object' &&
             response !== null &&
-            Object.keys(response).length > 0,
+            Object.keys(response).length > 0 &&
+            !('error' in response),
         );
       }
       return undefined;
@@ -205,8 +210,10 @@ function createSubAgentGuard(onFailure?: (agents: string[]) => void): {
     before: ({ tool }) => {
       if (tool.name !== 'publishReviewResults') return undefined;
       const failed = [...succeeded].filter(([, ok]) => !ok).map(([n]) => n);
-      // Thrown, not returned: ADK ends the run (as a generic error event, so
-      // the callback tells runReview which error to report).
+      // Throw, and report through onFailure: ADK surfaces the throw as a
+      // generic error (the run may even continue), and runReview rethrows
+      // SubAgentFailedError from the recorded failures — non-retryable —
+      // instead of reporting a clean "no findings" review.
       if (failed.length > 0) {
         onFailure?.(failed);
         throw new SubAgentFailedError(failed);

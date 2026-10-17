@@ -146,6 +146,40 @@ describe('runReview', () => {
     expect(published).toBe(false);
   });
 
+  it('keeps blocking publish when an over-limit sub-agent retry is short-circuited', async () => {
+    // The tool-call limiter answers a third call to an already-failed
+    // sub-agent with an {error} response without running it. That response
+    // must not be mistaken for a success and unblock publish.
+    let published = false;
+    let subAgentCalls = 0;
+    const llm = new ScriptedLlm((request) => {
+      if (systemInstruction(request).includes('You hunt for real defects')) {
+        return { errorCode: '429', errorMessage: 'RESOURCE_EXHAUSTED' };
+      }
+      if (subAgentCalls < 3) {
+        subAgentCalls += 1;
+        return callTool('code_problems_agent', { focus: 'all' });
+      }
+      if (!requestText(request).includes('publishReviewResults')) {
+        return callTool('publishReviewResults', {
+          summary: 'Looks good',
+          findings: [],
+        });
+      }
+      return text('done');
+    });
+
+    await expect(
+      runReview(input, {
+        llm,
+        onPublishResult: () => {
+          published = true;
+        },
+      }),
+    ).rejects.toThrow(SubAgentFailedError);
+    expect(published).toBe(false);
+  });
+
   it('publishes when the sub-agents succeed', async () => {
     const llm = new ScriptedLlm((request) => {
       if (systemInstruction(request).includes('You hunt for real defects')) {

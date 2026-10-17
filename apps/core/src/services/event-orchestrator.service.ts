@@ -391,9 +391,16 @@ export class EventOrchestratorService {
     if (prKey !== expectedPrKey) {
       // Deterministic, and it fires after a fully paid review: a redelivery
       // would pay again and be rejected again.
-      throw new NonRetryableTaskError(
-        `Review result coordinates (${prKey}) do not match the originating PR event (${expectedPrKey}); refusing to publish.`,
-      );
+      const error = `Review result coordinates (${prKey}) do not match the originating PR event (${expectedPrKey}); refusing to publish.`;
+      // The route acks this non-retryable failure and marks the delivery
+      // done, so record it on the PR that triggered the review — otherwise
+      // that PR stays "reviewing" forever with the rejection only in logs.
+      await this.prRepository
+        .updatePRStatus(expectedPrKey, { status: 'failed', error })
+        .catch(() => {
+          // status bookkeeping must not mask the original failure
+        });
+      throw new NonRetryableTaskError(error);
     }
 
     logger?.info(

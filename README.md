@@ -265,9 +265,13 @@ jobs:
           # 1. PR Events Push Subscription to Core
           # max-delivery-attempts + dead-letter-topic stop poison messages from
           # redelivering forever (each redelivery of a review costs real LLM spend).
-          # Core runs the review inside the push request: Cloud Run's --timeout
-          # (900s) exceeds the ack deadline (600s), and the review aborts itself
-          # after 8 minutes, so a delivery is answered before Pub/Sub retries it.
+          # Core runs the review inside the push request. The review aborts
+          # itself after 8 minutes — under the 600s ack deadline and the 900s
+          # Cloud Run --timeout — but a cold baseline build can push the total
+          # past the ack deadline. Pub/Sub then redelivers while the first
+          # attempt is still running; the messageId dedup acks the redelivery,
+          # so if Cloud Run kills the original at 900s the event is lost until
+          # the next webhook for that PR (known gap for cold-repo events).
           gcloud pubsub subscriptions create pr-events-sub \
             --topic=pr-events \
             --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events" \

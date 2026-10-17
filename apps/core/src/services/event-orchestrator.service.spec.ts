@@ -290,6 +290,11 @@ describe('EventOrchestratorService', () => {
         'github:test-org:test-repo:42',
       ),
     ).rejects.toThrow(/do not match the originating PR event/);
+
+    expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+      'github:test-org:test-repo:42',
+      expect.objectContaining({ status: 'failed' }),
+    );
   });
 
   it('publishes review results to REVIEW_RESULTS_TOPIC when review results arrive', async () => {
