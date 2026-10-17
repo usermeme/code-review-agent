@@ -50,7 +50,14 @@ export interface PREventPayload {
 
 export interface ReviewCommentPayload {
   path: string;
+  /**
+   * NEW-side line number the comment anchors to (mapped to GitHub's `line`).
+   * Named `position` for historical reasons — it is a file line number, not
+   * a diff-hunk position.
+   */
   position?: number;
+  /** NEW-side start line for multi-line comments (mapped to GitHub's `start_line`). */
+  startPosition?: number;
   line?: number;
   body: string;
 }
@@ -73,7 +80,6 @@ export interface WebhookEventPayload {
   htmlUrl: string;
   cloneUrl?: string;
   ref?: string;
-  token?: string;
   installationId?: number;
   isIncrementalUpdate?: boolean;
 }
