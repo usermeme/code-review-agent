@@ -1,6 +1,9 @@
 import { rm } from 'node:fs/promises';
 
-import type { GitAdapterContract } from '@code-review-agent/shared-types';
+import {
+  type GitAdapterContract,
+  NonRetryableTaskError,
+} from '@code-review-agent/shared-types';
 import type { BaseLlm } from '@google/adk';
 import { z } from 'zod';
 
@@ -94,7 +97,9 @@ export async function buildContext(
         // keep the existing baseline instead of burning LLM calls.
         return existingContext;
       }
-      throw new Error(
+      // Retrying cannot conjure summarizable files — ack-and-record instead
+      // of burning redeliveries on a deterministic failure.
+      throw new NonRetryableTaskError(
         `No summarizable files found for ${baselineKey}; cannot build a baseline context.`,
       );
     }

@@ -6,10 +6,12 @@ import {
   PREventPayload,
 } from '@code-review-agent/shared-types';
 import { PubSub } from '@google-cloud/pubsub';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { coreEnvSchema, CoreEnvService } from '../env.js';
+import { BaselineLockRepository } from '../modules/database/repositories/baseline-lock.repository.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
+import { DiscussionRepository } from '../modules/database/repositories/discussion.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import { AgentService } from './agent.service.js';
 import {
@@ -391,5 +393,158 @@ describe('EventOrchestratorService', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  describe('baseline lock and discussion wiring', () => {
+    function makeOpenedRequest(): IngestPREventRequest {
+      return {
+        $typeName: 'core.v1.IngestPREventRequest',
+        prMeta: {
+          $typeName: 'core.v1.PRMeta',
+          provider: 'github',
+          owner: 'test-org',
+          repo: 'test-repo',
+          prNumber: 42,
+          action: 'opened',
+          title: 'Feature X',
+          author: 'developer',
+          branch: 'feat/x',
+          body: 'Details',
+          htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+          cloneUrl: 'https://github.com/test-org/test-repo.git',
+          baseRef: 'main',
+          isIncrementalUpdate: false,
+        },
+        diff: 'diff --git a/file.ts ...',
+        changedFiles: ['file.ts'],
+      } as unknown as IngestPREventRequest;
+    }
+
+    it('backs the discussion tools with the repository when configured', async () => {
+      const mockDiscussionRepo = {
+        search: vi.fn().mockResolvedValue([]),
+        store: vi.fn().mockResolvedValue(true),
+      };
+      mockContextRepo.getContext.mockResolvedValue({
+        summary: '{"architecture":"cached"}',
+      });
+      const orchestrator = createTestOrchestrator({
+        discussionRepository:
+          mockDiscussionRepo as unknown as DiscussionRepository,
+      });
+
+      await orchestrator.ingestPREvent(makeOpenedRequest());
+
+      expect(mockRunReview).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          searchDiscussions: expect.any(Function),
+          storeDiscussion: expect.any(Function),
+        }),
+      );
+
+      const options = mockRunReview.mock.calls[0][1] as {
+        searchDiscussions?: (
+          repo: string,
+          query: string,
+          limit: number,
+        ) => Promise<unknown>;
+        storeDiscussion?: (input: Record<string, unknown>) => Promise<unknown>;
+      };
+      await options.searchDiscussions?.('acme/app', 'sql injection', 5);
+      expect(mockDiscussionRepo.search).toHaveBeenCalledWith(
+        'acme/app',
+        'sql injection',
+        5,
+      );
+      await options.storeDiscussion?.({ repo: 'acme/app', body: 'note' });
+      expect(mockDiscussionRepo.store).toHaveBeenCalledWith({
+        repo: 'acme/app',
+        body: 'note',
+      });
+    });
+
+    describe('cross-instance baseline lock', () => {
+      let mockLockRepo: {
+        tryAcquire: ReturnType<typeof vi.fn>;
+        release: ReturnType<typeof vi.fn>;
+      };
+
+      beforeEach(() => {
+        mockLockRepo = {
+          tryAcquire: vi.fn().mockResolvedValue(true),
+          release: vi.fn().mockResolvedValue(undefined),
+        };
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it('builds under the lock and releases it afterwards', async () => {
+        const orchestrator = createTestOrchestrator({
+          baselineLockRepository:
+            mockLockRepo as unknown as BaselineLockRepository,
+        });
+
+        await orchestrator.ingestPREvent(makeOpenedRequest());
+
+        expect(mockBuildContext).toHaveBeenCalled();
+        expect(mockLockRepo.tryAcquire).toHaveBeenCalledWith(
+          'github:test-org:test-repo:0',
+          expect.any(String),
+        );
+        expect(mockLockRepo.release).toHaveBeenCalledWith(
+          'github:test-org:test-repo:0',
+          expect.any(String),
+        );
+      });
+
+      it('reuses the stored context while another instance holds the lock', async () => {
+        mockLockRepo.tryAcquire.mockResolvedValue(false);
+        mockContextRepo.getContext
+          .mockResolvedValueOnce(null) // ingest's existence check
+          .mockResolvedValue({ summary: '{"architecture":"built-elsewhere"}' });
+
+        const orchestrator = createTestOrchestrator({
+          baselineLockRepository:
+            mockLockRepo as unknown as BaselineLockRepository,
+        });
+
+        const ingest = orchestrator.ingestPREvent(makeOpenedRequest());
+        // Let the chain reach its first poll sleep, then fire it.
+        await vi.advanceTimersByTimeAsync(1);
+        await vi.advanceTimersByTimeAsync(10_000);
+        const res = await ingest;
+
+        expect(mockBuildContext).not.toHaveBeenCalled();
+        expect(mockRunReview).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({
+            baselineContext: '{"architecture":"built-elsewhere"}',
+          }),
+        );
+        expect(res.status).toBe('reviewing');
+      });
+
+      it('builds anyway after the lock wait times out', async () => {
+        mockLockRepo.tryAcquire.mockResolvedValue(false);
+        // The other instance's context never appears.
+        const orchestrator = createTestOrchestrator({
+          baselineLockRepository:
+            mockLockRepo as unknown as BaselineLockRepository,
+        });
+
+        const ingest = orchestrator.ingestPREvent(makeOpenedRequest());
+        await vi.advanceTimersByTimeAsync(1);
+        await vi.advanceTimersByTimeAsync(25 * 60 * 1000);
+        await ingest;
+
+        expect(mockBuildContext).toHaveBeenCalled();
+        // The lock was never acquired, so there is nothing to release.
+        expect(mockLockRepo.release).not.toHaveBeenCalled();
+      });
+    });
   });
 });

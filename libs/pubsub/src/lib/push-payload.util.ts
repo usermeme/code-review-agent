@@ -43,3 +43,21 @@ export function parsePubSubPushPayload<T>(body: unknown): T {
   // Fallback: If body was sent directly as JSON (e.g. in test doubles or direct callers)
   return body as T;
 }
+
+/**
+ * Extracts the Pub/Sub `messageId` from a raw push envelope, if present.
+ * Used for cross-instance delivery dedup: Pub/Sub redelivers the same
+ * messageId when an ack deadline is exceeded, even though processing may
+ * still be running elsewhere.
+ */
+export function extractPushMessageId(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') {
+    return undefined;
+  }
+  const message = (body as Record<string, unknown>)['message'];
+  if (!message || typeof message !== 'object') {
+    return undefined;
+  }
+  const messageId = (message as Record<string, unknown>)['messageId'];
+  return typeof messageId === 'string' && messageId ? messageId : undefined;
+}

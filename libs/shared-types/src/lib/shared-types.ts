@@ -135,3 +135,16 @@ export interface GitAdapterContract {
   ): Promise<FileContentResult>;
   getRepoTarball(owner: string, repo: string, ref?: string): Promise<Response>;
 }
+
+/**
+ * An error whose retry cannot succeed (malformed input, a repository with
+ * nothing summarizable, ...). Consumers should ack-and-record the failure
+ * instead of nacking — redelivery would only repeat the same paid work and
+ * eventually hit the dead-letter path anyway.
+ */
+export class NonRetryableTaskError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'NonRetryableTaskError';
+  }
+}

@@ -35,4 +35,39 @@ export class FirestoreDatabaseService implements IDatabaseService {
     }
     return doc.data() as T;
   }
+
+  async createDocumentIfMissing<T extends object>(
+    collection: string,
+    docId: string,
+    data: T,
+  ): Promise<boolean> {
+    try {
+      await this.firestore.collection(collection).doc(docId).create(data);
+      return true;
+    } catch (err) {
+      // gRPC code 6 = ALREADY_EXISTS — the atomic claim was lost, not an error.
+      if ((err as { code?: number }).code === 6) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  async deleteDocument(collection: string, docId: string): Promise<void> {
+    await this.firestore.collection(collection).doc(docId).delete();
+  }
+
+  async findDocuments<T>(
+    collection: string,
+    field: string,
+    value: unknown,
+    limit: number,
+  ): Promise<T[]> {
+    const snapshot = await this.firestore
+      .collection(collection)
+      .where(field, '==', value)
+      .limit(limit)
+      .get();
+    return snapshot.docs.map((doc) => doc.data() as T);
+  }
 }

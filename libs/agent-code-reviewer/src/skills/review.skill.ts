@@ -42,9 +42,12 @@ hypotheticals with no realistic trigger; pre-existing issues unrelated to the di
 A ten-comment review where three matter teaches authors to skim.
 
 ## Writing the finding
-Anchor to exact file and line; one finding per comment. Structure: what's wrong → concrete
-failure scenario → suggested fix. When uncertain, ask the specific question instead of asserting.
-The summary leads with the verdict and the criticals — never bury a data-loss finding under nits.`;
+Anchor to exact file and line; one finding per comment. Structure: what's wrong → its concrete
+failure scenario. Point at the problem — do NOT write the fix or propose replacement code; at
+most one short sentence on fix direction when it is not obvious. Keep every finding body under
+five sentences: long comments get skimmed and waste everyone's tokens. When uncertain, ask the
+specific question instead of asserting. The summary leads with the verdict and the criticals in
+one short paragraph — never bury a data-loss finding under nits.`;
 
 const SECURITY = `# Security checklist (construct the attack input, don't eyeball)
 - Injection: every SQL value parameterized (including ORDER BY/identifiers built from config);

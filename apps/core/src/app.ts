@@ -3,6 +3,7 @@ import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import { contextModule } from './modules/context/context.module.js';
 import { DatabaseService } from './modules/database/interfaces/database.interface.js';
 import { ContextRepository } from './modules/database/repositories/context.repository.js';
+import { DeliveryRepository } from './modules/database/repositories/delivery.repository.js';
 import { healthModule } from './modules/health/health.module.js';
 import { pubsubModule } from './modules/pubsub/pubsub.module.js';
 import { EventOrchestratorService } from './services/event-orchestrator.service.js';
@@ -11,6 +12,8 @@ export interface BuildCoreServerOptions {
   databaseService: DatabaseService;
   contextRepository: ContextRepository;
   orchestrator: EventOrchestratorService;
+  /** Optional cross-instance Pub/Sub delivery dedup. */
+  deliveryRepository?: DeliveryRepository;
   fastifyOptions?: FastifyServerOptions;
 }
 
@@ -34,6 +37,7 @@ export async function buildCoreServer(
   await server.register(pubsubModule, {
     prefix: '/api/v1/pubsub',
     orchestrator: options.orchestrator,
+    deliveryRepository: options.deliveryRepository,
   });
 
   return server;

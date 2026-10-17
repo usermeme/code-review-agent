@@ -263,26 +263,36 @@ jobs:
           ADAPTER_URL=$(gcloud run services describe github-adapter --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
 
           # 1. PR Events Push Subscription to Core
+          # max-delivery-attempts + dead-letter-topic stop poison messages from
+          # redelivering forever (each redelivery of a review costs real LLM spend).
           gcloud pubsub subscriptions create pr-events-sub \
             --topic=pr-events \
             --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events" \
             --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --ack-deadline=600 || \
+            --ack-deadline=600 \
+            --max-delivery-attempts=3 \
+            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/pr-events-dlq" || \
           gcloud pubsub subscriptions update pr-events-sub \
             --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events" \
             --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --ack-deadline=600
+            --ack-deadline=600 \
+            --max-delivery-attempts=3 \
+            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/pr-events-dlq"
 
           # 2. Review Results Push Subscription to Adapter
           gcloud pubsub subscriptions create review-results-sub \
             --topic=review-results \
             --push-endpoint="${ADAPTER_URL}/api/v1/pubsub/review-results" \
             --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --ack-deadline=60 || \
+            --ack-deadline=60 \
+            --max-delivery-attempts=5 \
+            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/review-results-dlq" || \
           gcloud pubsub subscriptions update review-results-sub \
             --push-endpoint="${ADAPTER_URL}/api/v1/pubsub/review-results" \
             --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --ack-deadline=60
+            --ack-deadline=60 \
+            --max-delivery-attempts=5 \
+            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/review-results-dlq"
 ```
 
 ---
@@ -320,15 +330,32 @@ else
   echo "Firestore database already exists."
 fi
 
-# 3. Create Pub/Sub Topics
+# TTL for the Pub/Sub delivery-dedup records (processed_deliveries): claims
+# expire on their own so the collection does not grow without bound.
+echo "Configuring TTL on processed_deliveries..."
+gcloud firestore fields update ttl \
+  --collection-group=processed_deliveries \
+  --field-path=startedAt \
+  --ttl-duration=86400s || echo "TTL update skipped (already configured?)."
+
+# 3. Create Pub/Sub Topics (including dead-letter topics for poison messages)
 echo "Creating Pub/Sub topics..."
-for TOPIC in pr-events review-results; do
+for TOPIC in pr-events review-results pr-events-dlq review-results-dlq; do
   if ! gcloud pubsub topics describe "${TOPIC}" &>/dev/null; then
     gcloud pubsub topics create "${TOPIC}"
     echo "Created topic: ${TOPIC}"
   else
     echo "Topic ${TOPIC} already exists."
   fi
+done
+
+# Dead-lettering publishes as the Pub/Sub service agent — it needs publisher
+# rights on the DLQ topics or dead-lettering silently fails.
+PROJECT_NUMBER=$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')
+for DLQ in pr-events-dlq review-results-dlq; do
+  gcloud pubsub topics add-iam-policy-binding "${DLQ}" \
+    --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com" \
+    --role="roles/pubsub.publisher" --quiet
 done
 
 # 4. Create Service Account
@@ -413,6 +440,8 @@ resource "google_pubsub_topic" "topics" {
   for_each = toset([
     "pr-events",
     "review-results",
+    "pr-events-dlq",
+    "review-results-dlq",
   ])
   name       = each.key
   depends_on = [google_project_service.apis]
