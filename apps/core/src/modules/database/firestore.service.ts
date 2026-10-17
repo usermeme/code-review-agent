@@ -3,11 +3,15 @@ import { FastifyBaseLogger } from 'fastify';
 
 import { DatabaseService as IDatabaseService } from './interfaces/database.interface.js';
 
+export interface FirestoreDatabaseServiceDependencies {
+  firestore: Firestore;
+}
+
 export class FirestoreDatabaseService implements IDatabaseService {
   private firestore: Firestore;
 
-  constructor() {
-    this.firestore = new Firestore();
+  constructor(deps: FirestoreDatabaseServiceDependencies) {
+    this.firestore = deps.firestore;
   }
 
   async connect(logger: FastifyBaseLogger): Promise<void> {
@@ -32,19 +36,38 @@ export class FirestoreDatabaseService implements IDatabaseService {
     return doc.data() as T;
   }
 
-  async transactDocument<T extends object, R>(
+  async createDocumentIfMissing<T extends object>(
     collection: string,
     docId: string,
-    decide: (current: T | null) => { write?: Partial<T>; result: R },
-  ): Promise<R> {
-    const docRef = this.firestore.collection(collection).doc(docId);
-    return this.firestore.runTransaction(async (tx) => {
-      const snapshot = await tx.get(docRef);
-      const { write, result } = decide(
-        snapshot.exists ? (snapshot.data() as T) : null,
-      );
-      if (write) tx.set(docRef, write, { merge: true });
-      return result;
-    });
+    data: T,
+  ): Promise<boolean> {
+    try {
+      await this.firestore.collection(collection).doc(docId).create(data);
+      return true;
+    } catch (err) {
+      // gRPC code 6 = ALREADY_EXISTS — the atomic claim was lost, not an error.
+      if ((err as { code?: number }).code === 6) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  async deleteDocument(collection: string, docId: string): Promise<void> {
+    await this.firestore.collection(collection).doc(docId).delete();
+  }
+
+  async findDocuments<T>(
+    collection: string,
+    field: string,
+    value: unknown,
+    limit: number,
+  ): Promise<T[]> {
+    const snapshot = await this.firestore
+      .collection(collection)
+      .where(field, '==', value)
+      .limit(limit)
+      .get();
+    return snapshot.docs.map((doc) => doc.data() as T);
   }
 }

@@ -1,27 +1,19 @@
-import { PubSub } from '@google-cloud/pubsub';
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 
-import type { CoreEnvService } from './env.js';
 import { contextModule } from './modules/context/context.module.js';
-import { FirestoreDatabaseService } from './modules/database/firestore.service.js';
 import { DatabaseService } from './modules/database/interfaces/database.interface.js';
 import { ContextRepository } from './modules/database/repositories/context.repository.js';
-import { PrRepository } from './modules/database/repositories/pr.repository.js';
-import { ReviewRunRepository } from './modules/database/repositories/review-run.repository.js';
+import { DeliveryRepository } from './modules/database/repositories/delivery.repository.js';
 import { healthModule } from './modules/health/health.module.js';
 import { pubsubModule } from './modules/pubsub/pubsub.module.js';
-import { AgentService } from './services/agent.service.js';
 import { EventOrchestratorService } from './services/event-orchestrator.service.js';
 
 export interface BuildCoreServerOptions {
-  envService: CoreEnvService;
-  pubsub: PubSub;
-  databaseService?: DatabaseService;
-  prRepository?: PrRepository;
-  contextRepository?: ContextRepository;
-  reviewRunRepository?: ReviewRunRepository;
-  agentService?: AgentService;
-  orchestrator?: EventOrchestratorService;
+  databaseService: DatabaseService;
+  contextRepository: ContextRepository;
+  orchestrator: EventOrchestratorService;
+  /** Optional cross-instance Pub/Sub delivery dedup. */
+  deliveryRepository?: DeliveryRepository;
   fastifyOptions?: FastifyServerOptions;
 }
 
@@ -30,28 +22,7 @@ export async function buildCoreServer(
 ): Promise<FastifyInstance> {
   const server = Fastify(options.fastifyOptions ?? { logger: true });
 
-  const databaseService =
-    options.databaseService ?? new FirestoreDatabaseService();
-  await databaseService.connect(server.log);
-
-  const prRepository =
-    options.prRepository ?? new PrRepository(databaseService);
-  const contextRepository =
-    options.contextRepository ?? new ContextRepository(databaseService);
-  const reviewRunRepository =
-    options.reviewRunRepository ?? new ReviewRunRepository(databaseService);
-  const agentService = options.agentService ?? new AgentService();
-
-  const orchestrator =
-    options.orchestrator ??
-    new EventOrchestratorService({
-      envService: options.envService,
-      pubsub: options.pubsub,
-      prRepository,
-      contextRepository,
-      reviewRunRepository,
-      agentService,
-    });
+  await options.databaseService.connect(server.log);
 
   // 1. Health check module
   await server.register(healthModule);
@@ -59,13 +30,14 @@ export async function buildCoreServer(
   // 2. Context lookup module
   await server.register(contextModule, {
     prefix: '/api/v1/context',
-    contextRepository,
+    contextRepository: options.contextRepository,
   });
 
   // 3. Pub/Sub PR Events Push route module (wakes up scale-to-zero serverless instances)
   await server.register(pubsubModule, {
     prefix: '/api/v1/pubsub',
-    orchestrator,
+    orchestrator: options.orchestrator,
+    deliveryRepository: options.deliveryRepository,
   });
 
   return server;

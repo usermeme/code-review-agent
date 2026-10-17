@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  parsePubSubPushEnvelope,
-  parsePubSubPushPayload,
-} from './push-payload.util.js';
+import { parsePubSubPushPayload } from './push-payload.util.js';
 
 describe('parsePubSubPushPayload', () => {
   it('decodes base64 JSON payload from standard GCP Pub/Sub push envelope', () => {
@@ -52,29 +49,5 @@ describe('parsePubSubPushPayload', () => {
     expect(() => parsePubSubPushPayload(invalidEnvelope)).toThrow(
       'Failed to decode/parse base64 Pub/Sub push message data',
     );
-  });
-});
-
-describe('parsePubSubPushEnvelope', () => {
-  it('returns messageId and deliveryAttempt alongside the decoded payload', () => {
-    const envelope = {
-      message: {
-        data: Buffer.from(JSON.stringify({ foo: 'bar' })).toString('base64'),
-        messageId: 'msg-1',
-      },
-      deliveryAttempt: 3,
-    };
-
-    expect(parsePubSubPushEnvelope(envelope)).toEqual({
-      payload: { foo: 'bar' },
-      messageId: 'msg-1',
-      deliveryAttempt: 3,
-    });
-  });
-
-  it('returns no delivery metadata for a direct JSON payload', () => {
-    expect(parsePubSubPushEnvelope({ foo: 'bar' })).toEqual({
-      payload: { foo: 'bar' },
-    });
   });
 });

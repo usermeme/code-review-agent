@@ -1,7 +1,6 @@
 import { Octokit } from '@octokit/rest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AdapterEnvService } from '../../env.js';
 import { GithubService, GithubServiceDependencies } from './github.service.js';
 
 describe('GithubService (Adapter)', () => {
@@ -26,7 +25,6 @@ describe('GithubService (Adapter)', () => {
       };
     };
   };
-  let mockEnvService: { get: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     mockOctokit = {
@@ -50,14 +48,8 @@ describe('GithubService (Adapter)', () => {
       },
     };
 
-    mockEnvService = {
-      get: vi.fn().mockReturnValue('test-token'),
-    };
-
     const deps: GithubServiceDependencies = {
-      envService: mockEnvService as unknown as AdapterEnvService,
       octokit: mockOctokit as unknown as Octokit,
-      token: 'test-token',
     };
 
     service = new GithubService(deps);

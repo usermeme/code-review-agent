@@ -2,23 +2,26 @@ import type {
   GitAdapterContract,
   ReviewResultPayload,
 } from '@code-review-agent/shared-types';
+import { NonRetryableTaskError } from '@code-review-agent/shared-types';
 import { type BaseLlm, InMemoryRunner } from '@google/adk';
+import { z } from 'zod';
 
 import {
   createOrchestrator,
   type OrchestratorTools,
+  SubAgentFailedError,
 } from './agents/orchestrator.agent.js';
+import { ContextError } from './constants/errors.constant.js';
+import { LIMITS } from './constants/limits.constant.js';
 import { STATE } from './constants/state-keys.constant.js';
+import { CoordinateGuardPlugin } from './plugins/coordinate-guard.plugin.js';
 import { createFetchRepositoryFileTool } from './tools/fetch-repository-file.tool.js';
 import {
   createGetDiscussionTool,
   type DiscussionSearchFunction,
 } from './tools/get-discussion.tool.js';
-import {
-  type ContextLoader,
-  createGetRepoContextTool,
-} from './tools/get-repo-context.tool.js';
 import { createGetRepoGuidelinesTool } from './tools/get-repo-guidelines.tool.js';
+import { createLoadRepoSkillTool } from './tools/load-repo-skill.tool.js';
 import { createPublishReviewResultsTool } from './tools/publish-review-results.tool.js';
 import { createSearchRepositoryCodeTool } from './tools/search-repository-code.tool.js';
 import {
@@ -28,60 +31,101 @@ import {
 import {
   createLlmCallBudget,
   ReviewBudgetExceededError,
-  ReviewRunError,
   ReviewTimeoutError,
 } from './utils/budget.util.js';
 import { prepareDiff } from './utils/diff.util.js';
 
 /**
- * Across the orchestrator AND all sub-agents. A normal review needs ~15: about
- * 6 orchestrator turns plus a few turns per sub-agent.
+ * Validated review input. Parsing happens in code (fail-fast) — the payload
+ * is seeded into session state via `stateDelta`, never re-parsed from the
+ * user message inside an instruction callback.
  */
-export const DEFAULT_MAX_LLM_CALLS = 40;
-/** Kept below the Pub/Sub ack deadline (600s) so a run never outlives its delivery. */
-export const DEFAULT_REVIEW_TIMEOUT_MS = 8 * 60_000;
+export const reviewInputSchema = z.object({
+  prMeta: z.object({
+    provider: z.string().optional().default('github'),
+    owner: z.string().optional().default(''),
+    repo: z.string(),
+    number: z.number(),
+    title: z.string(),
+    author: z.string(),
+    branch: z.string(),
+    body: z.string().optional(),
+    baseRef: z.string().optional(),
+    headSha: z.string().optional(),
+  }),
+  diff: z.string(),
+  changedFiles: z.string().optional().default(''),
+  tickets: z.array(z.unknown()).optional().default([]),
+});
+
+export type ReviewExecutionInput = z.input<typeof reviewInputSchema>;
 
 export interface RunReviewOptions {
   llm: BaseLlm;
   baselineContext?: string | Record<string, string>;
-  contextLoader?: ContextLoader;
   gitAdapter?: GitAdapterContract;
   searchDiscussions?: DiscussionSearchFunction;
   storeDiscussion?: DiscussionStoreFunction;
   onPublishResult?: (payload: ReviewResultPayload) => Promise<void> | void;
-  /** Hard cap on LLM calls for the whole review, sub-agents included. */
+  /** Overrides LIMITS.maxLlmCalls (orchestrator and sub-agents combined). */
   maxLlmCalls?: number;
-  /** Hard wall-clock limit; in-flight LLM requests are aborted when it fires. */
+  /** Overrides LIMITS.reviewTimeoutMs; in-flight LLM requests are aborted when it fires. */
   timeoutMs?: number;
 }
 
-export interface ReviewExecutionInput {
-  prMeta: {
-    provider?: string;
-    owner?: string;
-    repo: string;
-    number: number;
-    title: string;
-    author: string;
-    branch: string;
-    body?: string;
-  };
-  diff: string;
-  changedFiles?: string;
-  tickets?: unknown[];
+/** Parses the persisted baseline context into its named sections. */
+export function parseBaselineSections(
+  baselineContext: string | Record<string, string> | undefined,
+): Record<string, string> {
+  if (!baselineContext) return {};
+  if (typeof baselineContext === 'object') return baselineContext;
+  const trimmed = baselineContext.trim();
+  if (!trimmed || trimmed === '{}') return {};
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>;
+    }
+  } catch {
+    // Not JSON — treat the whole string as the architecture section.
+  }
+  return { architecture: trimmed };
 }
 
+/**
+ * Runs the full PR review.
+ *
+ * Failures are loud: agent error events or a run that ends without calling
+ * publishReviewResults throw, instead of silently publishing a misleading
+ * "no findings" review. All bulk data (diff, PR meta, baseline context
+ * sections) is seeded through `stateDelta` — the user message is a short
+ * trigger line and no dependency object is ever serialized into model input.
+ */
 export async function runReview(
   input: ReviewExecutionInput,
   options: RunReviewOptions,
 ): Promise<ReviewResultPayload> {
-  const llm = options.llm;
+  let parsed: z.infer<typeof reviewInputSchema>;
+  try {
+    parsed = reviewInputSchema.parse(input);
+  } catch (err) {
+    // Malformed input is deterministic — redelivery cannot fix it.
+    if (err instanceof z.ZodError) {
+      throw new NonRetryableTaskError(
+        `Invalid review input: ${err.issues
+          .map((i) => `${i.path.join('.')}: ${i.message}`)
+          .join('; ')}`,
+      );
+    }
+    throw err;
+  }
+  const meta = parsed.prMeta;
+  const sections = parseBaselineSections(options.baselineContext);
+  const defaultRepo = `${meta.owner || ''}/${meta.repo}`.replace(/^\//, '');
+
   let resultPayload: ReviewResultPayload | null = null;
 
   const tools: OrchestratorTools = {
-    getRepoContext: createGetRepoContextTool({
-      contextLoader: options.contextLoader,
-    }),
     publishReviewResults: createPublishReviewResultsTool({
       onPublishResult: async (res) => {
         resultPayload = res;
@@ -90,46 +134,64 @@ export async function runReview(
         }
       },
     }),
-    getDiscussion: createGetDiscussionTool({
-      searchDiscussions: options.searchDiscussions,
-      defaultRepo: `${input.prMeta.owner}/${input.prMeta.repo}`,
-    }),
-    storeDiscussion: createStoreDiscussionTool({
-      storeDiscussion: options.storeDiscussion,
-      defaultRepo: `${input.prMeta.owner}/${input.prMeta.repo}`,
-      defaultPrNumber: input.prMeta.number,
-    }),
     searchRepositoryCode: createSearchRepositoryCodeTool({
       gitAdapter: options.gitAdapter,
-      defaultOwner: input.prMeta.owner,
-      defaultRepo: input.prMeta.repo,
+      defaultOwner: meta.owner,
+      defaultRepo: meta.repo,
     }),
     fetchRepositoryFile: createFetchRepositoryFileTool({
       gitAdapter: options.gitAdapter,
-      defaultOwner: input.prMeta.owner,
-      defaultRepo: input.prMeta.repo,
+      defaultOwner: meta.owner,
+      defaultRepo: meta.repo,
     }),
     getRepoGuidelines: createGetRepoGuidelinesTool({
       gitAdapter: options.gitAdapter,
-      defaultOwner: input.prMeta.owner,
-      defaultRepo: input.prMeta.repo,
+      defaultOwner: meta.owner,
+      defaultRepo: meta.repo,
+    }),
+    loadRepoSkill: createLoadRepoSkillTool({
+      gitAdapter: options.gitAdapter,
+      defaultOwner: meta.owner,
+      defaultRepo: meta.repo,
     }),
   };
 
-  const maxLlmCalls = options.maxLlmCalls ?? DEFAULT_MAX_LLM_CALLS;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
+  // Discussion tools are registered only when the host actually wired a
+  // store — otherwise the model would waste turns on permanent no-ops.
+  if (options.searchDiscussions) {
+    tools.getDiscussion = createGetDiscussionTool({
+      searchDiscussions: options.searchDiscussions,
+      defaultRepo,
+    });
+  }
+  if (options.storeDiscussion) {
+    tools.storeDiscussion = createStoreDiscussionTool({
+      storeDiscussion: options.storeDiscussion,
+      defaultRepo,
+      defaultPrNumber: meta.number,
+    });
+  }
+
+  const maxLlmCalls = options.maxLlmCalls ?? LIMITS.maxLlmCalls;
+  const timeoutMs = options.timeoutMs ?? LIMITS.reviewTimeoutMs;
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), timeoutMs);
   const budget = createLlmCallBudget(maxLlmCalls, abort.signal);
 
+  let failedSubAgents: string[] | undefined;
   const agent = createOrchestrator({
-    llm,
+    llm: options.llm,
     tools,
+    hasTickets: parsed.tickets.length > 0,
     budget,
+    onSubAgentFailure: (agents) => {
+      failedSubAgents = agents;
+    },
   });
-
-  const { diff } = prepareDiff(input.diff);
-  const runner = new InMemoryRunner({ agent });
+  const runner = new InMemoryRunner({
+    agent,
+    plugins: [new CoordinateGuardPlugin()],
+  });
   const userId = 'core-reviewer';
   // runEphemeral does not forward an abort signal, so manage the session here.
   const session = await runner.sessionService.createSession({
@@ -137,41 +199,43 @@ export async function runReview(
     userId,
   });
 
-  // ADK does not throw from a run: errors raised in callbacks or model calls
-  // end the run with an error event instead, so remember the first one.
-  let errorEvent: { code: string; message: string } | undefined;
+  const errors: string[] = [];
   const consume = async () => {
     for await (const event of runner.runAsync({
       userId,
       sessionId: session.id,
-      // The PR input travels via state, not the message: the orchestrator
-      // re-sends its whole history on every turn, so a diff in the message
-      // would be paid for again on each of them.
       newMessage: {
         parts: [
           {
-            text: `Review pull request ${input.prMeta.owner}/${input.prMeta.repo}#${input.prMeta.number}.`,
+            text:
+              `Review pull request ${meta.provider || 'github'}:${meta.owner || ''}/` +
+              `${meta.repo}#${meta.number} "${meta.title}". ` +
+              `The PR metadata, diff, changed-file paths, tickets, and repository baseline context are in session state.`,
           },
         ],
       },
       stateDelta: {
-        [STATE.prMeta]: input.prMeta,
-        [STATE.diff]: diff,
-        [STATE.changedFiles]: input.changedFiles ?? '',
-        [STATE.tickets]: input.tickets ?? [],
-        baselineContext:
-          typeof options.baselineContext === 'object'
-            ? JSON.stringify(options.baselineContext)
-            : options.baselineContext,
+        [STATE.prMeta]: meta,
+        [STATE.diff]: prepareDiff(parsed.diff).diff,
+        [STATE.changedFiles]: parsed.changedFiles,
+        [STATE.tickets]: parsed.tickets,
+        [STATE.ctxArchitecture]:
+          sections['architecture'] || ContextError.REPO_CONTEXT_NOT_LOADED,
+        [STATE.ctxModules]:
+          sections['modules'] || ContextError.REPO_CONTEXT_NOT_LOADED,
+        [STATE.ctxPatterns]:
+          sections['patterns'] || ContextError.REPO_CONTEXT_NOT_LOADED,
+        [STATE.ctxErrorHandling]:
+          sections['errorHandling'] || ContextError.REPO_CONTEXT_NOT_LOADED,
+        [STATE.ctxAgentDocs]: sections['agentDocs'] || '',
       },
       runConfig: { maxLlmCalls },
       abortSignal: abort.signal,
     })) {
-      if (event.errorCode && !errorEvent) {
-        errorEvent = {
-          code: event.errorCode,
-          message: event.errorMessage ?? '',
-        };
+      if (event.errorCode || event.errorMessage) {
+        errors.push(
+          `${event.errorCode ?? 'agent_error'}: ${event.errorMessage ?? 'unknown error'}`,
+        );
       }
     }
   };
@@ -193,23 +257,22 @@ export async function runReview(
 
   // A result published before a late failure is still a complete review.
   if (resultPayload) return resultPayload;
+  // Budget and timeout overruns surface as generic ADK error events; report
+  // them as the non-retryable failures they are, so they are not redelivered.
   if (abort.signal.aborted) throw new ReviewTimeoutError(timeoutMs);
   if (budget.exceeded()) {
     throw new ReviewBudgetExceededError(
       `Review exceeded its budget of ${maxLlmCalls} LLM calls.`,
     );
   }
-  if (errorEvent) throw new ReviewRunError(errorEvent.code, errorEvent.message);
-
+  if (failedSubAgents) throw new SubAgentFailedError(failedSubAgents);
+  if (errors.length > 0) {
+    throw new Error(`Code review agent failed: ${errors.join('; ')}`);
+  }
   if (!resultPayload) {
-    resultPayload = {
-      provider: input.prMeta.provider || 'github',
-      owner: input.prMeta.owner || '',
-      repo: input.prMeta.repo,
-      prNumber: input.prMeta.number,
-      summary: 'Code review completed with no automated findings generated.',
-      comments: [],
-    };
+    throw new Error(
+      `Code review agent finished without publishing a result (publishReviewResults was never called) for ${defaultRepo}#${meta.number}.`,
+    );
   }
 
   return resultPayload;

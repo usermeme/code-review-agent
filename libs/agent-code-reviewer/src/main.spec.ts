@@ -1,3 +1,4 @@
+import { NonRetryableTaskError } from '@code-review-agent/shared-types';
 import {
   BaseLlm,
   type BaseLlmConnection,
@@ -6,10 +7,10 @@ import {
 } from '@google/adk';
 import { describe, expect, it } from 'vitest';
 
+import { SubAgentFailedError } from './agents/orchestrator.agent.js';
 import { runReview } from './main.js';
 import {
   ReviewBudgetExceededError,
-  ReviewRunError,
   ReviewTimeoutError,
 } from './utils/budget.util.js';
 
@@ -86,13 +87,11 @@ function systemInstruction(request: LlmRequest): string {
 
 describe('runReview', () => {
   it('stops a model that never stops calling tools at the LLM call budget', async () => {
-    const llm = new ScriptedLlm(() =>
-      callTool('getDiscussion', { query: 'anything' }),
-    );
+    const llm = new ScriptedLlm(() => callTool('getRepoGuidelines', {}));
 
-    await expect(runReview(input, { llm, maxLlmCalls: 12 })).rejects.toThrow(
-      ReviewBudgetExceededError,
-    );
+    const failure = runReview(input, { llm, maxLlmCalls: 12 });
+    await expect(failure).rejects.toThrow(ReviewBudgetExceededError);
+    await expect(failure).rejects.toBeInstanceOf(NonRetryableTaskError);
     expect(llm.calls).toHaveLength(12);
   });
 
@@ -106,13 +105,15 @@ describe('runReview', () => {
     );
   });
 
-  it('fails instead of reporting "no findings" when the model request fails', async () => {
+  it('fails (retryably) instead of reporting "no findings" when the model request fails', async () => {
     const llm = new ScriptedLlm(() => ({
       errorCode: '429',
       errorMessage: 'RESOURCE_EXHAUSTED',
     }));
 
-    await expect(runReview(input, { llm })).rejects.toThrow(ReviewRunError);
+    const failure = runReview(input, { llm });
+    await expect(failure).rejects.toThrow('RESOURCE_EXHAUSTED');
+    await expect(failure).rejects.not.toBeInstanceOf(NonRetryableTaskError);
   });
 
   it('fails instead of publishing a clean review when a sub-agent fails', async () => {
@@ -141,7 +142,7 @@ describe('runReview', () => {
           published = true;
         },
       }),
-    ).rejects.toThrow(ReviewRunError);
+    ).rejects.toThrow(SubAgentFailedError);
     expect(published).toBe(false);
   });
 
@@ -201,7 +202,11 @@ describe('runReview', () => {
   });
 
   it('keeps the diff out of the conversation and filters lockfiles', async () => {
-    const llm = new ScriptedLlm(() => text('done'));
+    const llm = new ScriptedLlm((request) =>
+      requestText(request).includes('publishReviewResults')
+        ? text('done')
+        : callTool('publishReviewResults', { summary: 'ok', findings: [] }),
+    );
 
     await runReview(input, { llm });
 

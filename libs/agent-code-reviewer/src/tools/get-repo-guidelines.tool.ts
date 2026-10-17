@@ -2,6 +2,7 @@ import type { GitAdapterContract } from '@code-review-agent/shared-types';
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
+import { LIMITS } from '../constants/limits.constant.js';
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
 
 export interface RepoSkillSummary {
@@ -10,13 +11,8 @@ export interface RepoSkillSummary {
   description: string;
 }
 
-/**
- * What the orchestrator sees. The rules text itself only goes into session
- * state for the sub-agents: returning it here would put it in the
- * orchestrator's history and re-send it on every later turn.
- */
 export interface GetRepoGuidelinesResult {
-  rulesChars: number;
+  rules: string;
   ruleSources: string[];
   skills: RepoSkillSummary[];
   message?: string;
@@ -35,10 +31,6 @@ const CANDIDATE_RULE_FILES = [
   'CONTRIBUTING.md',
 ];
 
-const MAX_RULE_FILE_CHARS = 8_000;
-const MAX_TOTAL_RULES_CHARS = 20_000;
-const MAX_SKILLS = 15;
-const MAX_SKILL_DESCRIPTION_CHARS = 200;
 const IGNORED_SKILL_DIRS = /(^|\/)(node_modules|vendor|dist)\//;
 
 function truncate(text: string, max: number, label: string): string {
@@ -83,21 +75,19 @@ export function createGetRepoGuidelinesTool(
   return new FunctionTool({
     name: 'getRepoGuidelines',
     description:
-      'Fetches the repository agent rules (e.g. AGENTS.md, CLAUDE.md) and discovers available repository skills (e.g. in .agents/skills). Shares the rules with the reviewer sub-agents and returns the rule sources and a skills catalogue.',
-    parameters: z.object({
-      owner: z.string().optional().describe('Repository owner'),
-      repo: z.string().optional().describe('Repository name'),
-      ref: z.string().optional().describe('Git branch or ref'),
-    }),
-    execute: async (input, ctx): Promise<GetRepoGuidelinesResult> => {
+      'Fetches the repository agent rules (e.g. AGENTS.md, CLAUDE.md) and discovers available repository skills (e.g. in .agents/skills). Returns rules and a skills catalogue.',
+    parameters: z.object({}),
+    execute: async (_input, ctx): Promise<GetRepoGuidelinesResult> => {
       const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-      const owner = input.owner || meta?.owner || deps.defaultOwner || '';
-      const repo = input.repo || meta?.repo || deps.defaultRepo || '';
-      const ref = input.ref || meta?.branch;
+      // Owner/repo/ref are fixed to the PR under review (state/deps only) —
+      // a prompt-injected agent cannot point this tool at another repository.
+      const owner = meta?.owner || deps.defaultOwner || '';
+      const repo = meta?.repo || deps.defaultRepo || '';
+      const ref = meta?.branch;
 
       if (!deps.gitAdapter) {
         return {
-          rulesChars: 0,
+          rules: '',
           ruleSources: [],
           skills: [],
           message: 'Git adapter is not configured.',
@@ -106,34 +96,42 @@ export function createGetRepoGuidelinesTool(
 
       if (!owner || !repo) {
         return {
-          rulesChars: 0,
+          rules: '',
           ruleSources: [],
           skills: [],
           message: 'Owner and repo are required.',
         };
       }
 
-      // 1. Fetch candidate rule files
+      // 1. Fetch candidate rule files (in parallel — this sits on the
+      // critical path of every review)
+      const ruleResults = await Promise.all(
+        CANDIDATE_RULE_FILES.map(async (fileName) => {
+          try {
+            const res = await deps.gitAdapter?.getFileContent(
+              owner,
+              repo,
+              fileName,
+              ref,
+            );
+            if (res?.content && res.content.trim()) {
+              return { fileName, content: res.content.trim() };
+            }
+          } catch {
+            // File does not exist, continue
+          }
+          return null;
+        }),
+      );
+
       const collectedRules: string[] = [];
       const ruleSources: string[] = [];
-
-      for (const fileName of CANDIDATE_RULE_FILES) {
-        try {
-          const res = await deps.gitAdapter.getFileContent(
-            owner,
-            repo,
-            fileName,
-            ref,
-          );
-          if (res?.content && res.content.trim()) {
-            collectedRules.push(
-              `### ${fileName}\n\n${truncate(res.content.trim(), MAX_RULE_FILE_CHARS, fileName)}`,
-            );
-            ruleSources.push(fileName);
-          }
-        } catch {
-          // File does not exist, continue
-        }
+      for (const result of ruleResults) {
+        if (!result) continue;
+        collectedRules.push(
+          `### ${result.fileName}\n\n${truncate(result.content, LIMITS.maxRuleFileChars, result.fileName)}`,
+        );
+        ruleSources.push(result.fileName);
       }
 
       // 2. Discover available repository skills
@@ -146,6 +144,8 @@ export function createGetRepoGuidelinesTool(
           'filename:SKILL.md',
         );
 
+        // Cap the fetch fan-out: a repo with hundreds of SKILL.md files must
+        // not turn catalogue discovery into hundreds of adapter round-trips.
         // Repos often mirror the same skills for several agent tools
         // (.agents/, .opencode/, ...); fetch each skill directory name once.
         const seenSkillDirs = new Set<string>();
@@ -161,40 +161,44 @@ export function createGetRepoGuidelinesTool(
             seenSkillDirs.add(dir);
             return true;
           })
-          .slice(0, MAX_SKILLS);
+          .slice(0, LIMITS.maxSkillCatalogueEntries);
 
-        for (const file of skillFiles) {
-          try {
-            const skillContent = await deps.gitAdapter.getFileContent(
-              owner,
-              repo,
-              file.path,
-              ref,
-            );
-            const { name, description } = parseSkillFrontmatter(
-              skillContent.content,
-            );
-            const skillName =
-              name || file.path.split('/').slice(-2, -1)[0] || file.name;
-            skills.push({
-              name: skillName,
-              path: file.path,
-              description: (description || 'No description provided.').slice(
-                0,
-                MAX_SKILL_DESCRIPTION_CHARS,
-              ),
-            });
-          } catch {
-            // Failed to fetch specific skill file, skip
-          }
-        }
+        const skillResults = await Promise.all(
+          skillFiles.map(async (file) => {
+            try {
+              const skillContent = await deps.gitAdapter?.getFileContent(
+                owner,
+                repo,
+                file.path,
+                ref,
+              );
+              if (!skillContent) return null;
+              const { name, description } = parseSkillFrontmatter(
+                skillContent.content,
+              );
+              const skillName =
+                name || file.path.split('/').slice(-2, -1)[0] || file.name;
+              return {
+                name: skillName,
+                path: file.path,
+                description: description || 'No description provided.',
+              } satisfies RepoSkillSummary;
+            } catch {
+              // Failed to fetch specific skill file, skip
+              return null;
+            }
+          }),
+        );
+        skills.push(...skillResults.filter((s) => s !== null));
       } catch {
         // Code search not available or failed, continue with rules
       }
 
+      // Capped: the rules are returned to the orchestrator, whose history is
+      // re-sent on every later turn.
       const combinedRules = truncate(
         collectedRules.join('\n\n---\n\n'),
-        MAX_TOTAL_RULES_CHARS,
+        LIMITS.maxTotalRuleChars,
         'repository rules',
       );
 
@@ -208,12 +212,9 @@ export function createGetRepoGuidelinesTool(
       }
 
       return {
-        rulesChars: combinedRules.length,
+        rules: combinedRules || '(no agent rules found in repository)',
         ruleSources,
         skills,
-        message: combinedRules
-          ? 'Rules loaded and shared with the reviewer sub-agents.'
-          : 'No agent rules found in repository.',
       };
     },
   });

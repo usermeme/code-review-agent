@@ -1,10 +1,18 @@
-import { prepareDiff } from '@code-review-agent/agent-code-reviewer';
-import { LlmFactory } from '@code-review-agent/llm';
+import { randomUUID } from 'node:crypto';
+
+import {
+  parseBaselineSections,
+  prepareDiff,
+  type ReviewExecutionInput,
+  type RunReviewOptions,
+  type StoreDiscussionInput,
+} from '@code-review-agent/agent-code-reviewer';
+import type { ContextLoader } from '@code-review-agent/agent-context-builder';
 import {
   ContextReadyPayload,
   GitAdapterContract,
+  NonRetryableTaskError,
   PREventPayload,
-  PRMeta,
   ReviewResultPayload,
 } from '@code-review-agent/shared-types';
 import type { BaseLlm } from '@google/adk';
@@ -12,12 +20,35 @@ import { PubSub } from '@google-cloud/pubsub';
 import { FastifyBaseLogger } from 'fastify';
 
 import type { CoreEnvService } from '../env.js';
-import { GitAdapterClient } from '../modules/adapter/git-adapter.client.js';
+import { BaselineLockRepository } from '../modules/database/repositories/baseline-lock.repository.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
+import { DiscussionRepository } from '../modules/database/repositories/discussion.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
-import { ReviewRunRepository } from '../modules/database/repositories/review-run.repository.js';
 import type { AgentService } from './agent.service.js';
-import { isRetryableError } from './review-errors.js';
+
+/** Poll interval and total wait while another instance holds the baseline lock. */
+const BASELINE_LOCK_POLL_MS = 5_000;
+const BASELINE_LOCK_WAIT_MS = 20 * 60 * 1000;
+
+interface BaselineBuildParams {
+  baselineKey: string;
+  prKey: string;
+  provider: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
+  meta: {
+    title?: string;
+    author?: string;
+    branch?: string;
+    body?: string;
+    cloneUrl?: string;
+    baseRef?: string;
+  };
+  diff: string;
+  changedFiles?: string[];
+  logger?: FastifyBaseLogger;
+}
 
 export interface PREventResult {
   success: boolean;
@@ -25,64 +56,77 @@ export interface PREventResult {
   message: string;
 }
 
-/** Pub/Sub delivery metadata for the event being processed. */
-export interface PREventDelivery {
-  messageId?: string;
-}
-
-const REVIEW_ACTIONS = new Set([
-  'opened',
-  'synchronize',
-  'reopened',
-  'review_requested',
-  'manual_trigger',
-]);
-
 export interface EventOrchestratorDependencies {
   envService: CoreEnvService;
   prRepository: PrRepository;
   contextRepository: ContextRepository;
-  reviewRunRepository: ReviewRunRepository;
+  /** Optional cross-instance lock for baseline builds (Firestore-backed). */
+  baselineLockRepository?: BaselineLockRepository;
+  /** Optional review-discussion memory backing getDiscussion/storeDiscussion. */
+  discussionRepository?: DiscussionRepository;
   pubsub: PubSub;
   agentService: AgentService;
-  gitAdapterClient?: GitAdapterContract;
-  llm?: BaseLlm;
+  gitAdapterClient: GitAdapterContract;
+  llm: BaseLlm;
+  /** Optional cheaper model for context-build chunk summarization. */
+  summaryLlm?: BaseLlm;
 }
 
 export class EventOrchestratorService {
   private pubsub: PubSub;
   private prRepository: PrRepository;
   private contextRepository: ContextRepository;
-  private reviewRunRepository: ReviewRunRepository;
+  private baselineLockRepository?: BaselineLockRepository;
+  private discussionRepository?: DiscussionRepository;
   private envService: CoreEnvService;
   private agentService: AgentService;
   private gitAdapterClient: GitAdapterContract;
   private llm: BaseLlm;
+  private summaryLlm?: BaseLlm;
+  /** Unique per-process id, used as the baseline-lock owner. */
+  private readonly lockOwner = randomUUID();
+  /**
+   * In-process dedup for baseline builds: concurrent PR events (or Pub/Sub
+   * push retries) for the same repo must not trigger two full tarball
+   * downloads + summarization runs. Cross-instance dedup is handled by the
+   * optional Firestore-backed baselineLockRepository.
+   */
+  private readonly baselineBuilds = new Map<string, Promise<string>>();
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub;
     this.prRepository = deps.prRepository;
     this.contextRepository = deps.contextRepository;
-    this.reviewRunRepository = deps.reviewRunRepository;
+    this.baselineLockRepository = deps.baselineLockRepository;
+    this.discussionRepository = deps.discussionRepository;
     this.envService = deps.envService;
     this.agentService = deps.agentService;
-
-    const adapterUrl = deps.envService.get('GIT_ADAPTER_URL');
-    this.gitAdapterClient =
-      deps.gitAdapterClient ?? new GitAdapterClient(adapterUrl);
-
-    this.llm = deps.llm ?? new LlmFactory(deps.envService.data).createLlm();
+    this.gitAdapterClient = deps.gitAdapterClient;
+    this.llm = deps.llm;
+    this.summaryLlm = deps.summaryLlm;
   }
 
-  /**
-   * Processes a PR event at most once per revision. Redeliveries and
-   * duplicate events are acknowledged without re-running the review; failures
-   * are rethrown (so Pub/Sub redelivers) only when a retry can succeed.
-   */
+  /** Guards against saving/using an "empty" context payload (cache poisoning). */
+  private isValidSummary(
+    summary: string | null | undefined,
+  ): summary is string {
+    const trimmed = summary?.trim();
+    return !!trimmed && trimmed !== '{}' && trimmed !== '{"summary":""}';
+  }
+
+  /** Loads a persisted baseline context and parses it into named sections. */
+  private createContextLoader(): ContextLoader {
+    return async (key: string) => {
+      const stored = await this.contextRepository.getContext(key);
+      if (!stored?.summary) return null;
+      const sections = parseBaselineSections(stored.summary);
+      return Object.keys(sections).length > 0 ? sections : null;
+    };
+  }
+
   async ingestPREvent(
     req: PREventPayload,
     logger?: FastifyBaseLogger,
-    delivery: PREventDelivery = {},
   ): Promise<PREventResult> {
     const meta = req.prMeta;
     if (!meta) {
@@ -93,81 +137,6 @@ export class EventOrchestratorService {
       };
     }
 
-    const { provider, owner, repo, prNumber } = meta;
-    const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
-    const runKey = this.runKeyFor(req, prKey, delivery);
-
-    if (runKey) {
-      const lock = await this.reviewRunRepository.acquire(runKey);
-      if ('reason' in lock) {
-        logger?.info(
-          `[Core] Skipping ${meta.action} for ${prKey}: run ${runKey} is ${lock.reason}.`,
-        );
-        return {
-          success: true,
-          status: 'duplicate',
-          message: `Skipped: run ${lock.reason}`,
-        };
-      }
-      logger?.info(`[Core] Run ${runKey} attempt ${lock.attempt}.`);
-    }
-
-    try {
-      const response = await this.processPREvent(req, meta, logger);
-      if (runKey) await this.reviewRunRepository.complete(runKey);
-      return response;
-    } catch (error) {
-      const retryable = isRetryableError(error);
-      logger?.error(
-        `[Core] Processing ${meta.action} for ${prKey} failed (${retryable ? 'retryable' : 'permanent'}): ${String(error)}`,
-      );
-      if (runKey) {
-        await this.reviewRunRepository.fail(runKey, String(error), retryable);
-      }
-      await this.prRepository.updatePRStatus(prKey, {
-        status: 'failed',
-        error: String(error),
-      });
-      if (retryable) throw error;
-      return {
-        success: false,
-        status: 'failed',
-        message: String(error),
-      };
-    }
-  }
-
-  /**
-   * Identity of one unit of work, or undefined for events that do no
-   * expensive work. Review events are keyed by head commit so `opened` and
-   * `review_requested` for the same revision review once; a manual `/review`
-   * is keyed by its message so it can deliberately re-review a revision.
-   */
-  private runKeyFor(
-    req: PREventPayload,
-    prKey: string,
-    delivery: PREventDelivery,
-  ): string | undefined {
-    const meta = req.prMeta;
-    if (!meta) return undefined;
-
-    if (meta.action === 'closed' && meta.isIncrementalUpdate) {
-      return `${prKey}#merged`;
-    }
-    if (!REVIEW_ACTIONS.has(meta.action)) return undefined;
-    if (meta.action !== 'manual_trigger' && meta.headSha) {
-      return `${prKey}@${meta.headSha}`;
-    }
-    return delivery.messageId
-      ? `${prKey}#msg-${delivery.messageId}`
-      : undefined;
-  }
-
-  private async processPREvent(
-    req: PREventPayload,
-    meta: PRMeta,
-    logger?: FastifyBaseLogger,
-  ): Promise<PREventResult> {
     const { provider, owner, repo, prNumber, action } = meta;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
     const baselineKey = `${provider}:${owner}:${repo}:0`;
@@ -188,6 +157,8 @@ export class EventOrchestratorService {
         ref: meta.baseRef,
         isIncrementalUpdate: true,
         llm: this.llm,
+        summaryLlm: this.summaryLlm,
+        contextLoader: this.createContextLoader(),
         gitAdapter: this.gitAdapterClient,
       });
 
@@ -202,7 +173,13 @@ export class EventOrchestratorService {
       };
     }
 
-    if (REVIEW_ACTIONS.has(action)) {
+    if (
+      action === 'opened' ||
+      action === 'synchronize' ||
+      action === 'reopened' ||
+      action === 'review_requested' ||
+      action === 'manual_trigger'
+    ) {
       let diff = req.diff || '';
       let changedFiles = req.changedFiles || [];
 
@@ -234,14 +211,9 @@ export class EventOrchestratorService {
       const existingContext =
         await this.contextRepository.getContext(baselineKey);
 
-      const isValidContext =
-        existingContext?.summary &&
-        existingContext.summary.trim() !== '' &&
-        existingContext.summary.trim() !== '{}' &&
-        existingContext.summary.trim() !== '{"summary":""}';
-
+      const storedSummary = existingContext?.summary;
       const baselineSummary =
-        (isValidContext ? existingContext.summary : null) ??
+        (this.isValidSummary(storedSummary) ? storedSummary : null) ??
         (await this.buildAndSaveBaselineContext({
           baselineKey,
           prKey,
@@ -273,7 +245,8 @@ export class EventOrchestratorService {
         ? changedFiles.join('\n')
         : (changedFiles ?? '');
 
-      const reviewResult = await this.agentService.runReview(
+      const reviewResult = await this.runReviewOrFail(
+        prKey,
         {
           prMeta: {
             provider,
@@ -284,19 +257,17 @@ export class EventOrchestratorService {
             author: meta.author,
             branch: meta.branch,
             body: meta.body,
+            baseRef: meta.baseRef,
+            headSha: meta.headSha,
           },
           diff,
           changedFiles: changedFilesStr,
           tickets: [],
         },
-        {
-          llm: this.llm,
-          baselineContext: baselineSummary,
-          gitAdapter: this.gitAdapterClient,
-        },
+        this.createRunReviewOptions(baselineSummary),
       );
 
-      await this.handleReviewResults(reviewResult, logger);
+      await this.handleReviewResults(reviewResult, prKey, logger);
 
       return {
         success: true,
@@ -337,7 +308,8 @@ export class EventOrchestratorService {
       ? pendingPR.changedFiles.join('\n')
       : (pendingPR?.changedFiles ?? '');
 
-    const reviewResult = await this.agentService.runReview(
+    const reviewResult = await this.runReviewOrFail(
+      prKey,
       {
         prMeta: {
           provider,
@@ -348,27 +320,81 @@ export class EventOrchestratorService {
           author: pendingPR?.prMeta?.['author'] || '',
           branch: pendingPR?.prMeta?.['branch'] || '',
           body: pendingPR?.prMeta?.['body'] || '',
+          baseRef: pendingPR?.prMeta?.['baseRef'],
         },
         diff: pendingPR?.diff || '',
         changedFiles: changedFilesStr,
         tickets: [],
       },
-      {
-        llm: this.llm,
-        baselineContext: summary,
-        gitAdapter: this.gitAdapterClient,
-      },
+      this.createRunReviewOptions(summary),
     );
 
-    await this.handleReviewResults(reviewResult, logger);
+    await this.handleReviewResults(reviewResult, prKey, logger);
+  }
+
+  /**
+   * runReview options shared by both review call sites. When a discussion
+   * repository is configured, the agent's getDiscussion/storeDiscussion tools
+   * are backed by it; otherwise they stay unregistered.
+   */
+  private createRunReviewOptions(baselineContext: string): RunReviewOptions {
+    const discussionRepository = this.discussionRepository;
+    return {
+      llm: this.llm,
+      baselineContext,
+      gitAdapter: this.gitAdapterClient,
+      ...(discussionRepository
+        ? {
+            searchDiscussions: (repo: string, query: string, limit: number) =>
+              discussionRepository.search(repo, query, limit),
+            storeDiscussion: (input: StoreDiscussionInput) =>
+              discussionRepository.store(input),
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * Runs the review; on failure marks the PR as failed and rethrows so the
+   * failure is visible (Pub/Sub nack / 500) instead of silently publishing a
+   * misleading "no findings" review.
+   */
+  private async runReviewOrFail(
+    prKey: string,
+    input: ReviewExecutionInput,
+    options: RunReviewOptions,
+  ): Promise<ReviewResultPayload> {
+    try {
+      return await this.agentService.runReview(input, options);
+    } catch (error) {
+      await this.prRepository
+        .updatePRStatus(prKey, { status: 'failed', error: String(error) })
+        .catch(() => {
+          // status bookkeeping must not mask the original failure
+        });
+      throw error;
+    }
   }
 
   async handleReviewResults(
     payload: ReviewResultPayload,
+    expectedPrKey: string,
     logger?: FastifyBaseLogger,
   ): Promise<void> {
     const { provider, owner, repo, prNumber, summary } = payload;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
+
+    // Correlation check at the trust boundary: the review must carry the
+    // coordinates of the event that triggered it. A payload redirected to
+    // another repo/PR (e.g. by prompt injection) is rejected before it is
+    // ever published to the results topic.
+    if (prKey !== expectedPrKey) {
+      // Deterministic, and it fires after a fully paid review: a redelivery
+      // would pay again and be rejected again.
+      throw new NonRetryableTaskError(
+        `Review result coordinates (${prKey}) do not match the originating PR event (${expectedPrKey}); refusing to publish.`,
+      );
+    }
 
     logger?.info(
       `[Core] Handling review results for ${prKey}. Publishing to Review Results topic.`,
@@ -390,25 +416,100 @@ export class EventOrchestratorService {
     }
   }
 
-  private async buildAndSaveBaselineContext(params: {
-    baselineKey: string;
-    prKey: string;
-    provider: string;
-    owner: string;
-    repo: string;
-    prNumber: number;
-    meta: {
-      title?: string;
-      author?: string;
-      branch?: string;
-      body?: string;
-      cloneUrl?: string;
-      baseRef?: string;
-    };
-    diff: string;
-    changedFiles?: string[];
-    logger?: FastifyBaseLogger;
-  }): Promise<string> {
+  private buildAndSaveBaselineContext(
+    params: BaselineBuildParams,
+  ): Promise<string> {
+    // Dedup concurrent baseline builds for the same repository (e.g. an
+    // 'opened' + 'review_requested' pair, or a Pub/Sub push retry after a
+    // timeout): reuse the in-flight build instead of paying for a second
+    // tarball download + full summarization run.
+    const inFlight = this.baselineBuilds.get(params.baselineKey);
+    if (inFlight !== undefined) {
+      params.logger?.info(
+        `[Core] Baseline build for ${params.baselineKey} already in flight; awaiting it.`,
+      );
+      return inFlight;
+    }
+
+    const build = this.doBuildAndSaveBaselineContext(params).finally(() => {
+      this.baselineBuilds.delete(params.baselineKey);
+    });
+    this.baselineBuilds.set(params.baselineKey, build);
+    return build;
+  }
+
+  /**
+   * Cross-instance dedup wrapper: acquires the Firestore baseline lock (when
+   * configured) so a burst of PR events across Cloud Run instances pays for
+   * the expensive tarball + summarization build only once. Waiters reuse the
+   * winner's stored context; on lock timeout we build anyway (correctness
+   * over dedup).
+   */
+  private async doBuildAndSaveBaselineContext(
+    params: BaselineBuildParams,
+  ): Promise<string> {
+    const lock = this.baselineLockRepository;
+    if (!lock) {
+      return this.buildBaselineNow(params);
+    }
+
+    let acquired = await lock.tryAcquire(params.baselineKey, this.lockOwner);
+    if (!acquired) {
+      params.logger?.info(
+        `[Core] Baseline build for ${params.baselineKey} is locked by another instance; waiting for its context.`,
+      );
+      const outcome = await this.awaitBaselineSlot(params.baselineKey, lock);
+      if (outcome && typeof outcome === 'object') {
+        params.logger?.info(
+          `[Core] Baseline context for ${params.baselineKey} became available while waiting; reusing it.`,
+        );
+        return outcome.summary;
+      }
+      acquired = outcome === 'acquire';
+      if (!acquired) {
+        params.logger?.warn(
+          `[Core] Timed out waiting for the baseline lock on ${params.baselineKey}; building anyway.`,
+        );
+      }
+    }
+
+    try {
+      return await this.buildBaselineNow(params);
+    } finally {
+      if (acquired) {
+        await lock.release(params.baselineKey, this.lockOwner);
+      }
+    }
+  }
+
+  /**
+   * Waits for another instance's baseline build. Resolves with the stored
+   * summary once it appears, `'acquire'` when this instance took over the
+   * (expired) lock, or null after the wait budget — the caller then builds
+   * anyway.
+   */
+  private async awaitBaselineSlot(
+    baselineKey: string,
+    lock: BaselineLockRepository,
+  ): Promise<{ summary: string } | 'acquire' | null> {
+    const deadline = Date.now() + BASELINE_LOCK_WAIT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, BASELINE_LOCK_POLL_MS),
+      );
+      const stored = await this.contextRepository.getContext(baselineKey);
+      const storedSummary = stored?.summary;
+      if (this.isValidSummary(storedSummary)) {
+        return { summary: storedSummary };
+      }
+      if (await lock.tryAcquire(baselineKey, this.lockOwner)) {
+        return 'acquire';
+      }
+    }
+    return null;
+  }
+
+  private async buildBaselineNow(params: BaselineBuildParams): Promise<string> {
     params.logger?.info(
       `[Core] No baseline context found for ${params.baselineKey}. Building context in-process.`,
     );
@@ -439,18 +540,15 @@ export class EventOrchestratorService {
       ref: params.meta.baseRef || 'main',
       isIncrementalUpdate: false,
       llm: this.llm,
+      summaryLlm: this.summaryLlm,
+      contextLoader: this.createContextLoader(),
       gitAdapter: this.gitAdapterClient,
     });
 
     const summary =
       typeof sections === 'string' ? sections : JSON.stringify(sections);
-    const isValid =
-      summary &&
-      summary.trim() !== '' &&
-      summary.trim() !== '{}' &&
-      summary.trim() !== '{"summary":""}';
 
-    if (isValid) {
+    if (this.isValidSummary(summary)) {
       await this.contextRepository.saveContext(params.baselineKey, { summary });
     } else {
       params.logger?.warn(

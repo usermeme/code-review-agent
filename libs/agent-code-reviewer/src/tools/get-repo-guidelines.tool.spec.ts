@@ -68,8 +68,9 @@ More content...`;
       mockContext,
     )) as GetRepoGuidelinesResult;
 
-    expect(result.rulesChars).toBeGreaterThan(0);
-    expect(result).not.toHaveProperty('rules');
+    expect(result.rules).toContain(
+      '# Agent Rules\nAlways prefix with pnpm nx.',
+    );
     expect(result.ruleSources).toContain('AGENTS.md');
     expect(result.skills).toHaveLength(1);
     expect(result.skills[0]).toEqual({
@@ -93,7 +94,7 @@ More content...`;
       {},
       undefined,
     )) as GetRepoGuidelinesResult;
-    expect(result.rulesChars).toBe(0);
+    expect(result.rules).toBe('');
     expect(result.skills).toHaveLength(0);
     expect(result.message).toContain('Git adapter is not configured');
   });
@@ -127,21 +128,16 @@ More content...`;
       defaultOwner: 'test-owner',
       defaultRepo: 'test-repo',
     });
-    const stateMap = new Map<string, unknown>();
-    const ctx = {
-      state: {
-        set: vi.fn((k, v) => stateMap.set(k, v)),
-        get: vi.fn((k) => stateMap.get(k)),
-      },
-    };
 
-    const result = (await tool.execute({}, ctx)) as GetRepoGuidelinesResult;
+    const result = (await tool.execute(
+      {},
+      undefined,
+    )) as GetRepoGuidelinesResult;
 
     expect(result.skills.map((s) => s.path)).toEqual([
       '.agents/skills/nx/SKILL.md',
     ]);
-    const storedRules = stateMap.get('repoctx:agentDocs') as string;
-    expect(storedRules.length).toBeLessThan(21_000);
-    expect(storedRules).toContain('truncated');
+    expect(result.rules.length).toBeLessThan(21_000);
+    expect(result.rules).toContain('truncated');
   });
 });

@@ -1,16 +1,12 @@
-import { PubSub } from '@google-cloud/pubsub';
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import fastifyRawBody from 'fastify-raw-body';
 
-import type { IngressEnvService } from './env.js';
 import { healthModule } from './modules/health/health.module.js';
 import { GithubIngressService } from './modules/webhooks/ingress.service.js';
 import { webhooksModule } from './modules/webhooks/webhooks.module.js';
 
 export interface BuildServerOptions {
-  envService: IngressEnvService;
-  pubsub: PubSub;
-  ingressService?: GithubIngressService;
+  ingressService: GithubIngressService;
   fastifyOptions?: FastifyServerOptions;
 }
 
@@ -26,12 +22,7 @@ export async function buildServer(
     runFirst: true,
   });
 
-  const ingressService =
-    options.ingressService ??
-    new GithubIngressService({
-      pubsub: options.pubsub,
-      envService: options.envService,
-    });
+  const { ingressService } = options;
 
   // 1. Health check module
   await server.register(healthModule);

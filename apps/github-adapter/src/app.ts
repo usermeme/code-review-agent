@@ -1,16 +1,12 @@
-import { PubSub } from '@google-cloud/pubsub';
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 
-import type { AdapterEnvService } from './env.js';
 import { providerRoutes } from './modules/api/provider.routes.js';
 import { GithubService } from './modules/github/github.service.js';
 import { healthModule } from './modules/health/health.module.js';
 import { pubsubModule } from './modules/pubsub/pubsub.module.js';
 
 export interface BuildServerOptions {
-  envService: AdapterEnvService;
-  pubsub?: PubSub;
-  githubService?: GithubService;
+  githubService: GithubService;
   fastifyOptions?: FastifyServerOptions;
 }
 
@@ -19,11 +15,7 @@ export async function buildServer(
 ): Promise<FastifyInstance> {
   const server = Fastify(options.fastifyOptions ?? { logger: true });
 
-  const githubService =
-    options.githubService ??
-    new GithubService({
-      envService: options.envService,
-    });
+  const { githubService } = options;
 
   // 1. Health check module
   await server.register(healthModule);

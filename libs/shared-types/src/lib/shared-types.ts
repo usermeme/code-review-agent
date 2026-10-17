@@ -40,7 +40,7 @@ export interface PRMeta {
   cloneUrl?: string;
   baseRef?: string;
   isIncrementalUpdate?: boolean;
-  /** Head commit of the PR; with prKey it identifies one reviewable revision. */
+  /** Head commit of the PR at the time of the event. */
   headSha?: string;
 }
 
@@ -52,7 +52,14 @@ export interface PREventPayload {
 
 export interface ReviewCommentPayload {
   path: string;
+  /**
+   * NEW-side line number the comment anchors to (mapped to GitHub's `line`).
+   * Named `position` for historical reasons — it is a file line number, not
+   * a diff-hunk position.
+   */
   position?: number;
+  /** NEW-side start line for multi-line comments (mapped to GitHub's `start_line`). */
+  startPosition?: number;
   line?: number;
   body: string;
 }
@@ -75,7 +82,6 @@ export interface WebhookEventPayload {
   htmlUrl: string;
   cloneUrl?: string;
   ref?: string;
-  token?: string;
   installationId?: number;
   isIncrementalUpdate?: boolean;
 }
@@ -130,4 +136,17 @@ export interface GitAdapterContract {
     ref?: string,
   ): Promise<FileContentResult>;
   getRepoTarball(owner: string, repo: string, ref?: string): Promise<Response>;
+}
+
+/**
+ * An error whose retry cannot succeed (malformed input, a repository with
+ * nothing summarizable, ...). Consumers should ack-and-record the failure
+ * instead of nacking — redelivery would only repeat the same paid work and
+ * eventually hit the dead-letter path anyway.
+ */
+export class NonRetryableTaskError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'NonRetryableTaskError';
+  }
 }

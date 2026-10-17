@@ -114,6 +114,30 @@ function truncateLongFile(content: string): string {
   ].join('\n');
 }
 
+/**
+ * True when a repo-relative path matches the ignore lists (lockfiles,
+ * binaries, generated dirs). Shared by the baseline tree walk and the
+ * incremental changed-file path so both modes filter identically.
+ */
+export function isIgnoredPath(relPath: string): boolean {
+  const segments = relPath.split('/');
+  const base = segments[segments.length - 1];
+  if (IGNORED_FILES.has(base)) return true;
+  if (BINARY_EXTENSIONS.has(extension(base))) return true;
+  return segments.slice(0, -1).some((dir) => IGNORED_DIRS.has(dir));
+}
+
+/**
+ * Applies the content-level filters (size cap, binary NUL check, generated
+ * blob detection, long-file truncation). Returns the sanitized content, or
+ * null when the file should be skipped entirely.
+ */
+export function acceptFileContent(content: string): string | null {
+  if (content.length > MAX_FILE_BYTES) return null;
+  if (content.includes('\u0000') || looksGenerated(content)) return null;
+  return truncateLongFile(content);
+}
+
 export async function collectFiles(
   rootDir: string,
   extraIgnores: string[] = [],
@@ -131,11 +155,7 @@ export async function collectFiles(
         continue;
       }
       if (!entry.isFile()) continue;
-      if (
-        IGNORED_FILES.has(entry.name) ||
-        BINARY_EXTENSIONS.has(extension(entry.name))
-      )
-        continue;
+      if (isIgnoredPath(rel)) continue;
       if (extraIgnoreRegexes.some((regex) => regex.test(rel))) continue;
       const info = await stat(full);
       if (info.size > MAX_FILE_BYTES) continue;
@@ -145,12 +165,12 @@ export async function collectFiles(
       } catch {
         continue;
       }
-      if (content.includes('\u0000') || looksGenerated(content)) continue;
-      const truncated = truncateLongFile(content);
+      const accepted = acceptFileContent(content);
+      if (accepted === null) continue;
       files.push({
         path: rel,
-        content: truncated,
-        tokens: estimateTokens(truncated),
+        content: accepted,
+        tokens: estimateTokens(accepted),
       });
     }
   }

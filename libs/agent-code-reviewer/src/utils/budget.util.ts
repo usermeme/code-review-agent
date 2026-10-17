@@ -1,3 +1,4 @@
+import { NonRetryableTaskError } from '@code-review-agent/shared-types';
 import type {
   SingleBeforeModelCallback,
   SingleBeforeToolCallback,
@@ -8,28 +9,22 @@ import type {
  * are advisory only; these callbacks are what actually stops a run.
  */
 
-export class ReviewBudgetExceededError extends Error {
+/**
+ * Non-retryable: a redelivery would spend the same budget again and fail the
+ * same way, so Pub/Sub must ack instead of redelivering.
+ */
+export class ReviewBudgetExceededError extends NonRetryableTaskError {
   constructor(message: string) {
     super(message);
     this.name = 'ReviewBudgetExceededError';
   }
 }
 
-export class ReviewTimeoutError extends Error {
+/** Non-retryable for the same reason as {@link ReviewBudgetExceededError}. */
+export class ReviewTimeoutError extends NonRetryableTaskError {
   constructor(timeoutMs: number) {
     super(`Review exceeded its ${timeoutMs}ms time limit and was aborted.`);
     this.name = 'ReviewTimeoutError';
-  }
-}
-
-/** The run ended with an ADK error event, e.g. a failed model request. */
-export class ReviewRunError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(`Review run failed (${code}): ${message}`);
-    this.name = 'ReviewRunError';
   }
 }
 

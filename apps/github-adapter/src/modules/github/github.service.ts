@@ -1,6 +1,5 @@
 import { Octokit } from '@octokit/rest';
 
-import type { AdapterEnvService } from '../../env.js';
 import {
   CodeSearchResult,
   FileContentResult,
@@ -12,17 +11,14 @@ import {
 } from './interfaces/github.interface.js';
 
 export interface GithubServiceDependencies {
-  envService: AdapterEnvService;
-  octokit?: Octokit;
-  token?: string;
+  octokit: Octokit;
 }
 
 export class GithubService implements GitAdapterContract {
   private octokit: Octokit;
 
   constructor(deps: GithubServiceDependencies) {
-    const token = deps.token ?? deps.envService.get('GITHUB_TOKEN');
-    this.octokit = deps.octokit ?? new Octokit({ auth: token });
+    this.octokit = deps.octokit;
   }
 
   private get octokitClient(): Octokit {
@@ -250,19 +246,31 @@ export class GithubService implements GitAdapterContract {
     }
 
     // Post inline comments if commit_id is available
+    let postedComments = 0;
+    let failedComments = 0;
     if (commit_id && comments && comments.length > 0) {
       for (const comment of comments) {
         try {
+          const line = comment.line ?? comment.position;
+          // Multi-line findings anchor to their full range; GitHub requires
+          // start_line < line (side defaults to RIGHT, the NEW side).
+          const startLine =
+            comment.startPosition && line && comment.startPosition < line
+              ? comment.startPosition
+              : undefined;
           await this.octokitClient.rest.pulls.createReviewComment({
             owner,
             repo,
             pull_number: prNumber,
             body: comment.body,
             path: comment.path,
-            line: comment.position,
+            ...(startLine ? { start_line: startLine } : {}),
+            ...(line ? { line } : {}),
             commit_id,
           });
+          postedComments += 1;
         } catch (error) {
+          failedComments += 1;
           console.error(
             `Failed to post comment to ${comment.path}:${comment.position}`,
             error,
@@ -273,7 +281,10 @@ export class GithubService implements GitAdapterContract {
 
     return {
       success: true,
-      message: 'Review posted successfully',
+      message:
+        failedComments > 0
+          ? `Review posted successfully (${postedComments}/${postedComments + failedComments} inline comments posted; ${failedComments} failed — lines may be outside the diff)`
+          : 'Review posted successfully',
       reviewId,
     };
   }

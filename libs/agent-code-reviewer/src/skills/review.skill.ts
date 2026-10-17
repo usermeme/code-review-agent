@@ -1,26 +1,23 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 /**
  * The review philosophy injected into the reviewer agents' prompts.
  *
- * Source of truth is the `code-review` skill in the usermeme/skills repo
- * (SKILL.md + references/security.md), loaded from `skills.codeReviewDir` so
- * editing the skill updates both interactive reviews and this bot. The
- * embedded snapshot below keeps deployments working when the skills repo
- * isn't mounted — it is a condensed copy, refreshed manually when the skill
- * changes materially.
+ * Embedded as plain prompt constants on purpose: the bot must not depend on
+ * filesystem-mounted skill directories at runtime (deployments are
+ * container-first, and file-based loading added a silent fallback path and a
+ * cache that could serve stale content). The text is kept in sync with the
+ * `code-review` skill in the usermeme/skills repo when it changes
+ * materially — edit it here, in the prompt, and nowhere else.
  */
 export interface ReviewSkill {
   core: string;
   security: string;
 }
 
-const FALLBACK_CORE = `# Code Review
+const CORE = `# Code Review
 
 A review has two jobs, in priority order: catch what would hurt in production (bugs, data loss,
 security, broken contracts), and protect the codebase's long-term shape (conventions, patterns,
-maintainability). Style opinions and cleverness are noise that dilutes those signals.
+maintainability). Style opinions and cleverness are noise that dilute those signals.
 
 ## Verify before asserting — the cardinal rule
 A plausible-but-wrong finding costs more than a missed one. Before any claim: read beyond the
@@ -45,16 +42,19 @@ hypotheticals with no realistic trigger; pre-existing issues unrelated to the di
 A ten-comment review where three matter teaches authors to skim.
 
 ## Writing the finding
-Anchor to exact file and line; one finding per comment. Structure: what's wrong → concrete
-failure scenario → suggested fix. When uncertain, ask the specific question instead of asserting.
-The summary leads with the verdict and the criticals — never bury a data-loss finding under nits.`;
+Anchor to exact file and line; one finding per comment. Structure: what's wrong → its concrete
+failure scenario. Point at the problem — do NOT write the fix or propose replacement code; at
+most one short sentence on fix direction when it is not obvious. Keep every finding body under
+five sentences: long comments get skimmed and waste everyone's tokens. When uncertain, ask the
+specific question instead of asserting. The summary leads with the verdict and the criticals in
+one short paragraph — never bury a data-loss finding under nits.`;
 
-const FALLBACK_SECURITY = `# Security checklist (construct the attack input, don't eyeball)
+const SECURITY = `# Security checklist (construct the attack input, don't eyeball)
 - Injection: every SQL value parameterized (including ORDER BY/identifiers built from config);
   no user input in shell strings (execFile + args, no shell:true); path traversal on any joined
   path (normalize + prefix check); no user content in eval/Function/dynamic import.
 - AuthN/AuthZ: every new endpoint — who can call it? Object fetched by user-supplied id — is
-  ownership/tenancy checked (IDOR)? Authorization on the action, not just the route. Webhooks:
+  ownership/tenancy checked (IDOR)? Authorization on the action, not the route. Webhooks:
   signature verified over raw bytes, constant-time compare, reject on absence.
 - Secrets & data: no credentials in code/config/git; no tokens, PII, or full bodies in logs
   (including error paths and clone URLs); no stack traces to clients.
@@ -66,42 +66,5 @@ const FALLBACK_SECURITY = `# Security checklist (construct the attack input, don
 - Crypto & deps: no hand-rolled crypto, no Math.random() for tokens; new dependencies maintained
   and pinned.`;
 
-const cache = new Map<string, ReviewSkill>();
-
-const FRONTMATTER_REGEX = /^---\n[\s\S]*?\n---\n/;
-
-/** Removes the YAML frontmatter block — trigger metadata, not prompt material. */
-export function stripFrontmatter(markdown: string): string {
-  const match = FRONTMATTER_REGEX.exec(markdown);
-  return (match ? markdown.slice(match[0].length) : markdown).trim();
-}
-
-export function loadReviewSkill(dir: string): ReviewSkill {
-  const cached = cache.get(dir);
-  if (cached) return cached;
-
-  let core = FALLBACK_CORE;
-  let security = FALLBACK_SECURITY;
-  if (dir) {
-    try {
-      core = stripFrontmatter(readFileSync(join(dir, 'SKILL.md'), 'utf8'));
-      console.info({ dir }, 'loaded code-review skill');
-    } catch (error) {
-      console.warn(
-        { dir, err: error },
-        'code-review skill dir not readable; using embedded snapshot',
-      );
-    }
-    try {
-      security = stripFrontmatter(
-        readFileSync(join(dir, 'references', 'security.md'), 'utf8'),
-      );
-    } catch {
-      // SKILL.md warning above already signals discovery problems; keep the snapshot.
-    }
-  }
-
-  const skill: ReviewSkill = { core, security };
-  cache.set(dir, skill);
-  return skill;
-}
+/** The single source of review-philosophy prompt text used by all agents. */
+export const REVIEW_SKILL: ReviewSkill = { core: CORE, security: SECURITY };

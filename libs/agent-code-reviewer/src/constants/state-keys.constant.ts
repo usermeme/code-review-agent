@@ -17,6 +17,12 @@ export const STATE = {
   ctxAgentDocs: 'repoctx:agentDocs',
   repoRules: 'repo:rules',
   repoSkills: 'repo:skills',
+  /**
+   * Full SKILL.md bodies staged by the orchestrator via loadRepoSkill for
+   * the reviewer sub-agents. The orchestrator itself never receives them —
+   * only the catalogue descriptions. Shape: Record<path, LoadedRepoSkill>.
+   */
+  repoSkillBodies: 'repo:skillBodies',
   reviewResult: 'review:result',
 } as const;
 
@@ -30,4 +36,6 @@ export interface PrMeta {
   branch: string;
   author: string;
   headSha?: string;
+  /** Base branch of the PR — one of the two refs fetch tools may read. */
+  baseRef?: string;
 }

@@ -1,3 +1,5 @@
+import { LIMITS } from '../constants/limits.constant.js';
+
 /**
  * Shrinks a unified PR diff before it reaches any prompt.
  *
@@ -8,8 +10,8 @@
  * preamble so the reviewers know what they did not see.
  */
 
-export const DEFAULT_MAX_DIFF_CHARS = 120_000;
-export const DEFAULT_MAX_FILE_DIFF_CHARS = 20_000;
+export const DEFAULT_MAX_DIFF_CHARS = LIMITS.maxDiffChars;
+export const DEFAULT_MAX_FILE_DIFF_CHARS = LIMITS.maxFileDiffChars;
 const MAX_LISTED_OMISSIONS = 50;
 
 const IGNORED_PATH_PATTERNS: RegExp[] = [
