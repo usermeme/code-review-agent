@@ -1,4 +1,3 @@
-import { IngestPREventRequest } from '@code-review-agent/contracts';
 import { EnvService } from '@code-review-agent/env';
 import { PREventPayload } from '@code-review-agent/shared-types';
 import { PubSub } from '@google-cloud/pubsub';
@@ -107,9 +106,7 @@ describe('EventOrchestratorService', () => {
     const orchestrator = createTestOrchestrator();
 
     const req = {
-      $typeName: 'core.v1.IngestPREventRequest',
       prMeta: {
-        $typeName: 'core.v1.PRMeta',
         provider: 'github',
         owner: 'test-org',
         repo: 'test-repo',
@@ -126,7 +123,7 @@ describe('EventOrchestratorService', () => {
       },
       diff: 'diff --git a/file.ts ...',
       changedFiles: ['file.ts'],
-    } as unknown as IngestPREventRequest;
+    } satisfies PREventPayload;
 
     const res = await orchestrator.ingestPREvent(req);
 
@@ -176,9 +173,7 @@ describe('EventOrchestratorService', () => {
     const orchestrator = createTestOrchestrator();
 
     const req = {
-      $typeName: 'core.v1.IngestPREventRequest',
       prMeta: {
-        $typeName: 'core.v1.PRMeta',
         provider: 'github',
         owner: 'test-org',
         repo: 'test-repo',
@@ -195,7 +190,7 @@ describe('EventOrchestratorService', () => {
       },
       diff: 'diff --git a/file.ts ...',
       changedFiles: ['file.ts'],
-    } as unknown as IngestPREventRequest;
+    } satisfies PREventPayload;
 
     const res = await orchestrator.ingestPREvent(req);
 
@@ -222,9 +217,7 @@ describe('EventOrchestratorService', () => {
     const orchestrator = createTestOrchestrator();
 
     const req = {
-      $typeName: 'core.v1.IngestPREventRequest',
       prMeta: {
-        $typeName: 'core.v1.PRMeta',
         provider: 'github',
         owner: 'test-org',
         repo: 'test-repo',
@@ -241,7 +234,7 @@ describe('EventOrchestratorService', () => {
       },
       diff: '',
       changedFiles: [],
-    } as unknown as IngestPREventRequest;
+    } satisfies PREventPayload;
 
     const res = await orchestrator.ingestPREvent(req);
 

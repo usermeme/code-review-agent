@@ -1,7 +1,3 @@
-import {
-  IngestPREventRequest,
-  IngestPREventResponse,
-} from '@code-review-agent/contracts';
 import { LlmFactory } from '@code-review-agent/llm';
 import {
   ContextReadyPayload,
@@ -18,6 +14,12 @@ import { GitAdapterClient } from '../modules/adapter/git-adapter.client.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import type { AgentService } from './agent.service.js';
+
+export interface PREventResult {
+  success: boolean;
+  status: 'queued' | 'reviewing' | 'ignored' | 'duplicate' | 'failed' | 'error';
+  message: string;
+}
 
 export interface EventOrchestratorDependencies {
   envService: CoreEnvService;
@@ -53,16 +55,16 @@ export class EventOrchestratorService {
   }
 
   async ingestPREvent(
-    req: IngestPREventRequest | PREventPayload,
+    req: PREventPayload,
     logger?: FastifyBaseLogger,
-  ): Promise<IngestPREventResponse> {
+  ): Promise<PREventResult> {
     const meta = req.prMeta;
     if (!meta) {
       return {
         success: false,
         status: 'error',
         message: 'Missing PR metadata',
-      } as IngestPREventResponse;
+      };
     }
 
     const { provider, owner, repo, prNumber, action } = meta;
@@ -96,7 +98,7 @@ export class EventOrchestratorService {
         success: true,
         status: 'queued',
         message: 'Incremental context build completed for merged PR',
-      } as IngestPREventResponse;
+      };
     }
 
     if (
@@ -200,14 +202,14 @@ export class EventOrchestratorService {
         success: true,
         status: 'reviewing',
         message: 'Review completed and results published',
-      } as IngestPREventResponse;
+      };
     }
 
     return {
       success: true,
       status: 'ignored',
       message: `Ignored action: ${action}`,
-    } as IngestPREventResponse;
+    };
   }
 
   async handleContextReady(

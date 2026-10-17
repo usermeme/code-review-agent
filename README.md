@@ -79,7 +79,6 @@ code-review-agent/
 │   ├── agent-code-reviewer/    # ADK agent library for diff review & inline findings
 │   ├── pubsub/                 # Abstract Pub/Sub consumer & push envelope parsing utilities
 │   ├── env/                    # Type-safe environment manager with eager Zod schema validation
-│   ├── contracts/              # Protobuf schemas & ConnectRPC client/server contracts (Legacy/Internal)
 │   └── shared-types/           # Common domain TypeScript interfaces & schemas
 ├── .github/
 │   └── workflows/

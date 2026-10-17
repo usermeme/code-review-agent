@@ -1,11 +1,5 @@
-import { CoreService } from '@code-review-agent/contracts';
 import { EnvService } from '@code-review-agent/env';
 import { ReviewResultPayload } from '@code-review-agent/shared-types';
-import {
-  Client,
-  createClient,
-  createRouterTransport,
-} from '@connectrpc/connect';
 import { IWorldOptions, setWorldConstructor, World } from '@cucumber/cucumber';
 import { PubSub } from '@google-cloud/pubsub';
 import { FastifyInstance, LightMyRequestResponse } from 'fastify';
@@ -26,7 +20,6 @@ export class CoreWorld extends World {
   public contextRepository: ContextRepository;
   public orchestrator!: EventOrchestratorService;
   public envService!: CoreEnvService;
-  public coreRpcClient!: Client<typeof CoreService>;
   public lastResponse?: LightMyRequestResponse;
 
   constructor(options: IWorldOptions) {
@@ -96,16 +89,6 @@ export class CoreWorld extends World {
       orchestrator: this.orchestrator,
       fastifyOptions: { logger: false },
     });
-
-    // 3. In-process ConnectRPC client pointing to coreApp's orchestrator
-    const coreTransport = createRouterTransport((router) => {
-      router.service(CoreService, {
-        ingestPREvent: async (req) => {
-          return await this.orchestrator.ingestPREvent(req);
-        },
-      });
-    });
-    this.coreRpcClient = createClient(CoreService, coreTransport);
   }
 
   async cleanup(): Promise<void> {
