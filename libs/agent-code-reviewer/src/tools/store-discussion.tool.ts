@@ -30,32 +30,17 @@ export function createStoreDiscussionTool(
       'Persists a note into the review-discussion memory so future reviews can find it. Use for ' +
       'noteworthy conclusions that are not covered by the findings you will publish anyway.',
     parameters: z.object({
-      repo: z
-        .string()
-        .optional()
-        .describe(
-          'The repository to store the note for (e.g. owner/repo). If not provided, relies on the Core default.',
-        ),
-      prNumber: z
-        .number()
-        .optional()
-        .describe(
-          'The PR number to store the note for. If not provided, relies on the Core default.',
-        ),
       body: z.string().describe('The note to remember'),
       filePath: z
         .string()
         .optional()
         .describe('File the note is about, if any'),
     }),
-    execute: async ({
-      repo: queryRepo,
-      prNumber: queryPrNumber,
-      body,
-      filePath,
-    }) => {
-      const targetRepo = queryRepo || deps.defaultRepo || '';
-      const targetPrNumber = queryPrNumber || deps.defaultPrNumber;
+    execute: async ({ body, filePath }) => {
+      // The target repo/PR are fixed to the review defaults — the model
+      // cannot redirect writes to another repository or PR number.
+      const targetRepo = deps.defaultRepo || '';
+      const targetPrNumber = deps.defaultPrNumber;
 
       if (!deps.storeDiscussion) {
         return { stored: false };

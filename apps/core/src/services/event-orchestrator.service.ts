@@ -1,4 +1,10 @@
 import {
+  parseBaselineSections,
+  type ReviewExecutionInput,
+  type RunReviewOptions,
+} from '@code-review-agent/agent-code-reviewer';
+import type { ContextLoader } from '@code-review-agent/agent-context-builder';
+import {
   IngestPREventRequest,
   IngestPREventResponse,
 } from '@code-review-agent/contracts';
@@ -25,6 +31,8 @@ export interface EventOrchestratorDependencies {
   agentService: AgentService;
   gitAdapterClient: GitAdapterContract;
   llm: BaseLlm;
+  /** Optional cheaper model for context-build chunk summarization. */
+  summaryLlm?: BaseLlm;
 }
 
 export class EventOrchestratorService {
@@ -35,6 +43,14 @@ export class EventOrchestratorService {
   private agentService: AgentService;
   private gitAdapterClient: GitAdapterContract;
   private llm: BaseLlm;
+  private summaryLlm?: BaseLlm;
+  /**
+   * In-process dedup for baseline builds: concurrent PR events (or Pub/Sub
+   * push retries) for the same repo must not trigger two full tarball
+   * downloads + summarization runs. Cross-instance dedup would need a
+   * Firestore lock; this covers the single-instance hot path.
+   */
+  private readonly baselineBuilds = new Map<string, Promise<string>>();
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub;
@@ -44,6 +60,17 @@ export class EventOrchestratorService {
     this.agentService = deps.agentService;
     this.gitAdapterClient = deps.gitAdapterClient;
     this.llm = deps.llm;
+    this.summaryLlm = deps.summaryLlm;
+  }
+
+  /** Loads a persisted baseline context and parses it into named sections. */
+  private createContextLoader(): ContextLoader {
+    return async (key: string) => {
+      const stored = await this.contextRepository.getContext(key);
+      if (!stored?.summary) return null;
+      const sections = parseBaselineSections(stored.summary);
+      return Object.keys(sections).length > 0 ? sections : null;
+    };
   }
 
   async ingestPREvent(
@@ -79,6 +106,8 @@ export class EventOrchestratorService {
         ref: meta.baseRef,
         isIncrementalUpdate: true,
         llm: this.llm,
+        summaryLlm: this.summaryLlm,
+        contextLoader: this.createContextLoader(),
         gitAdapter: this.gitAdapterClient,
       });
 
@@ -165,7 +194,8 @@ export class EventOrchestratorService {
         ? changedFiles.join('\n')
         : (changedFiles ?? '');
 
-      const reviewResult = await this.agentService.runReview(
+      const reviewResult = await this.runReviewOrFail(
+        prKey,
         {
           prMeta: {
             provider,
@@ -176,6 +206,7 @@ export class EventOrchestratorService {
             author: meta.author,
             branch: meta.branch,
             body: meta.body,
+            baseRef: meta.baseRef,
           },
           diff,
           changedFiles: changedFilesStr,
@@ -188,7 +219,7 @@ export class EventOrchestratorService {
         },
       );
 
-      await this.handleReviewResults(reviewResult, logger);
+      await this.handleReviewResults(reviewResult, prKey, logger);
 
       return {
         success: true,
@@ -229,7 +260,8 @@ export class EventOrchestratorService {
       ? pendingPR.changedFiles.join('\n')
       : (pendingPR?.changedFiles ?? '');
 
-    const reviewResult = await this.agentService.runReview(
+    const reviewResult = await this.runReviewOrFail(
+      prKey,
       {
         prMeta: {
           provider,
@@ -240,6 +272,7 @@ export class EventOrchestratorService {
           author: pendingPR?.prMeta?.['author'] || '',
           branch: pendingPR?.prMeta?.['branch'] || '',
           body: pendingPR?.prMeta?.['body'] || '',
+          baseRef: pendingPR?.prMeta?.['baseRef'],
         },
         diff: pendingPR?.diff || '',
         changedFiles: changedFilesStr,
@@ -252,15 +285,48 @@ export class EventOrchestratorService {
       },
     );
 
-    await this.handleReviewResults(reviewResult, logger);
+    await this.handleReviewResults(reviewResult, prKey, logger);
+  }
+
+  /**
+   * Runs the review; on failure marks the PR as failed and rethrows so the
+   * failure is visible (Pub/Sub nack / 500) instead of silently publishing a
+   * misleading "no findings" review.
+   */
+  private async runReviewOrFail(
+    prKey: string,
+    input: ReviewExecutionInput,
+    options: RunReviewOptions,
+  ): Promise<ReviewResultPayload> {
+    try {
+      return await this.agentService.runReview(input, options);
+    } catch (error) {
+      await this.prRepository
+        .updatePRStatus(prKey, { status: 'failed', error: String(error) })
+        .catch(() => {
+          // status bookkeeping must not mask the original failure
+        });
+      throw error;
+    }
   }
 
   async handleReviewResults(
     payload: ReviewResultPayload,
+    expectedPrKey: string,
     logger?: FastifyBaseLogger,
   ): Promise<void> {
     const { provider, owner, repo, prNumber, summary } = payload;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
+
+    // Correlation check at the trust boundary: the review must carry the
+    // coordinates of the event that triggered it. A payload redirected to
+    // another repo/PR (e.g. by prompt injection) is rejected before it is
+    // ever published to the results topic.
+    if (prKey !== expectedPrKey) {
+      throw new Error(
+        `Review result coordinates (${prKey}) do not match the originating PR event (${expectedPrKey}); refusing to publish.`,
+      );
+    }
 
     logger?.info(
       `[Core] Handling review results for ${prKey}. Publishing to Review Results topic.`,
@@ -282,7 +348,45 @@ export class EventOrchestratorService {
     }
   }
 
-  private async buildAndSaveBaselineContext(params: {
+  private buildAndSaveBaselineContext(params: {
+    baselineKey: string;
+    prKey: string;
+    provider: string;
+    owner: string;
+    repo: string;
+    prNumber: number;
+    meta: {
+      title?: string;
+      author?: string;
+      branch?: string;
+      body?: string;
+      cloneUrl?: string;
+      baseRef?: string;
+    };
+    diff: string;
+    changedFiles?: string[];
+    logger?: FastifyBaseLogger;
+  }): Promise<string> {
+    // Dedup concurrent baseline builds for the same repository (e.g. an
+    // 'opened' + 'review_requested' pair, or a Pub/Sub push retry after a
+    // timeout): reuse the in-flight build instead of paying for a second
+    // tarball download + full summarization run.
+    const inFlight = this.baselineBuilds.get(params.baselineKey);
+    if (inFlight !== undefined) {
+      params.logger?.info(
+        `[Core] Baseline build for ${params.baselineKey} already in flight; awaiting it.`,
+      );
+      return inFlight;
+    }
+
+    const build = this.doBuildAndSaveBaselineContext(params).finally(() => {
+      this.baselineBuilds.delete(params.baselineKey);
+    });
+    this.baselineBuilds.set(params.baselineKey, build);
+    return build;
+  }
+
+  private async doBuildAndSaveBaselineContext(params: {
     baselineKey: string;
     prKey: string;
     provider: string;
@@ -331,6 +435,8 @@ export class EventOrchestratorService {
       ref: params.meta.baseRef || 'main',
       isIncrementalUpdate: false,
       llm: this.llm,
+      summaryLlm: this.summaryLlm,
+      contextLoader: this.createContextLoader(),
       gitAdapter: this.gitAdapterClient,
     });
 

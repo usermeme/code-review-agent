@@ -41,35 +41,3 @@ export const ticketReportSchema = z.object({
   summary: z.string(),
 });
 export type TicketReport = z.infer<typeof ticketReportSchema>;
-
-export const reviewPlanSchema = z.object({
-  summary: z.string().describe('Overall review verdict paragraph in markdown'),
-  ticketCoverage: z
-    .string()
-    .optional()
-    .describe('Markdown section on ticket completeness'),
-  findings: z.array(findingSchema),
-});
-export type ReviewPlan = z.infer<typeof reviewPlanSchema>;
-
-const JSON_FENCE_REGEX = /```(?:json)?\s*\n([\s\S]*?)\n```/;
-
-/** Extracts and validates the ReviewPlan JSON from the orchestrator's final text. */
-export function parseReviewPlan(text: string): ReviewPlan | null {
-  const fenced = JSON_FENCE_REGEX.exec(text);
-  const candidates = [
-    fenced?.[1],
-    text,
-    text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1),
-  ];
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    try {
-      const result = reviewPlanSchema.safeParse(JSON.parse(candidate));
-      if (result.success) return result.data;
-    } catch {
-      // try next candidate
-    }
-  }
-  return null;
-}

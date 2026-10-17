@@ -34,20 +34,15 @@ export function createGetDiscussionTool(
       'threads, and previously posted bot findings). Use it to check whether the team has already ' +
       'discussed, accepted, or rejected feedback similar to a candidate finding.',
     parameters: z.object({
-      repo: z
-        .string()
-        .optional()
-        .describe(
-          'The repository to search in (e.g. owner/repo). If not provided, relies on the Core default.',
-        ),
       query: z
         .string()
         .describe(
           'Natural-language description of the finding or topic to look up',
         ),
     }),
-    execute: async ({ repo: queryRepo, query }) => {
-      const targetRepo = queryRepo || deps.defaultRepo || '';
+    execute: async ({ query }) => {
+      // The searched repository is fixed to the review's default (owner/repo).
+      const targetRepo = deps.defaultRepo || '';
       if (!deps.searchDiscussions) {
         return [];
       }

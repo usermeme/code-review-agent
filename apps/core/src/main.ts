@@ -25,6 +25,12 @@ async function bootstrap() {
     envService.get('GIT_ADAPTER_URL'),
   );
   const llm = new LlmFactory(envService.data).createLlm();
+  const summaryModel = envService.data.CONTEXT_SUMMARY_MODEL;
+  const summaryLlm = summaryModel
+    ? new LlmFactory(envService.data).createLlm({
+        modelOverride: summaryModel,
+      })
+    : undefined;
 
   const orchestrator = new EventOrchestratorService({
     envService,
@@ -34,6 +40,7 @@ async function bootstrap() {
     agentService,
     gitAdapterClient,
     llm,
+    summaryLlm,
   });
 
   const server = await buildCoreServer({

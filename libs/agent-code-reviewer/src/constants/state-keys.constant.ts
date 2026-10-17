@@ -30,4 +30,6 @@ export interface PrMeta {
   branch: string;
   author: string;
   headSha?: string;
+  /** Base branch of the PR — one of the two refs fetch tools may read. */
+  baseRef?: string;
 }

@@ -24,7 +24,7 @@ const instruction =
       ContextError.REPO_CONTEXT_NOT_LOADED;
 
     const changedFilesContext = changedFiles
-      ? `\nFull content of the changed files:\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
+      ? `\nChanged file paths in this PR (names only, NOT file contents — use fetchRepositoryFile to read a file when the diff alone is not enough evidence):\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
       : '';
 
     return `You hunt for real defects in a pull request. Report only problems, not style.

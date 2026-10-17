@@ -21,13 +21,12 @@ export function createSearchRepositoryCodeTool(
       query: z
         .string()
         .describe('Search query keyword, symbol name, or function signature'),
-      owner: z.string().optional().describe('Repository owner'),
-      repo: z.string().optional().describe('Repository name'),
     }),
     execute: async (input, ctx) => {
       const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-      const owner = input.owner || meta?.owner || deps.defaultOwner || '';
-      const repo = input.repo || meta?.repo || deps.defaultRepo || '';
+      // Search scope is fixed to the PR's repository (state/deps only).
+      const owner = meta?.owner || deps.defaultOwner || '';
+      const repo = meta?.repo || deps.defaultRepo || '';
 
       if (!deps.gitAdapter) {
         return {
