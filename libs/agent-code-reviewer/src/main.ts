@@ -12,6 +12,7 @@ import {
 import { ContextError } from './constants/errors.constant.js';
 import { LIMITS } from './constants/limits.constant.js';
 import { STATE } from './constants/state-keys.constant.js';
+import { CoordinateGuardPlugin } from './plugins/coordinate-guard.plugin.js';
 import { createFetchRepositoryFileTool } from './tools/fetch-repository-file.tool.js';
 import {
   createGetDiscussionTool,
@@ -40,6 +41,8 @@ export const reviewInputSchema = z.object({
     author: z.string(),
     branch: z.string(),
     body: z.string().optional(),
+    baseRef: z.string().optional(),
+    headSha: z.string().optional(),
   }),
   diff: z.string(),
   changedFiles: z.string().optional().default(''),
@@ -139,7 +142,10 @@ export async function runReview(
   }
 
   const agent = createOrchestrator({ llm: options.llm, tools });
-  const runner = new InMemoryRunner({ agent });
+  const runner = new InMemoryRunner({
+    agent,
+    plugins: [new CoordinateGuardPlugin()],
+  });
 
   const errors: string[] = [];
   for await (const event of runner.runEphemeral({

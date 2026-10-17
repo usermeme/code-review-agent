@@ -121,6 +121,42 @@ describe('publishReviewResultsTool', () => {
     );
   });
 
+  it('pins the publish target to the state prMeta even if coordinate args are smuggled in', async () => {
+    const onPublishResult = vi.fn().mockResolvedValue(undefined);
+    const tool = createPublishReviewResultsTool({ onPublishResult });
+
+    const stateMap = new Map<string, unknown>([
+      [
+        STATE.prMeta,
+        { provider: 'github', owner: 'real', repo: 'pr-repo', number: 1 },
+      ],
+    ]);
+    const mockCtx = {
+      state: {
+        get: (key: string) => stateMap.get(key),
+        set: (key: string, val: unknown) => stateMap.set(key, val),
+      },
+    } as unknown;
+
+    const smuggled = {
+      owner: 'victim',
+      repo: 'private-repo',
+      prNumber: 777,
+      summary: 's',
+      findings: [],
+    } as unknown;
+
+    await tool.execute(smuggled, mockCtx);
+
+    expect(onPublishResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: 'real',
+        repo: 'pr-repo',
+        prNumber: 1,
+      }),
+    );
+  });
+
   it('drops low-confidence findings and caps the list in code', async () => {
     const onPublishResult = vi.fn().mockResolvedValue(undefined);
     const tool = createPublishReviewResultsTool({ onPublishResult });

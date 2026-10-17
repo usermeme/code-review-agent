@@ -67,16 +67,14 @@ export function createGetRepoGuidelinesTool(
     name: 'getRepoGuidelines',
     description:
       'Fetches the repository agent rules (e.g. AGENTS.md, CLAUDE.md) and discovers available repository skills (e.g. in .agents/skills). Returns rules and a skills catalogue.',
-    parameters: z.object({
-      owner: z.string().optional().describe('Repository owner'),
-      repo: z.string().optional().describe('Repository name'),
-      ref: z.string().optional().describe('Git branch or ref'),
-    }),
-    execute: async (input, ctx): Promise<GetRepoGuidelinesResult> => {
+    parameters: z.object({}),
+    execute: async (_input, ctx): Promise<GetRepoGuidelinesResult> => {
       const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-      const owner = input.owner || meta?.owner || deps.defaultOwner || '';
-      const repo = input.repo || meta?.repo || deps.defaultRepo || '';
-      const ref = input.ref || meta?.branch;
+      // Owner/repo/ref are fixed to the PR under review (state/deps only) —
+      // a prompt-injected agent cannot point this tool at another repository.
+      const owner = meta?.owner || deps.defaultOwner || '';
+      const repo = meta?.repo || deps.defaultRepo || '';
+      const ref = meta?.branch;
 
       if (!deps.gitAdapter) {
         return {

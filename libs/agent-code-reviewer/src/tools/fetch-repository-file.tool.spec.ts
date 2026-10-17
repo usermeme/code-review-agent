@@ -9,9 +9,79 @@ interface FetchResult {
   endLine?: number;
   content?: string;
   error?: string;
+  refNotice?: string;
+}
+
+function ctxWithMeta(meta: Record<string, unknown>) {
+  const stateMap = new Map<string, unknown>([['review:prMeta', meta]]);
+  return {
+    state: {
+      get: (key: string) => stateMap.get(key),
+      set: (key: string, val: unknown) => stateMap.set(key, val),
+    },
+  } as unknown;
 }
 
 describe('fetchRepositoryFile tool', () => {
+  it('reads only from the PR repository even if owner/repo args are smuggled in', async () => {
+    const getFileContent = vi.fn().mockResolvedValue({ content: 'x' });
+    const tool = createFetchRepositoryFileTool({
+      gitAdapter: { getFileContent } as unknown as GitAdapterContract,
+    });
+
+    await tool.execute(
+      {
+        path: 'src/app.ts',
+        owner: 'victim-org',
+        repo: 'private-repo',
+      },
+      ctxWithMeta({ owner: 'real', repo: 'pr-repo', number: 1 }),
+    );
+
+    expect(getFileContent).toHaveBeenCalledWith(
+      'real',
+      'pr-repo',
+      'src/app.ts',
+      undefined,
+    );
+  });
+
+  it('clamps a foreign ref to the PR head branch and allows head/base refs', async () => {
+    const getFileContent = vi
+      .fn()
+      .mockResolvedValue({ content: 'const a = 1;' });
+    const tool = createFetchRepositoryFileTool({
+      gitAdapter: { getFileContent } as unknown as GitAdapterContract,
+    });
+    const ctx = ctxWithMeta({
+      owner: 'real',
+      repo: 'pr-repo',
+      number: 1,
+      branch: 'feature/x',
+      baseRef: 'main',
+    });
+
+    const blocked = (await tool.execute(
+      { path: 'src/app.ts', ref: 'other-secret-branch' },
+      ctx,
+    )) as FetchResult;
+    expect(getFileContent).toHaveBeenLastCalledWith(
+      'real',
+      'pr-repo',
+      'src/app.ts',
+      'feature/x',
+    );
+    expect(blocked.refNotice).toContain('not this PR');
+
+    await tool.execute({ path: 'src/app.ts', ref: 'main' }, ctx);
+    expect(getFileContent).toHaveBeenLastCalledWith(
+      'real',
+      'pr-repo',
+      'src/app.ts',
+      'main',
+    );
+  });
+
   it('fetches file content with line numbers and caches result', async () => {
     const getFileContent = vi.fn().mockResolvedValue({
       path: 'src/app.ts',

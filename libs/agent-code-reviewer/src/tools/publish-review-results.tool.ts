@@ -24,11 +24,10 @@ export function createPublishReviewResultsTool(
     description:
       'Publishes the final review findings and comments so they can be processed and posted inline to GitHub. ' +
       `Findings below confidence ${LIMITS.confidenceThreshold} are dropped and the list is capped at ${LIMITS.maxFindings} (highest severity first).`,
+    // Coordinates are NOT model-facing: the publish target is fixed to the
+    // PR under review (session-state prMeta) so a prompt-injected agent
+    // cannot redirect the published review to another repository or PR.
     parameters: z.object({
-      provider: z.string().optional().describe('Git provider (e.g. github)'),
-      owner: z.string().optional().describe('Repository owner'),
-      repo: z.string().optional().describe('Repository name'),
-      prNumber: z.number().optional().describe('Pull request number'),
       summary: z
         .string()
         .describe('Overall summary verdict of the code review'),
@@ -43,10 +42,10 @@ export function createPublishReviewResultsTool(
     execute: async (input, ctx) => {
       const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
 
-      const provider = input.provider || meta?.provider || 'github';
-      const owner = input.owner || meta?.owner || '';
-      const repo = input.repo || meta?.repo || '';
-      const prNumber = input.prNumber || meta?.number || 0;
+      const provider = meta?.provider || 'github';
+      const owner = meta?.owner || '';
+      const repo = meta?.repo || '';
+      const prNumber = meta?.number || 0;
 
       if (!owner || !repo || !prNumber) {
         throw new Error(

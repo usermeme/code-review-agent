@@ -206,6 +206,7 @@ export class EventOrchestratorService {
             author: meta.author,
             branch: meta.branch,
             body: meta.body,
+            baseRef: meta.baseRef,
           },
           diff,
           changedFiles: changedFilesStr,
@@ -218,7 +219,7 @@ export class EventOrchestratorService {
         },
       );
 
-      await this.handleReviewResults(reviewResult, logger);
+      await this.handleReviewResults(reviewResult, prKey, logger);
 
       return {
         success: true,
@@ -271,6 +272,7 @@ export class EventOrchestratorService {
           author: pendingPR?.prMeta?.['author'] || '',
           branch: pendingPR?.prMeta?.['branch'] || '',
           body: pendingPR?.prMeta?.['body'] || '',
+          baseRef: pendingPR?.prMeta?.['baseRef'],
         },
         diff: pendingPR?.diff || '',
         changedFiles: changedFilesStr,
@@ -283,7 +285,7 @@ export class EventOrchestratorService {
       },
     );
 
-    await this.handleReviewResults(reviewResult, logger);
+    await this.handleReviewResults(reviewResult, prKey, logger);
   }
 
   /**
@@ -310,10 +312,21 @@ export class EventOrchestratorService {
 
   async handleReviewResults(
     payload: ReviewResultPayload,
+    expectedPrKey: string,
     logger?: FastifyBaseLogger,
   ): Promise<void> {
     const { provider, owner, repo, prNumber, summary } = payload;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
+
+    // Correlation check at the trust boundary: the review must carry the
+    // coordinates of the event that triggered it. A payload redirected to
+    // another repo/PR (e.g. by prompt injection) is rejected before it is
+    // ever published to the results topic.
+    if (prKey !== expectedPrKey) {
+      throw new Error(
+        `Review result coordinates (${prKey}) do not match the originating PR event (${expectedPrKey}); refusing to publish.`,
+      );
+    }
 
     logger?.info(
       `[Core] Handling review results for ${prKey}. Publishing to Review Results topic.`,

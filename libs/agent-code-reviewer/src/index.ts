@@ -6,6 +6,7 @@ export * from './constants/errors.constant.js';
 export * from './constants/limits.constant.js';
 export * from './constants/state-keys.constant.js';
 export * from './main.js';
+export * from './plugins/coordinate-guard.plugin.js';
 export * from './schemas/review.schema.js';
 export * from './skills/review.skill.js';
 export * from './tools/fetch-repository-file.tool.js';
