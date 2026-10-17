@@ -10,6 +10,10 @@ import { ContextError } from '../constants/errors.constant.js';
 import { STATE } from '../constants/state-keys.constant.js';
 import { findingsReportSchema } from '../schemas/review.schema.js';
 import type { ReviewSkill } from '../skills/review.skill.js';
+import {
+  type LoadedRepoSkill,
+  renderLoadedSkills,
+} from '../tools/load-repo-skill.tool.js';
 
 const instruction =
   (skill: ReviewSkill) =>
@@ -22,6 +26,10 @@ const instruction =
     const errorHandling =
       ctx.state.get<string>(STATE.ctxErrorHandling) ||
       ContextError.REPO_CONTEXT_NOT_LOADED;
+    const stagedSkillBodies = ctx.state.get<Record<string, LoadedRepoSkill>>(
+      STATE.repoSkillBodies,
+    );
+    const skillsSection = renderLoadedSkills(stagedSkillBodies);
 
     const changedFilesContext = changedFiles
       ? `\nChanged file paths in this PR (names only, NOT file contents — use fetchRepositoryFile to read a file when the diff alone is not enough evidence):\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
@@ -45,7 +53,7 @@ ${architecture}
 
 Repository error-handling & testing conventions:
 ${errorHandling}
-
+${skillsSection}
 TOOL USAGE POLICY:
 If tools (searchRepositoryCode, fetchRepositoryFile) are available to you:
 - STRICT BUDGET: Make at most 3 tool calls in total during your review.
@@ -65,7 +73,8 @@ numbers for startLine/endLine):
 ${diff}
 </UNTRUSTED_CODE_DIFF>
 ${changedFilesContext}
-Report uncertain findings too, with an honest "confidence" value (0.0 to 1.0) — findings with confidence below 0.75 will be filtered out. Respond with JSON only.`;
+Point at each problem and its concrete failure scenario in at most five sentences — do NOT propose
+fixes or replacement code. Report uncertain findings too, with an honest "confidence" value (0.0 to 1.0) — findings with confidence below 0.75 will be filtered out. Respond with JSON only.`;
   };
 
 export interface CreateProblemsAgentPayload {

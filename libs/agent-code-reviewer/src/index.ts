@@ -12,6 +12,7 @@ export * from './skills/review.skill.js';
 export * from './tools/fetch-repository-file.tool.js';
 export * from './tools/get-discussion.tool.js';
 export * from './tools/get-repo-guidelines.tool.js';
+export * from './tools/load-repo-skill.tool.js';
 export * from './tools/publish-review-results.tool.js';
 export * from './tools/search-repository-code.tool.js';
 export * from './tools/store-discussion.tool.js';

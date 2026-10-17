@@ -2,6 +2,7 @@ import type {
   GitAdapterContract,
   ReviewResultPayload,
 } from '@code-review-agent/shared-types';
+import { NonRetryableTaskError } from '@code-review-agent/shared-types';
 import { type BaseLlm, InMemoryRunner } from '@google/adk';
 import { z } from 'zod';
 
@@ -19,6 +20,7 @@ import {
   type DiscussionSearchFunction,
 } from './tools/get-discussion.tool.js';
 import { createGetRepoGuidelinesTool } from './tools/get-repo-guidelines.tool.js';
+import { createLoadRepoSkillTool } from './tools/load-repo-skill.tool.js';
 import { createPublishReviewResultsTool } from './tools/publish-review-results.tool.js';
 import { createSearchRepositoryCodeTool } from './tools/search-repository-code.tool.js';
 import {
@@ -92,7 +94,20 @@ export async function runReview(
   input: ReviewExecutionInput,
   options: RunReviewOptions,
 ): Promise<ReviewResultPayload> {
-  const parsed = reviewInputSchema.parse(input);
+  let parsed: z.infer<typeof reviewInputSchema>;
+  try {
+    parsed = reviewInputSchema.parse(input);
+  } catch (err) {
+    // Malformed input is deterministic — redelivery cannot fix it.
+    if (err instanceof z.ZodError) {
+      throw new NonRetryableTaskError(
+        `Invalid review input: ${err.issues
+          .map((i) => `${i.path.join('.')}: ${i.message}`)
+          .join('; ')}`,
+      );
+    }
+    throw err;
+  }
   const meta = parsed.prMeta;
   const sections = parseBaselineSections(options.baselineContext);
   const defaultRepo = `${meta.owner || ''}/${meta.repo}`.replace(/^\//, '');
@@ -123,6 +138,11 @@ export async function runReview(
       defaultOwner: meta.owner,
       defaultRepo: meta.repo,
     }),
+    loadRepoSkill: createLoadRepoSkillTool({
+      gitAdapter: options.gitAdapter,
+      defaultOwner: meta.owner,
+      defaultRepo: meta.repo,
+    }),
   };
 
   // Discussion tools are registered only when the host actually wired a
@@ -141,7 +161,11 @@ export async function runReview(
     });
   }
 
-  const agent = createOrchestrator({ llm: options.llm, tools });
+  const agent = createOrchestrator({
+    llm: options.llm,
+    tools,
+    hasTickets: parsed.tickets.length > 0,
+  });
   const runner = new InMemoryRunner({
     agent,
     plugins: [new CoordinateGuardPlugin()],

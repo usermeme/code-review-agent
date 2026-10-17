@@ -9,12 +9,12 @@ export const findingSchema = z.object({
     .int()
     .describe('First line on the NEW side of the diff'),
   endLine: z.number().int().describe('Last line on the NEW side of the diff'),
-  body: z.string().describe('Explanation of the problem and why it matters'),
-  confidence: z.number().min(0).max(1),
-  suggestion: z
+  body: z
     .string()
-    .optional()
-    .describe('Replacement code for the flagged lines, if applicable'),
+    .describe(
+      'What is wrong and its concrete failure scenario — point at the problem, do NOT propose fix code',
+    ),
+  confidence: z.number().min(0).max(1),
 });
 export type Finding = z.infer<typeof findingSchema>;
 

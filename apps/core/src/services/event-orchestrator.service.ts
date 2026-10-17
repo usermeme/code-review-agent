@@ -1,7 +1,10 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   parseBaselineSections,
   type ReviewExecutionInput,
   type RunReviewOptions,
+  type StoreDiscussionInput,
 } from '@code-review-agent/agent-code-reviewer';
 import type { ContextLoader } from '@code-review-agent/agent-context-builder';
 import {
@@ -19,14 +22,44 @@ import { PubSub } from '@google-cloud/pubsub';
 import { FastifyBaseLogger } from 'fastify';
 
 import type { CoreEnvService } from '../env.js';
+import { BaselineLockRepository } from '../modules/database/repositories/baseline-lock.repository.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
+import { DiscussionRepository } from '../modules/database/repositories/discussion.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import type { AgentService } from './agent.service.js';
+
+/** Poll interval and total wait while another instance holds the baseline lock. */
+const BASELINE_LOCK_POLL_MS = 5_000;
+const BASELINE_LOCK_WAIT_MS = 20 * 60 * 1000;
+
+interface BaselineBuildParams {
+  baselineKey: string;
+  prKey: string;
+  provider: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
+  meta: {
+    title?: string;
+    author?: string;
+    branch?: string;
+    body?: string;
+    cloneUrl?: string;
+    baseRef?: string;
+  };
+  diff: string;
+  changedFiles?: string[];
+  logger?: FastifyBaseLogger;
+}
 
 export interface EventOrchestratorDependencies {
   envService: CoreEnvService;
   prRepository: PrRepository;
   contextRepository: ContextRepository;
+  /** Optional cross-instance lock for baseline builds (Firestore-backed). */
+  baselineLockRepository?: BaselineLockRepository;
+  /** Optional review-discussion memory backing getDiscussion/storeDiscussion. */
+  discussionRepository?: DiscussionRepository;
   pubsub: PubSub;
   agentService: AgentService;
   gitAdapterClient: GitAdapterContract;
@@ -39,16 +72,20 @@ export class EventOrchestratorService {
   private pubsub: PubSub;
   private prRepository: PrRepository;
   private contextRepository: ContextRepository;
+  private baselineLockRepository?: BaselineLockRepository;
+  private discussionRepository?: DiscussionRepository;
   private envService: CoreEnvService;
   private agentService: AgentService;
   private gitAdapterClient: GitAdapterContract;
   private llm: BaseLlm;
   private summaryLlm?: BaseLlm;
+  /** Unique per-process id, used as the baseline-lock owner. */
+  private readonly lockOwner = randomUUID();
   /**
    * In-process dedup for baseline builds: concurrent PR events (or Pub/Sub
    * push retries) for the same repo must not trigger two full tarball
-   * downloads + summarization runs. Cross-instance dedup would need a
-   * Firestore lock; this covers the single-instance hot path.
+   * downloads + summarization runs. Cross-instance dedup is handled by the
+   * optional Firestore-backed baselineLockRepository.
    */
   private readonly baselineBuilds = new Map<string, Promise<string>>();
 
@@ -56,11 +93,21 @@ export class EventOrchestratorService {
     this.pubsub = deps.pubsub;
     this.prRepository = deps.prRepository;
     this.contextRepository = deps.contextRepository;
+    this.baselineLockRepository = deps.baselineLockRepository;
+    this.discussionRepository = deps.discussionRepository;
     this.envService = deps.envService;
     this.agentService = deps.agentService;
     this.gitAdapterClient = deps.gitAdapterClient;
     this.llm = deps.llm;
     this.summaryLlm = deps.summaryLlm;
+  }
+
+  /** Guards against saving/using an "empty" context payload (cache poisoning). */
+  private isValidSummary(
+    summary: string | null | undefined,
+  ): summary is string {
+    const trimmed = summary?.trim();
+    return !!trimmed && trimmed !== '{}' && trimmed !== '{"summary":""}';
   }
 
   /** Loads a persisted baseline context and parses it into named sections. */
@@ -155,14 +202,9 @@ export class EventOrchestratorService {
       const existingContext =
         await this.contextRepository.getContext(baselineKey);
 
-      const isValidContext =
-        existingContext?.summary &&
-        existingContext.summary.trim() !== '' &&
-        existingContext.summary.trim() !== '{}' &&
-        existingContext.summary.trim() !== '{"summary":""}';
-
+      const storedSummary = existingContext?.summary;
       const baselineSummary =
-        (isValidContext ? existingContext.summary : null) ??
+        (this.isValidSummary(storedSummary) ? storedSummary : null) ??
         (await this.buildAndSaveBaselineContext({
           baselineKey,
           prKey,
@@ -212,11 +254,7 @@ export class EventOrchestratorService {
           changedFiles: changedFilesStr,
           tickets: [],
         },
-        {
-          llm: this.llm,
-          baselineContext: baselineSummary,
-          gitAdapter: this.gitAdapterClient,
-        },
+        this.createRunReviewOptions(baselineSummary),
       );
 
       await this.handleReviewResults(reviewResult, prKey, logger);
@@ -278,14 +316,32 @@ export class EventOrchestratorService {
         changedFiles: changedFilesStr,
         tickets: [],
       },
-      {
-        llm: this.llm,
-        baselineContext: summary,
-        gitAdapter: this.gitAdapterClient,
-      },
+      this.createRunReviewOptions(summary),
     );
 
     await this.handleReviewResults(reviewResult, prKey, logger);
+  }
+
+  /**
+   * runReview options shared by both review call sites. When a discussion
+   * repository is configured, the agent's getDiscussion/storeDiscussion tools
+   * are backed by it; otherwise they stay unregistered.
+   */
+  private createRunReviewOptions(baselineContext: string): RunReviewOptions {
+    const discussionRepository = this.discussionRepository;
+    return {
+      llm: this.llm,
+      baselineContext,
+      gitAdapter: this.gitAdapterClient,
+      ...(discussionRepository
+        ? {
+            searchDiscussions: (repo: string, query: string, limit: number) =>
+              discussionRepository.search(repo, query, limit),
+            storeDiscussion: (input: StoreDiscussionInput) =>
+              discussionRepository.store(input),
+          }
+        : {}),
+    };
   }
 
   /**
@@ -348,25 +404,9 @@ export class EventOrchestratorService {
     }
   }
 
-  private buildAndSaveBaselineContext(params: {
-    baselineKey: string;
-    prKey: string;
-    provider: string;
-    owner: string;
-    repo: string;
-    prNumber: number;
-    meta: {
-      title?: string;
-      author?: string;
-      branch?: string;
-      body?: string;
-      cloneUrl?: string;
-      baseRef?: string;
-    };
-    diff: string;
-    changedFiles?: string[];
-    logger?: FastifyBaseLogger;
-  }): Promise<string> {
+  private buildAndSaveBaselineContext(
+    params: BaselineBuildParams,
+  ): Promise<string> {
     // Dedup concurrent baseline builds for the same repository (e.g. an
     // 'opened' + 'review_requested' pair, or a Pub/Sub push retry after a
     // timeout): reuse the in-flight build instead of paying for a second
@@ -386,25 +426,78 @@ export class EventOrchestratorService {
     return build;
   }
 
-  private async doBuildAndSaveBaselineContext(params: {
-    baselineKey: string;
-    prKey: string;
-    provider: string;
-    owner: string;
-    repo: string;
-    prNumber: number;
-    meta: {
-      title?: string;
-      author?: string;
-      branch?: string;
-      body?: string;
-      cloneUrl?: string;
-      baseRef?: string;
-    };
-    diff: string;
-    changedFiles?: string[];
-    logger?: FastifyBaseLogger;
-  }): Promise<string> {
+  /**
+   * Cross-instance dedup wrapper: acquires the Firestore baseline lock (when
+   * configured) so a burst of PR events across Cloud Run instances pays for
+   * the expensive tarball + summarization build only once. Waiters reuse the
+   * winner's stored context; on lock timeout we build anyway (correctness
+   * over dedup).
+   */
+  private async doBuildAndSaveBaselineContext(
+    params: BaselineBuildParams,
+  ): Promise<string> {
+    const lock = this.baselineLockRepository;
+    if (!lock) {
+      return this.buildBaselineNow(params);
+    }
+
+    let acquired = await lock.tryAcquire(params.baselineKey, this.lockOwner);
+    if (!acquired) {
+      params.logger?.info(
+        `[Core] Baseline build for ${params.baselineKey} is locked by another instance; waiting for its context.`,
+      );
+      const outcome = await this.awaitBaselineSlot(params.baselineKey, lock);
+      if (outcome && typeof outcome === 'object') {
+        params.logger?.info(
+          `[Core] Baseline context for ${params.baselineKey} became available while waiting; reusing it.`,
+        );
+        return outcome.summary;
+      }
+      acquired = outcome === 'acquire';
+      if (!acquired) {
+        params.logger?.warn(
+          `[Core] Timed out waiting for the baseline lock on ${params.baselineKey}; building anyway.`,
+        );
+      }
+    }
+
+    try {
+      return await this.buildBaselineNow(params);
+    } finally {
+      if (acquired) {
+        await lock.release(params.baselineKey, this.lockOwner);
+      }
+    }
+  }
+
+  /**
+   * Waits for another instance's baseline build. Resolves with the stored
+   * summary once it appears, `'acquire'` when this instance took over the
+   * (expired) lock, or null after the wait budget — the caller then builds
+   * anyway.
+   */
+  private async awaitBaselineSlot(
+    baselineKey: string,
+    lock: BaselineLockRepository,
+  ): Promise<{ summary: string } | 'acquire' | null> {
+    const deadline = Date.now() + BASELINE_LOCK_WAIT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) =>
+        setTimeout(resolve, BASELINE_LOCK_POLL_MS),
+      );
+      const stored = await this.contextRepository.getContext(baselineKey);
+      const storedSummary = stored?.summary;
+      if (this.isValidSummary(storedSummary)) {
+        return { summary: storedSummary };
+      }
+      if (await lock.tryAcquire(baselineKey, this.lockOwner)) {
+        return 'acquire';
+      }
+    }
+    return null;
+  }
+
+  private async buildBaselineNow(params: BaselineBuildParams): Promise<string> {
     params.logger?.info(
       `[Core] No baseline context found for ${params.baselineKey}. Building context in-process.`,
     );
@@ -442,13 +535,8 @@ export class EventOrchestratorService {
 
     const summary =
       typeof sections === 'string' ? sections : JSON.stringify(sections);
-    const isValid =
-      summary &&
-      summary.trim() !== '' &&
-      summary.trim() !== '{}' &&
-      summary.trim() !== '{"summary":""}';
 
-    if (isValid) {
+    if (this.isValidSummary(summary)) {
       await this.contextRepository.saveContext(params.baselineKey, { summary });
     } else {
       params.logger?.warn(

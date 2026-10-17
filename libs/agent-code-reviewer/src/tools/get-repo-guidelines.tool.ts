@@ -2,6 +2,7 @@ import type { GitAdapterContract } from '@code-review-agent/shared-types';
 import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
+import { LIMITS } from '../constants/limits.constant.js';
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
 
 export interface RepoSkillSummary {
@@ -133,9 +134,11 @@ export function createGetRepoGuidelinesTool(
           'filename:SKILL.md',
         );
 
-        const skillFiles = (searchResult?.items || []).filter((item) =>
-          item.path.endsWith('SKILL.md'),
-        );
+        // Cap the fetch fan-out: a repo with hundreds of SKILL.md files must
+        // not turn catalogue discovery into hundreds of adapter round-trips.
+        const skillFiles = (searchResult?.items || [])
+          .filter((item) => item.path.endsWith('SKILL.md'))
+          .slice(0, LIMITS.maxSkillCatalogueEntries);
 
         const skillResults = await Promise.all(
           skillFiles.map(async (file) => {

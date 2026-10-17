@@ -1,4 +1,7 @@
-import type { GitAdapterContract } from '@code-review-agent/shared-types';
+import {
+  type GitAdapterContract,
+  NonRetryableTaskError,
+} from '@code-review-agent/shared-types';
 import {
   BaseLlm,
   type BaseLlmConnection,
@@ -143,17 +146,19 @@ describe('buildContext (deterministic pipeline)', () => {
   it('fails loudly when a baseline build has nothing to summarize', async () => {
     const llm = new FakeLlm(() => SECTIONS_MARKDOWN);
 
-    await expect(
-      buildContext({
-        provider: 'github',
-        owner: 'test-org',
-        repo: 'test-repo',
-        prNumber: 7,
-        llm,
-        gitAdapter: incrementalAdapter([]),
-        isIncrementalUpdate: true,
-      }),
-    ).rejects.toThrow('cannot build a baseline context');
+    const build = buildContext({
+      provider: 'github',
+      owner: 'test-org',
+      repo: 'test-repo',
+      prNumber: 7,
+      llm,
+      gitAdapter: incrementalAdapter([]),
+      isIncrementalUpdate: true,
+    });
+
+    await expect(build).rejects.toThrow('cannot build a baseline context');
+    // Deterministic failure — consumers ack instead of redelivering.
+    await expect(build).rejects.toBeInstanceOf(NonRetryableTaskError);
   });
 
   it('rejects payloads with missing required coordinates', async () => {
