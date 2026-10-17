@@ -43,7 +43,7 @@ export function createFetchRepositoryFileTool(
   return new FunctionTool({
     name: 'fetchRepositoryFile',
     description:
-      'Fetches file content from the repository. Use this to inspect callers, types, existing utilities, or surrounding code. Maximum 250 lines returned at a time.',
+      'Fetches file content from the repository under review (owner/repo are fixed). Use this to inspect callers, types, existing utilities, or surrounding code. Maximum 250 lines returned at a time.',
     parameters: z.object({
       path: z
         .string()
@@ -62,16 +62,26 @@ export function createFetchRepositoryFileTool(
         .string()
         .optional()
         .describe(
-          'Git ref, commit SHA, or branch (defaults to base or target branch)',
+          'Optional git ref to read the file at — only the PR head/base branch or its commit SHA are allowed; anything else falls back to the PR head branch.',
         ),
-      owner: z.string().optional().describe('Repository owner'),
-      repo: z.string().optional().describe('Repository name'),
     }),
     execute: async (input, ctx) => {
       const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-      const owner = input.owner || meta?.owner || deps.defaultOwner || '';
-      const repo = input.repo || meta?.repo || deps.defaultRepo || '';
-      const ref = input.ref || meta?.branch;
+      // Coordinates are fixed to the PR under review: model-supplied
+      // owner/repo are no longer accepted, and state/deps are the only
+      // sources. This blocks prompt-injected cross-repo reads.
+      const owner = meta?.owner || deps.defaultOwner || '';
+      const repo = meta?.repo || deps.defaultRepo || '';
+
+      // Clamp ref to the PR's own head/base refs (or head SHA); anything
+      // else silently falls back to the head branch with a notice.
+      let ref = input.ref || meta?.branch;
+      let refNotice: string | undefined;
+      const allowedRefs = [meta?.branch, meta?.baseRef, meta?.headSha];
+      if (meta && input.ref && !allowedRefs.includes(input.ref)) {
+        ref = meta.branch;
+        refNotice = `Requested ref '${input.ref}' is not this PR's head/base branch; the file was read from '${ref}'.`;
+      }
 
       const lowerPath = input.path.toLowerCase();
       if (BLOCKED_FILE_EXTENSIONS.some((ext) => lowerPath.endsWith(ext))) {
@@ -149,6 +159,7 @@ export function createFetchRepositoryFileTool(
         startLine: start,
         endLine: end,
         totalLines,
+        ...(refNotice ? { refNotice } : {}),
         content: `<UNTRUSTED_REPOSITORY_FILE path="${input.path}">\n${finalContent}\n</UNTRUSTED_REPOSITORY_FILE>`,
       };
     },

@@ -22,7 +22,13 @@ export interface PostReviewOptions {
   prNumber: number;
   summary?: string;
   ticketCoverage?: string;
-  comments: { path: string; position?: number; line?: number; body: string }[];
+  comments: {
+    path: string;
+    position?: number;
+    startPosition?: number;
+    line?: number;
+    body: string;
+  }[];
 }
 
 export interface PostReviewResult {

@@ -279,24 +279,45 @@ describe('EventOrchestratorService', () => {
     expect(mockRunReview).not.toHaveBeenCalled();
   });
 
+  it('refuses to publish review results whose coordinates do not match the originating event', async () => {
+    const orchestrator = createTestOrchestrator();
+
+    await expect(
+      orchestrator.handleReviewResults(
+        {
+          provider: 'github',
+          owner: 'victim-org',
+          repo: 'other-repo',
+          prNumber: 999,
+          summary: 'Injected review',
+          comments: [],
+        },
+        'github:test-org:test-repo:42',
+      ),
+    ).rejects.toThrow(/do not match the originating PR event/);
+  });
+
   it('publishes review results to REVIEW_RESULTS_TOPIC when review results arrive', async () => {
     const orchestrator = createTestOrchestrator();
 
-    await orchestrator.handleReviewResults({
-      provider: 'github',
-      owner: 'test-org',
-      repo: 'test-repo',
-      prNumber: 42,
-      summary: 'Looks great!',
-      ticketCoverage: 'All acceptance criteria met.',
-      comments: [
-        {
-          path: 'src/file.ts',
-          position: 10,
-          body: 'Consider refactoring this helper',
-        },
-      ],
-    });
+    await orchestrator.handleReviewResults(
+      {
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        prNumber: 42,
+        summary: 'Looks great!',
+        ticketCoverage: 'All acceptance criteria met.',
+        comments: [
+          {
+            path: 'src/file.ts',
+            position: 10,
+            body: 'Consider refactoring this helper',
+          },
+        ],
+      },
+      'github:test-org:test-repo:42',
+    );
 
     expect(publishedMessages).toHaveLength(1);
     expect(publishedMessages[0].topic).toBe('test-review-results-topic');

@@ -1,42 +1,39 @@
-import { type BaseLlm, FunctionTool } from '@google/adk';
-import { z } from 'zod';
+import { type BaseLlm } from '@google/adk';
 
 import { STATE } from '../constants/state-keys.constant.js';
-import { generateText } from '../services/generate.service.js';
+import { generateText } from './generate.service.js';
+import type { PipelineState } from './pipeline-state.js';
 
-export interface CreateSynthesizeContextToolPayload {
-  llm: BaseLlm;
-}
+/**
+ * Pipeline step 3: merge chunk summaries into the final context document.
+ *
+ * Returns the parsed sections object directly — the document never
+ * round-trips through an orchestrating model (previously it was emitted as a
+ * tool response and re-emitted verbatim by the LLM as the next tool's
+ * arguments, doubling token cost and risking truncation/corruption).
+ */
+export async function synthesizeContext(
+  llm: BaseLlm,
+  state: PipelineState,
+): Promise<Record<string, string>> {
+  const summaries = state.get<string[]>(STATE.chunkSummaries);
+  const overflow = state.get<string[]>(STATE.overflowPaths);
+  const agentDocs = state.get<string>(STATE.agentDocs);
+  const existingContext = state.get<Record<string, string>>(
+    STATE.existingContext,
+  );
 
-export function createSynthesizeContextTool({
-  llm,
-}: CreateSynthesizeContextToolPayload) {
-  return new FunctionTool({
-    name: 'synthesize_context',
-    description:
-      'Synthesizes chunk summaries into the final repository context document, patching the existing baseline if provided.',
-    parameters: z.object({}),
-    execute: async (_input, ctx) => {
-      const summaries = ctx?.state?.get<string[]>(STATE.chunkSummaries);
-      const overflow = ctx?.state?.get<string[]>(STATE.overflowPaths);
-      const agentDocs = ctx?.state?.get<string>(STATE.agentDocs);
-      const existingContext = ctx?.state?.get<Record<string, string>>(
-        STATE.existingContext,
-      );
+  if (!summaries || summaries.length === 0) {
+    if (existingContext && Object.keys(existingContext).length > 0) {
+      return existingContext;
+    }
+    throw new Error('No chunk summaries found. Did summarizeChunks run?');
+  }
 
-      if (!summaries || summaries.length === 0) {
-        if (existingContext) {
-          return JSON.stringify(existingContext);
-        }
-        throw new Error(
-          'No chunk summaries found. Did you call summarize_chunks?',
-        );
-      }
+  let prompt: string;
 
-      let prompt: string;
-
-      if (existingContext && Object.keys(existingContext).length > 0) {
-        prompt = `You are updating a repository context document incrementally based on recent file changes.
+  if (existingContext && Object.keys(existingContext).length > 0) {
+    prompt = `You are updating a repository context document incrementally based on recent file changes.
 Output markdown with EXACTLY these top-level sections, in this order, using these exact headings:
 ## Architecture
 ## Modules
@@ -58,8 +55,8 @@ ${(overflow || []).join('\n')}
 
 Agent docs:
 ${agentDocs || ''}`;
-      } else {
-        prompt = `You merge per-chunk codebase summaries into one repository context document.
+  } else {
+    prompt = `You merge per-chunk codebase summaries into one repository context document.
 Output markdown with EXACTLY these top-level sections, in this order, using these exact headings:
 ## Architecture
 ## Modules
@@ -78,16 +75,11 @@ ${(overflow || []).join('\n')}
 
 Agent docs:
 ${agentDocs || ''}`;
-      }
+  }
 
-      const text = await generateText(llm, { prompt });
+  const text = await generateText(llm, { prompt });
 
-      // Parse the markdown into sections
-      const sections = splitSections(text);
-
-      return JSON.stringify(sections);
-    },
-  });
+  return splitSections(text);
 }
 
 const SECTION_KEYS: Record<string, string> = {
@@ -98,7 +90,7 @@ const SECTION_KEYS: Record<string, string> = {
   'Agent Docs (verbatim)': 'agentDocs',
 };
 
-function splitSections(markdown: string): Record<string, string> {
+export function splitSections(markdown: string): Record<string, string> {
   const sections: Record<string, string> = {};
   let currentKey: string | null = null;
   let buffer: string[] = [];
