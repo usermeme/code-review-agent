@@ -59,6 +59,7 @@ describe('prEventsPushRoutes', () => {
     expect(mockOrchestrator.ingestPREvent).toHaveBeenCalledWith(
       validPayload,
       expect.anything(),
+      { messageId: 'msg-999' },
     );
   });
 
@@ -75,6 +76,7 @@ describe('prEventsPushRoutes', () => {
     expect(mockOrchestrator.ingestPREvent).toHaveBeenCalledWith(
       validPayload,
       expect.anything(),
+      { messageId: undefined },
     );
   });
 
@@ -120,7 +122,7 @@ describe('prEventsPushRoutes', () => {
     expect(mockOrchestrator.ingestPREvent).not.toHaveBeenCalled();
   });
 
-  it('returns 500 on orchestrator failure so Pub/Sub retries', async () => {
+  it('returns 500 when the orchestrator rethrows a retryable failure so Pub/Sub retries', async () => {
     mockOrchestrator.ingestPREvent.mockRejectedValueOnce(
       new Error('Firestore connection timeout'),
     );

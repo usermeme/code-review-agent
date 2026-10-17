@@ -7,6 +7,7 @@ import { FirestoreDatabaseService } from './modules/database/firestore.service.j
 import { DatabaseService } from './modules/database/interfaces/database.interface.js';
 import { ContextRepository } from './modules/database/repositories/context.repository.js';
 import { PrRepository } from './modules/database/repositories/pr.repository.js';
+import { ReviewRunRepository } from './modules/database/repositories/review-run.repository.js';
 import { healthModule } from './modules/health/health.module.js';
 import { pubsubModule } from './modules/pubsub/pubsub.module.js';
 import { AgentService } from './services/agent.service.js';
@@ -18,6 +19,7 @@ export interface BuildCoreServerOptions {
   databaseService?: DatabaseService;
   prRepository?: PrRepository;
   contextRepository?: ContextRepository;
+  reviewRunRepository?: ReviewRunRepository;
   agentService?: AgentService;
   orchestrator?: EventOrchestratorService;
   fastifyOptions?: FastifyServerOptions;
@@ -36,6 +38,8 @@ export async function buildCoreServer(
     options.prRepository ?? new PrRepository(databaseService);
   const contextRepository =
     options.contextRepository ?? new ContextRepository(databaseService);
+  const reviewRunRepository =
+    options.reviewRunRepository ?? new ReviewRunRepository(databaseService);
   const agentService = options.agentService ?? new AgentService();
 
   const orchestrator =
@@ -45,6 +49,7 @@ export async function buildCoreServer(
       pubsub: options.pubsub,
       prRepository,
       contextRepository,
+      reviewRunRepository,
       agentService,
     });
 

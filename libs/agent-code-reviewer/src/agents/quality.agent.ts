@@ -3,6 +3,8 @@ import {
   type BaseTool,
   LlmAgent,
   type ReadonlyContext,
+  type SingleBeforeModelCallback,
+  type SingleBeforeToolCallback,
 } from '@google/adk';
 import { z } from 'zod';
 
@@ -27,7 +29,7 @@ const instruction =
       ) ?? [];
 
     const changedFilesContext = changedFiles
-      ? `\nFull content of the changed files:\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
+      ? `\nPaths of all files changed in this PR (contents are not included; use fetchRepositoryFile if you need one):\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
       : '';
 
     const skillsSection =
@@ -82,12 +84,16 @@ export interface CreateQualityAgentPayload {
   skill: ReviewSkill;
   llm: BaseLlm;
   tools?: BaseTool[];
+  beforeModelCallback?: SingleBeforeModelCallback;
+  beforeToolCallback?: SingleBeforeToolCallback;
 }
 
 export function createQualityAgent({
   skill,
   llm,
   tools,
+  beforeModelCallback,
+  beforeToolCallback,
 }: CreateQualityAgentPayload): LlmAgent {
   return new LlmAgent({
     name: 'code_quality_agent',
@@ -105,5 +111,7 @@ export function createQualityAgent({
     disallowTransferToParent: true,
     disallowTransferToPeers: true,
     tools: tools ?? [],
+    beforeModelCallback,
+    beforeToolCallback,
   });
 }

@@ -3,6 +3,8 @@ import {
   type BaseTool,
   LlmAgent,
   type ReadonlyContext,
+  type SingleBeforeModelCallback,
+  type SingleBeforeToolCallback,
 } from '@google/adk';
 import { z } from 'zod';
 
@@ -24,7 +26,7 @@ const instruction =
       ContextError.REPO_CONTEXT_NOT_LOADED;
 
     const changedFilesContext = changedFiles
-      ? `\nFull content of the changed files:\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
+      ? `\nPaths of all files changed in this PR (contents are not included; use fetchRepositoryFile if you need one):\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
       : '';
 
     return `You hunt for real defects in a pull request. Report only problems, not style.
@@ -72,12 +74,16 @@ export interface CreateProblemsAgentPayload {
   skill: ReviewSkill;
   llm: BaseLlm;
   tools?: BaseTool[];
+  beforeModelCallback?: SingleBeforeModelCallback;
+  beforeToolCallback?: SingleBeforeToolCallback;
 }
 
 export function createProblemsAgent({
   skill,
   llm,
   tools,
+  beforeModelCallback,
+  beforeToolCallback,
 }: CreateProblemsAgentPayload): LlmAgent {
   return new LlmAgent({
     name: 'code_problems_agent',
@@ -95,5 +101,7 @@ export function createProblemsAgent({
     disallowTransferToParent: true,
     disallowTransferToPeers: true,
     tools: tools ?? [],
+    beforeModelCallback,
+    beforeToolCallback,
   });
 }

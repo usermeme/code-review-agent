@@ -36,6 +36,20 @@ export class InMemoryDatabaseService implements DatabaseService {
     return col.get(docId) as T;
   }
 
+  async transactDocument<T extends object, R>(
+    collection: string,
+    docId: string,
+    decide: (current: T | null) => { write?: Partial<T>; result: R },
+  ): Promise<R> {
+    // Single-threaded and synchronous between the read and the write, so this
+    // is atomic without a lock.
+    const current = (this.collections.get(collection)?.get(docId) ??
+      null) as T | null;
+    const { write, result } = decide(current);
+    if (write) await this.setDocument(collection, docId, write, true);
+    return result;
+  }
+
   clear(): void {
     this.collections.clear();
   }

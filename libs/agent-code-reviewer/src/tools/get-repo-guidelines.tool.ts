@@ -10,8 +10,13 @@ export interface RepoSkillSummary {
   description: string;
 }
 
+/**
+ * What the orchestrator sees. The rules text itself only goes into session
+ * state for the sub-agents: returning it here would put it in the
+ * orchestrator's history and re-send it on every later turn.
+ */
 export interface GetRepoGuidelinesResult {
-  rules: string;
+  rulesChars: number;
   ruleSources: string[];
   skills: RepoSkillSummary[];
   message?: string;
@@ -29,6 +34,18 @@ const CANDIDATE_RULE_FILES = [
   '.cursorrules',
   'CONTRIBUTING.md',
 ];
+
+const MAX_RULE_FILE_CHARS = 8_000;
+const MAX_TOTAL_RULES_CHARS = 20_000;
+const MAX_SKILLS = 15;
+const MAX_SKILL_DESCRIPTION_CHARS = 200;
+const IGNORED_SKILL_DIRS = /(^|\/)(node_modules|vendor|dist)\//;
+
+function truncate(text: string, max: number, label: string): string {
+  return text.length > max
+    ? `${text.slice(0, max)}\n... [${label} truncated: ${text.length} chars]`
+    : text;
+}
 
 export function parseSkillFrontmatter(content: string): {
   name?: string;
@@ -66,7 +83,7 @@ export function createGetRepoGuidelinesTool(
   return new FunctionTool({
     name: 'getRepoGuidelines',
     description:
-      'Fetches the repository agent rules (e.g. AGENTS.md, CLAUDE.md) and discovers available repository skills (e.g. in .agents/skills). Returns rules and a skills catalogue.',
+      'Fetches the repository agent rules (e.g. AGENTS.md, CLAUDE.md) and discovers available repository skills (e.g. in .agents/skills). Shares the rules with the reviewer sub-agents and returns the rule sources and a skills catalogue.',
     parameters: z.object({
       owner: z.string().optional().describe('Repository owner'),
       repo: z.string().optional().describe('Repository name'),
@@ -80,7 +97,7 @@ export function createGetRepoGuidelinesTool(
 
       if (!deps.gitAdapter) {
         return {
-          rules: '',
+          rulesChars: 0,
           ruleSources: [],
           skills: [],
           message: 'Git adapter is not configured.',
@@ -89,7 +106,7 @@ export function createGetRepoGuidelinesTool(
 
       if (!owner || !repo) {
         return {
-          rules: '',
+          rulesChars: 0,
           ruleSources: [],
           skills: [],
           message: 'Owner and repo are required.',
@@ -109,7 +126,9 @@ export function createGetRepoGuidelinesTool(
             ref,
           );
           if (res?.content && res.content.trim()) {
-            collectedRules.push(`### ${fileName}\n\n${res.content.trim()}`);
+            collectedRules.push(
+              `### ${fileName}\n\n${truncate(res.content.trim(), MAX_RULE_FILE_CHARS, fileName)}`,
+            );
             ruleSources.push(fileName);
           }
         } catch {
@@ -127,9 +146,22 @@ export function createGetRepoGuidelinesTool(
           'filename:SKILL.md',
         );
 
-        const skillFiles = (searchResult?.items || []).filter((item) =>
-          item.path.endsWith('SKILL.md'),
-        );
+        // Repos often mirror the same skills for several agent tools
+        // (.agents/, .opencode/, ...); fetch each skill directory name once.
+        const seenSkillDirs = new Set<string>();
+        const skillFiles = (searchResult?.items || [])
+          .filter(
+            (item) =>
+              item.path.endsWith('SKILL.md') &&
+              !IGNORED_SKILL_DIRS.test(item.path),
+          )
+          .filter((item) => {
+            const dir = item.path.split('/').slice(-2, -1)[0] ?? item.path;
+            if (seenSkillDirs.has(dir)) return false;
+            seenSkillDirs.add(dir);
+            return true;
+          })
+          .slice(0, MAX_SKILLS);
 
         for (const file of skillFiles) {
           try {
@@ -147,7 +179,10 @@ export function createGetRepoGuidelinesTool(
             skills.push({
               name: skillName,
               path: file.path,
-              description: description || 'No description provided.',
+              description: (description || 'No description provided.').slice(
+                0,
+                MAX_SKILL_DESCRIPTION_CHARS,
+              ),
             });
           } catch {
             // Failed to fetch specific skill file, skip
@@ -157,7 +192,11 @@ export function createGetRepoGuidelinesTool(
         // Code search not available or failed, continue with rules
       }
 
-      const combinedRules = collectedRules.join('\n\n---\n\n');
+      const combinedRules = truncate(
+        collectedRules.join('\n\n---\n\n'),
+        MAX_TOTAL_RULES_CHARS,
+        'repository rules',
+      );
 
       const state = ctx?.state;
       if (state) {
@@ -169,9 +208,12 @@ export function createGetRepoGuidelinesTool(
       }
 
       return {
-        rules: combinedRules || '(no agent rules found in repository)',
+        rulesChars: combinedRules.length,
         ruleSources,
         skills,
+        message: combinedRules
+          ? 'Rules loaded and shared with the reviewer sub-agents.'
+          : 'No agent rules found in repository.',
       };
     },
   });

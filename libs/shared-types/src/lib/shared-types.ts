@@ -40,6 +40,8 @@ export interface PRMeta {
   cloneUrl?: string;
   baseRef?: string;
   isIncrementalUpdate?: boolean;
+  /** Head commit of the PR; with prKey it identifies one reviewable revision. */
+  headSha?: string;
 }
 
 export interface PREventPayload {

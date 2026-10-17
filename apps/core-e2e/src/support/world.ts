@@ -8,6 +8,7 @@ import { buildCoreServer } from '../../../core/src/app.js';
 import { coreEnvSchema, CoreEnvService } from '../../../core/src/env.js';
 import { ContextRepository } from '../../../core/src/modules/database/repositories/context.repository.js';
 import { PrRepository } from '../../../core/src/modules/database/repositories/pr.repository.js';
+import { ReviewRunRepository } from '../../../core/src/modules/database/repositories/review-run.repository.js';
 import { EventOrchestratorService } from '../../../core/src/services/event-orchestrator.service.js';
 import { InMemoryDatabaseService } from './doubles/in-memory-db.service.js';
 import { MockPubSub } from './doubles/mock-pubsub.js';
@@ -18,6 +19,8 @@ export class CoreWorld extends World {
   public pubsub: MockPubSub;
   public prRepository: PrRepository;
   public contextRepository: ContextRepository;
+  public reviewRunRepository: ReviewRunRepository;
+  public reviewRuns = 0;
   public orchestrator!: EventOrchestratorService;
   public envService!: CoreEnvService;
   public lastResponse?: LightMyRequestResponse;
@@ -28,6 +31,7 @@ export class CoreWorld extends World {
     this.pubsub = new MockPubSub();
     this.prRepository = new PrRepository(this.db);
     this.contextRepository = new ContextRepository(this.db);
+    this.reviewRunRepository = new ReviewRunRepository(this.db);
   }
 
   get postedReviews(): ReviewResultPayload[] {
@@ -52,6 +56,7 @@ export class CoreWorld extends World {
       pubsub: this.pubsub as unknown as PubSub,
       prRepository: this.prRepository,
       contextRepository: this.contextRepository,
+      reviewRunRepository: this.reviewRunRepository,
       envService: this.envService,
       agentService: {
         buildContext: async (options) => {
@@ -61,6 +66,7 @@ export class CoreWorld extends World {
           };
         },
         runReview: async (input) => {
+          this.reviewRuns += 1;
           return {
             provider: input.prMeta.provider || 'github',
             owner: input.prMeta.owner || 'usermeme',
@@ -86,6 +92,7 @@ export class CoreWorld extends World {
       databaseService: this.db,
       prRepository: this.prRepository,
       contextRepository: this.contextRepository,
+      reviewRunRepository: this.reviewRunRepository,
       orchestrator: this.orchestrator,
       fastifyOptions: { logger: false },
     });

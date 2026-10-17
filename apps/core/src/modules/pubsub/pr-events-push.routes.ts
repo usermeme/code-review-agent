@@ -1,4 +1,4 @@
-import { parsePubSubPushPayload } from '@code-review-agent/pubsub';
+import { parsePubSubPushEnvelope } from '@code-review-agent/pubsub';
 import { PREventPayload } from '@code-review-agent/shared-types';
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 
@@ -13,8 +13,11 @@ export const prEventsPushRoutes: FastifyPluginAsync<
 > = async (fastify: FastifyInstance, options: PrEventsPushRoutesOptions) => {
   fastify.post('/pr-events', async (request, reply) => {
     let payload: PREventPayload;
+    let messageId: string | undefined;
     try {
-      payload = parsePubSubPushPayload<PREventPayload>(request.body);
+      ({ payload, messageId } = parsePubSubPushEnvelope<PREventPayload>(
+        request.body,
+      ));
     } catch (err) {
       request.log.warn(
         `[PrEventsPush] Malformed Pub/Sub envelope: ${String(err)}`,
@@ -42,12 +45,16 @@ export const prEventsPushRoutes: FastifyPluginAsync<
       const res = await options.orchestrator.ingestPREvent(
         payload,
         request.log,
+        { messageId },
       );
       return reply.status(200).send({
         success: true,
         data: res,
       });
     } catch (error) {
+      // The orchestrator only throws when a retry can succeed; answering 500
+      // makes Pub/Sub redeliver (bounded by the subscription's
+      // max-delivery-attempts, then dead-lettered).
       request.log.error(
         `[PrEventsPush] Error processing PR event: ${String(error)}`,
       );

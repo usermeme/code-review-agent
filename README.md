@@ -224,6 +224,7 @@ jobs:
             --memory 2Gi \
             --cpu 2 \
             --no-cpu-throttling \
+            --timeout 900 \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
@@ -262,15 +263,33 @@ jobs:
           ADAPTER_URL=$(gcloud run services describe github-adapter --region "${{ env.GCP_REGION }}" --format 'value(status.url)')
 
           # 1. PR Events Push Subscription to Core
-          gcloud pubsub subscriptions create pr-events-sub \
-            --topic=pr-events \
-            --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events" \
-            --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --ack-deadline=600 || \
-          gcloud pubsub subscriptions update pr-events-sub \
-            --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events" \
-            --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
+          # Core runs the whole review inside the push request. Cloud Run's
+          # --timeout (900s) must exceed the ack deadline (600s), and the review
+          # itself is capped at 8 minutes, so a delivery is answered before
+          # Pub/Sub gives up on it. Retries are bounded: after 5 failed
+          # deliveries the message goes to pr-events-dlq instead of being
+          # redelivered for the 7-day retention window (each redelivery is a
+          # full, paid LLM review).
+          PROJECT_NUMBER=$(gcloud projects describe "${{ env.GCP_PROJECT_ID }}" --format 'value(projectNumber)')
+          PUBSUB_AGENT="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com"
+          PR_EVENTS_SUB_FLAGS=(
+            --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events"
+            --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
             --ack-deadline=600
+            --dead-letter-topic=pr-events-dlq
+            --max-delivery-attempts=5
+            --min-retry-delay=30s
+            --max-retry-delay=600s
+          )
+          gcloud pubsub topics create pr-events-dlq || true
+          gcloud pubsub subscriptions create pr-events-sub --topic=pr-events "${PR_EVENTS_SUB_FLAGS[@]}" || \
+          gcloud pubsub subscriptions update pr-events-sub "${PR_EVENTS_SUB_FLAGS[@]}"
+
+          # Dead letters need a subscription to be retained, and the Pub/Sub
+          # service agent needs rights to move messages into the DLQ.
+          gcloud pubsub subscriptions create pr-events-dlq-sub --topic=pr-events-dlq --message-retention-duration=7d || true
+          gcloud pubsub topics add-iam-policy-binding pr-events-dlq --member="${PUBSUB_AGENT}" --role=roles/pubsub.publisher
+          gcloud pubsub subscriptions add-iam-policy-binding pr-events-sub --member="${PUBSUB_AGENT}" --role=roles/pubsub.subscriber
 
           # 2. Review Results Push Subscription to Adapter
           gcloud pubsub subscriptions create review-results-sub \
@@ -321,7 +340,7 @@ fi
 
 # 3. Create Pub/Sub Topics
 echo "Creating Pub/Sub topics..."
-for TOPIC in pr-events review-results; do
+for TOPIC in pr-events pr-events-dlq review-results; do
   if ! gcloud pubsub topics describe "${TOPIC}" &>/dev/null; then
     gcloud pubsub topics create "${TOPIC}"
     echo "Created topic: ${TOPIC}"
@@ -411,6 +430,7 @@ resource "google_firestore_database" "database" {
 resource "google_pubsub_topic" "topics" {
   for_each = toset([
     "pr-events",
+    "pr-events-dlq",
     "review-results",
   ])
   name       = each.key

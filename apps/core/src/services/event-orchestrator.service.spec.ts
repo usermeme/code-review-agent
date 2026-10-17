@@ -1,3 +1,4 @@
+import { ReviewBudgetExceededError } from '@code-review-agent/agent-code-reviewer';
 import { EnvService } from '@code-review-agent/env';
 import { PREventPayload } from '@code-review-agent/shared-types';
 import { PubSub } from '@google-cloud/pubsub';
@@ -6,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { coreEnvSchema, CoreEnvService } from '../env.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
+import { ReviewRunRepository } from '../modules/database/repositories/review-run.repository.js';
 import { AgentService } from './agent.service.js';
 import {
   EventOrchestratorDependencies,
@@ -21,6 +23,11 @@ describe('EventOrchestratorService', () => {
   let mockContextRepo: {
     getContext: ReturnType<typeof vi.fn>;
     saveContext: ReturnType<typeof vi.fn>;
+  };
+  let mockReviewRunRepo: {
+    acquire: ReturnType<typeof vi.fn>;
+    complete: ReturnType<typeof vi.fn>;
+    fail: ReturnType<typeof vi.fn>;
   };
   let testEnvService: CoreEnvService;
   let publishedMessages: { topic: string; data: Record<string, unknown> }[];
@@ -38,6 +45,7 @@ describe('EventOrchestratorService', () => {
       envService: testEnvService,
       prRepository: mockPrRepo as unknown as PrRepository,
       contextRepository: mockContextRepo as unknown as ContextRepository,
+      reviewRunRepository: mockReviewRunRepo as unknown as ReviewRunRepository,
       pubsub: mockPubSub as unknown as PubSub,
       agentService: mockAgentService as unknown as AgentService,
       ...overrides,
@@ -74,6 +82,12 @@ describe('EventOrchestratorService', () => {
     mockContextRepo = {
       getContext: vi.fn().mockResolvedValue(null),
       saveContext: vi.fn().mockResolvedValue(undefined),
+    };
+
+    mockReviewRunRepo = {
+      acquire: vi.fn().mockResolvedValue({ acquired: true, attempt: 1 }),
+      complete: vi.fn().mockResolvedValue(undefined),
+      fail: vi.fn().mockResolvedValue(undefined),
     };
 
     mockBuildContext = vi.fn().mockResolvedValue({
@@ -345,5 +359,123 @@ describe('EventOrchestratorService', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  describe('exactly-once processing', () => {
+    const reviewEvent = (overrides: Partial<PREventPayload['prMeta']> = {}) =>
+      ({
+        prMeta: {
+          provider: 'github',
+          owner: 'test-org',
+          repo: 'test-repo',
+          prNumber: 42,
+          title: 'Feature PR',
+          author: 'developer',
+          branch: 'feat/test',
+          htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+          action: 'synchronize',
+          headSha: 'abc123',
+          ...overrides,
+        },
+        diff: 'diff --git a/src/a.ts b/src/a.ts\n+a\n',
+        changedFiles: ['src/a.ts'],
+      }) satisfies PREventPayload;
+
+    beforeEach(() => {
+      mockContextRepo.getContext.mockResolvedValue({
+        prKey: 'github:test-org:test-repo:0',
+        summary: JSON.stringify({ architecture: 'microservices' }),
+        updatedAt: new Date(),
+      });
+    });
+
+    it('keys review runs by head commit and marks them completed', async () => {
+      await createTestOrchestrator().ingestPREvent(reviewEvent(), undefined, {
+        messageId: 'm-1',
+      });
+
+      expect(mockReviewRunRepo.acquire).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42@abc123',
+      );
+      expect(mockReviewRunRepo.complete).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42@abc123',
+      );
+    });
+
+    it('keys manual re-reviews by message so they can re-run a revision', async () => {
+      await createTestOrchestrator().ingestPREvent(
+        reviewEvent({ action: 'manual_trigger' }),
+        undefined,
+        { messageId: 'm-7' },
+      );
+
+      expect(mockReviewRunRepo.acquire).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42#msg-m-7',
+      );
+    });
+
+    it('acknowledges a duplicate delivery without running the review again', async () => {
+      mockReviewRunRepo.acquire.mockResolvedValue({
+        acquired: false,
+        reason: 'in_progress',
+      });
+
+      const res = await createTestOrchestrator().ingestPREvent(reviewEvent());
+
+      expect(res.status).toBe('duplicate');
+      expect(mockRunReview).not.toHaveBeenCalled();
+      expect(publishedMessages).toHaveLength(0);
+    });
+
+    it('does not rethrow permanent failures, so Pub/Sub does not redeliver', async () => {
+      mockRunReview.mockRejectedValue(
+        new ReviewBudgetExceededError('over budget'),
+      );
+
+      const res = await createTestOrchestrator().ingestPREvent(reviewEvent());
+
+      expect(res).toEqual(
+        expect.objectContaining({ success: false, status: 'failed' }),
+      );
+      expect(mockReviewRunRepo.fail).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42@abc123',
+        expect.stringContaining('over budget'),
+        false,
+      );
+      expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({ status: 'failed' }),
+      );
+    });
+
+    it('rethrows transient failures so Pub/Sub redelivers', async () => {
+      mockRunReview.mockRejectedValue(
+        Object.assign(new Error('backend down'), { code: 'UNAVAILABLE' }),
+      );
+
+      await expect(
+        createTestOrchestrator().ingestPREvent(reviewEvent()),
+      ).rejects.toThrow('backend down');
+      expect(mockReviewRunRepo.fail).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42@abc123',
+        expect.any(String),
+        true,
+      );
+    });
+
+    it('filters the diff before storing it or reviewing it', async () => {
+      const event = reviewEvent();
+      event.diff += 'diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml\n+LOCK\n';
+
+      await createTestOrchestrator().ingestPREvent(event);
+
+      const reviewInput = mockRunReview.mock.calls[0][0];
+      expect(reviewInput.diff).toContain('+a');
+      expect(reviewInput.diff).not.toContain('+LOCK');
+      const storedDiffs = mockPrRepo.updatePRStatus.mock.calls
+        .map(([, state]) => state.diff)
+        .filter(Boolean);
+      expect(storedDiffs.join('')).not.toContain('+LOCK');
+    });
   });
 });

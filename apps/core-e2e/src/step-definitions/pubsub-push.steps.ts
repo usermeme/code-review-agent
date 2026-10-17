@@ -8,6 +8,7 @@ function buildEnvelope(
   repoFullName: string,
   prNumber: number,
   action: string,
+  messageId: string,
   prMetaOverrides: Record<string, unknown> = {},
 ) {
   const [owner, repo] = repoFullName.split('/');
@@ -36,7 +37,7 @@ function buildEnvelope(
     message: {
       attributes: {},
       data: Buffer.from(JSON.stringify(payload)).toString('base64'),
-      messageId: `msg-${Date.now()}`,
+      messageId,
     },
     subscription: 'projects/test/subscriptions/pr-events-sub',
   };
@@ -53,8 +54,33 @@ When(
     this.lastResponse = await this.app.inject({
       method: 'POST',
       url: '/api/v1/pubsub/pr-events',
-      payload: buildEnvelope(repoFullName, prNumber, action),
+      payload: buildEnvelope(
+        repoFullName,
+        prNumber,
+        action,
+        `msg-${Date.now()}`,
+      ),
     });
+  },
+);
+
+When(
+  'PubSub delivers message {string} for {string} PR #{int} with action {string} {int} times',
+  async function (
+    this: CoreWorld,
+    messageId: string,
+    repoFullName: string,
+    prNumber: number,
+    action: string,
+    times: number,
+  ) {
+    for (let i = 0; i < times; i++) {
+      this.lastResponse = await this.app.inject({
+        method: 'POST',
+        url: '/api/v1/pubsub/pr-events',
+        payload: buildEnvelope(repoFullName, prNumber, action, messageId),
+      });
+    }
   },
 );
 
@@ -64,9 +90,13 @@ When(
     this.lastResponse = await this.app.inject({
       method: 'POST',
       url: '/api/v1/pubsub/pr-events',
-      payload: buildEnvelope(repoFullName, prNumber, 'closed', {
-        isIncrementalUpdate: true,
-      }),
+      payload: buildEnvelope(
+        repoFullName,
+        prNumber,
+        'closed',
+        `msg-${Date.now()}`,
+        { isIncrementalUpdate: true },
+      ),
     });
   },
 );
@@ -80,6 +110,10 @@ Then(
     assert.equal(body.data?.status, status);
   },
 );
+
+Then('the review ran {int} time(s)', function (this: CoreWorld, times: number) {
+  assert.equal(this.reviewRuns, times);
+});
 
 Then('the push request responds with HTTP 200', function (this: CoreWorld) {
   assert(this.lastResponse, 'Expected a response from push request');

@@ -1,8 +1,10 @@
+import { prepareDiff } from '@code-review-agent/agent-code-reviewer';
 import { LlmFactory } from '@code-review-agent/llm';
 import {
   ContextReadyPayload,
   GitAdapterContract,
   PREventPayload,
+  PRMeta,
   ReviewResultPayload,
 } from '@code-review-agent/shared-types';
 import type { BaseLlm } from '@google/adk';
@@ -13,7 +15,9 @@ import type { CoreEnvService } from '../env.js';
 import { GitAdapterClient } from '../modules/adapter/git-adapter.client.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
+import { ReviewRunRepository } from '../modules/database/repositories/review-run.repository.js';
 import type { AgentService } from './agent.service.js';
+import { isRetryableError } from './review-errors.js';
 
 export interface PREventResult {
   success: boolean;
@@ -21,10 +25,24 @@ export interface PREventResult {
   message: string;
 }
 
+/** Pub/Sub delivery metadata for the event being processed. */
+export interface PREventDelivery {
+  messageId?: string;
+}
+
+const REVIEW_ACTIONS = new Set([
+  'opened',
+  'synchronize',
+  'reopened',
+  'review_requested',
+  'manual_trigger',
+]);
+
 export interface EventOrchestratorDependencies {
   envService: CoreEnvService;
   prRepository: PrRepository;
   contextRepository: ContextRepository;
+  reviewRunRepository: ReviewRunRepository;
   pubsub: PubSub;
   agentService: AgentService;
   gitAdapterClient?: GitAdapterContract;
@@ -35,6 +53,7 @@ export class EventOrchestratorService {
   private pubsub: PubSub;
   private prRepository: PrRepository;
   private contextRepository: ContextRepository;
+  private reviewRunRepository: ReviewRunRepository;
   private envService: CoreEnvService;
   private agentService: AgentService;
   private gitAdapterClient: GitAdapterContract;
@@ -44,6 +63,7 @@ export class EventOrchestratorService {
     this.pubsub = deps.pubsub;
     this.prRepository = deps.prRepository;
     this.contextRepository = deps.contextRepository;
+    this.reviewRunRepository = deps.reviewRunRepository;
     this.envService = deps.envService;
     this.agentService = deps.agentService;
 
@@ -54,9 +74,15 @@ export class EventOrchestratorService {
     this.llm = deps.llm ?? new LlmFactory(deps.envService.data).createLlm();
   }
 
+  /**
+   * Processes a PR event at most once per revision. Redeliveries and
+   * duplicate events are acknowledged without re-running the review; failures
+   * are rethrown (so Pub/Sub redelivers) only when a retry can succeed.
+   */
   async ingestPREvent(
     req: PREventPayload,
     logger?: FastifyBaseLogger,
+    delivery: PREventDelivery = {},
   ): Promise<PREventResult> {
     const meta = req.prMeta;
     if (!meta) {
@@ -67,6 +93,81 @@ export class EventOrchestratorService {
       };
     }
 
+    const { provider, owner, repo, prNumber } = meta;
+    const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
+    const runKey = this.runKeyFor(req, prKey, delivery);
+
+    if (runKey) {
+      const lock = await this.reviewRunRepository.acquire(runKey);
+      if ('reason' in lock) {
+        logger?.info(
+          `[Core] Skipping ${meta.action} for ${prKey}: run ${runKey} is ${lock.reason}.`,
+        );
+        return {
+          success: true,
+          status: 'duplicate',
+          message: `Skipped: run ${lock.reason}`,
+        };
+      }
+      logger?.info(`[Core] Run ${runKey} attempt ${lock.attempt}.`);
+    }
+
+    try {
+      const response = await this.processPREvent(req, meta, logger);
+      if (runKey) await this.reviewRunRepository.complete(runKey);
+      return response;
+    } catch (error) {
+      const retryable = isRetryableError(error);
+      logger?.error(
+        `[Core] Processing ${meta.action} for ${prKey} failed (${retryable ? 'retryable' : 'permanent'}): ${String(error)}`,
+      );
+      if (runKey) {
+        await this.reviewRunRepository.fail(runKey, String(error), retryable);
+      }
+      await this.prRepository.updatePRStatus(prKey, {
+        status: 'failed',
+        error: String(error),
+      });
+      if (retryable) throw error;
+      return {
+        success: false,
+        status: 'failed',
+        message: String(error),
+      };
+    }
+  }
+
+  /**
+   * Identity of one unit of work, or undefined for events that do no
+   * expensive work. Review events are keyed by head commit so `opened` and
+   * `review_requested` for the same revision review once; a manual `/review`
+   * is keyed by its message so it can deliberately re-review a revision.
+   */
+  private runKeyFor(
+    req: PREventPayload,
+    prKey: string,
+    delivery: PREventDelivery,
+  ): string | undefined {
+    const meta = req.prMeta;
+    if (!meta) return undefined;
+
+    if (meta.action === 'closed' && meta.isIncrementalUpdate) {
+      return `${prKey}#merged`;
+    }
+    if (!REVIEW_ACTIONS.has(meta.action)) return undefined;
+    if (meta.action !== 'manual_trigger' && meta.headSha) {
+      return `${prKey}@${meta.headSha}`;
+    }
+    return delivery.messageId
+      ? `${prKey}#msg-${delivery.messageId}`
+      : undefined;
+  }
+
+  private async processPREvent(
+    req: PREventPayload,
+    meta: PRMeta,
+    logger?: FastifyBaseLogger,
+  ): Promise<PREventResult> {
     const { provider, owner, repo, prNumber, action } = meta;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
     const baselineKey = `${provider}:${owner}:${repo}:0`;
@@ -101,13 +202,7 @@ export class EventOrchestratorService {
       };
     }
 
-    if (
-      action === 'opened' ||
-      action === 'synchronize' ||
-      action === 'reopened' ||
-      action === 'review_requested' ||
-      action === 'manual_trigger'
-    ) {
+    if (REVIEW_ACTIONS.has(action)) {
       let diff = req.diff || '';
       let changedFiles = req.changedFiles || [];
 
@@ -129,6 +224,11 @@ export class EventOrchestratorService {
           );
         }
       }
+
+      // Filter and cap once, before the diff is stored or sent to any LLM:
+      // Firestore rejects documents over 1 MiB, and a failed write here would
+      // fail (and redeliver) the whole event.
+      diff = prepareDiff(diff).diff;
 
       // Check if baseline context exists in Firestore
       const existingContext =
