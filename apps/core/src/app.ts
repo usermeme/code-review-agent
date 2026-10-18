@@ -1,14 +1,14 @@
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 
-import { contextModule } from './modules/context/context.module.js';
+import { contextRoutes } from './modules/context/context.routes.js';
 import { DatabaseService } from './modules/database/interfaces/database.interface.js';
 import { ContextRepository } from './modules/database/repositories/context.repository.js';
 import { DeliveryRepository } from './modules/database/repositories/delivery.repository.js';
-import { healthModule } from './modules/health/health.module.js';
-import { pubsubModule } from './modules/pubsub/pubsub.module.js';
+import { healthRoutes } from './modules/health/health.routes.js';
+import { prEventsPushRoutes } from './modules/pubsub/pr-events-push.routes.js';
 import { EventOrchestratorService } from './services/event-orchestrator.service.js';
 
-export interface BuildCoreServerOptions {
+interface BuildCoreServerOptions {
   databaseService: DatabaseService;
   contextRepository: ContextRepository;
   orchestrator: EventOrchestratorService;
@@ -24,17 +24,17 @@ export async function buildCoreServer(
 
   await options.databaseService.connect(server.log);
 
-  // 1. Health check module
-  await server.register(healthModule);
+  // 1. Health check routes
+  await server.register(healthRoutes);
 
-  // 2. Context lookup module
-  await server.register(contextModule, {
+  // 2. Context lookup routes
+  await server.register(contextRoutes, {
     prefix: '/api/v1/context',
     contextRepository: options.contextRepository,
   });
 
-  // 3. Pub/Sub PR Events Push route module (wakes up scale-to-zero serverless instances)
-  await server.register(pubsubModule, {
+  // 3. Pub/Sub PR Events Push route (wakes up scale-to-zero serverless instances)
+  await server.register(prEventsPushRoutes, {
     prefix: '/api/v1/pubsub',
     orchestrator: options.orchestrator,
     deliveryRepository: options.deliveryRepository,

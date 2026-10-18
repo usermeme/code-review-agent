@@ -2,38 +2,33 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
   Endpoint,
-  EndpointPayload,
   EndpointPayloadRecord,
   ENDPOINTS,
-  EndointPayloadRecord,
-  Enpoint,
-  EnpointPayload,
-  EnpointPayloadRecord,
   interpolatePath,
 } from './endpoints.js';
 
 describe('endpoints library', () => {
   describe('interpolatePath', () => {
-    it('interpolates path parameters from payload.Path using ENDPOINTS.REPO_ROOT', () => {
-      const result = interpolatePath(ENDPOINTS.REPO_ROOT, {
+    it('interpolates path parameters from payload.Path', () => {
+      const result = interpolatePath(ENDPOINTS.TARBALL, {
         Path: {
           owner: 'octocat',
           repo: 'hello-world',
         },
       });
 
-      expect(result).toBe('/api/v1/repos/octocat/hello-world/');
+      expect(result).toBe('/api/v1/repos/octocat/hello-world/tarball');
     });
 
     it('encodes URI components for path parameters', () => {
-      const result = interpolatePath(ENDPOINTS.REPO_ROOT, {
+      const result = interpolatePath(ENDPOINTS.TARBALL, {
         Path: {
           owner: 'my org',
           repo: 'my repo',
         },
       });
 
-      expect(result).toBe('/api/v1/repos/my%20org/my%20repo/');
+      expect(result).toBe('/api/v1/repos/my%20org/my%20repo/tarball');
     });
 
     it('preserves slashes in file paths while encoding segments', () => {
@@ -76,12 +71,12 @@ describe('endpoints library', () => {
       expect(result).toBe('/api/v1/repos/octocat/repo/pulls/42/diff');
     });
 
-    it('interpolates PR files endpoint with number parameter', () => {
-      const result = interpolatePath(ENDPOINTS.PR_FILES_NUMBER, {
+    it('interpolates PR files endpoint with prNumber parameter', () => {
+      const result = interpolatePath(ENDPOINTS.PR_FILES, {
         Path: {
           owner: 'octocat',
           repo: 'repo',
-          number: 123,
+          prNumber: 123,
         },
       });
 
@@ -89,34 +84,34 @@ describe('endpoints library', () => {
     });
 
     it('falls back to payload.Params if payload.Path is not present', () => {
-      const result = interpolatePath(ENDPOINTS.REPO_ROOT, {
+      const result = interpolatePath(ENDPOINTS.TARBALL, {
         Params: {
           owner: 'facebook',
           repo: 'react',
         },
-      } as unknown as EndpointPayloadRecord[typeof ENDPOINTS.REPO_ROOT]);
+      } as unknown as EndpointPayloadRecord[typeof ENDPOINTS.TARBALL]);
 
-      expect(result).toBe('/api/v1/repos/facebook/react/');
+      expect(result).toBe('/api/v1/repos/facebook/react/tarball');
     });
 
     it('falls back to direct payload object if Path or Params are not present', () => {
-      const result = interpolatePath(ENDPOINTS.REPO_ROOT, {
+      const result = interpolatePath(ENDPOINTS.TARBALL, {
         owner: 'facebook',
         repo: 'react',
-      } as unknown as EndpointPayloadRecord[typeof ENDPOINTS.REPO_ROOT]);
+      } as unknown as EndpointPayloadRecord[typeof ENDPOINTS.TARBALL]);
 
-      expect(result).toBe('/api/v1/repos/facebook/react/');
+      expect(result).toBe('/api/v1/repos/facebook/react/tarball');
     });
 
     it('throws an error if a required path parameter is missing', () => {
       expect(() => {
-        interpolatePath(ENDPOINTS.REPO_ROOT, {
+        interpolatePath(ENDPOINTS.TARBALL, {
           Path: {
             owner: 'octocat',
           },
-        } as unknown as EndpointPayloadRecord[typeof ENDPOINTS.REPO_ROOT]);
+        } as unknown as EndpointPayloadRecord[typeof ENDPOINTS.TARBALL]);
       }).toThrowError(
-        'Missing required path parameter "repo" for endpoint "/api/v1/repos/:owner/:repo/"',
+        'Missing required path parameter "repo" for endpoint "/api/v1/repos/:owner/:repo/tarball"',
       );
     });
 
@@ -128,18 +123,11 @@ describe('endpoints library', () => {
 
   describe('ENDPOINTS and types', () => {
     it('provides valid endpoint constants', () => {
-      expect(ENDPOINTS.REPO_ROOT).toBe('/api/v1/repos/:owner/:repo/');
       expect(ENDPOINTS.PR_DIFF).toBe(
         '/api/v1/repos/:owner/:repo/pulls/:prNumber/diff',
       );
-      expect(ENDPOINTS.PR_DIFF_NUMBER).toBe(
-        '/api/v1/repos/:owner/:repo/pulls/:number/diff',
-      );
       expect(ENDPOINTS.PR_FILES).toBe(
         '/api/v1/repos/:owner/:repo/pulls/:prNumber/files',
-      );
-      expect(ENDPOINTS.PR_FILES_NUMBER).toBe(
-        '/api/v1/repos/:owner/:repo/pulls/:number/files',
       );
       expect(ENDPOINTS.SEARCH_CODE).toBe('/api/v1/repos/:owner/:repo/search');
       expect(ENDPOINTS.FILE_CONTENT).toBe(
@@ -153,15 +141,11 @@ describe('endpoints library', () => {
       );
       expect(ENDPOINTS.WEBHOOKS).toBe('/api/v1/webhooks');
       expect(ENDPOINTS.HEALTHZ).toBe('/healthz');
-      expect(ENDPOINTS.LIVEZ).toBe('/livez');
     });
 
-    it('verifies type definitions and aliases', () => {
-      expectTypeOf<Enpoint>().toEqualTypeOf<Endpoint>();
-      expectTypeOf<EndpointPayload>().toBeObject();
-      expectTypeOf<EnpointPayload>().toEqualTypeOf<EndpointPayload>();
-      expectTypeOf<EndointPayloadRecord>().toEqualTypeOf<EndpointPayloadRecord>();
-      expectTypeOf<EnpointPayloadRecord>().toEqualTypeOf<EndpointPayloadRecord>();
+    it('verifies type definitions', () => {
+      expectTypeOf<Endpoint>().toBeString();
+      expectTypeOf<EndpointPayloadRecord>().toBeObject();
     });
   });
 });

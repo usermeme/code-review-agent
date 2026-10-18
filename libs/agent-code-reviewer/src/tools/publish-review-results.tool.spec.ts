@@ -72,12 +72,6 @@ describe('publishReviewResultsTool', () => {
         },
       ],
     });
-    expect(stateMap.get(STATE.reviewResult)).toEqual(
-      expect.objectContaining({
-        prNumber: 42,
-        summary: 'Critical security issue detected',
-      }),
-    );
   });
 
   it('handles clean review with zero findings', async () => {
@@ -291,7 +285,7 @@ describe('publishReviewResultsTool', () => {
         findings: [
           {
             title: 'Anchored',
-            severity: 'high',
+            severity: 'major',
             path: 'src/db.ts',
             startLine: 11,
             endLine: 12,
@@ -300,7 +294,7 @@ describe('publishReviewResultsTool', () => {
           },
           {
             title: 'Outside hunk',
-            severity: 'high',
+            severity: 'major',
             path: 'src/db.ts',
             startLine: 300,
             endLine: 305,
@@ -309,7 +303,7 @@ describe('publishReviewResultsTool', () => {
           },
           {
             title: 'Unknown file',
-            severity: 'high',
+            severity: 'major',
             path: 'src/other.ts',
             startLine: 1,
             endLine: 2,
@@ -372,7 +366,7 @@ describe('publishReviewResultsTool', () => {
         findings: [
           {
             title: 'Partially outside hunk',
-            severity: 'high',
+            severity: 'major',
             path: 'src/db.ts',
             startLine: 8,
             endLine: 13,

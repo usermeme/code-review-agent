@@ -33,19 +33,18 @@ export default defineConfig({
         __dirname,
         'libs/endpoints/src/index.ts',
       ),
-      '@code-review-agent/enpoints': path.resolve(
-        __dirname,
-        'libs/endpoints/src/index.ts',
-      ),
     },
   },
   test: {
+    isolate: false,
     include: ['apps/**/*.spec.ts', 'libs/**/*.spec.ts'],
     env: {
       HOST: '0.0.0.0',
       PORT: '8080',
       GITHUB_WEBHOOK_SECRET: 'test-secret',
-      GITHUB_TOKEN: 'test-token',
+      GITHUB_APP_ID: '123456',
+      GITHUB_APP_PRIVATE_KEY:
+        '-----BEGIN RSA PRIVATE KEY-----\ntest-key\n-----END RSA PRIVATE KEY-----',
       PR_EVENTS_TOPIC: 'pr-events',
       REVIEW_RESULTS_TOPIC: 'review-results',
       REVIEW_MODEL: 'gemini-2.5-pro',

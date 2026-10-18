@@ -1,3 +1,4 @@
+import { NonRetryableTaskError } from '@code-review-agent/shared-types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GitAdapterClient } from './git-adapter.client.js';
@@ -128,5 +129,23 @@ describe('GitAdapterClient', () => {
       'http://adapter:8080/api/v1/repos/owner/repo/tarball?ref=feature-branch',
     );
     expect(result).toBe(mockResponse);
+  });
+
+  it('throws NonRetryableTaskError when adapter responds with nonRetryable: true', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      statusText: 'Unprocessable Entity',
+      json: vi.fn().mockResolvedValue({
+        error: 'GitHub App is not installed on owner/repo',
+        nonRetryable: true,
+      }),
+    });
+
+    const promise = client.getPRDiff('owner', 'repo', 10);
+    await expect(promise).rejects.toBeInstanceOf(NonRetryableTaskError);
+    await expect(promise).rejects.toThrow(
+      'Failed to fetch PR diff from git adapter: GitHub App is not installed on owner/repo',
+    );
   });
 });

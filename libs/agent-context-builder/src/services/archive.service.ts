@@ -9,8 +9,6 @@ import * as tar from 'tar';
 
 export interface RepoSnapshot {
   dir: string;
-  headSha: string;
-  cleanup: () => Promise<void>;
 }
 
 export function parseRepoCoordinates(cloneUrl?: string): {
@@ -67,16 +65,6 @@ function toNodeStream(body: unknown): NodeJS.ReadableStream {
     : (body as NodeJS.ReadableStream);
 }
 
-/** Best-effort commit identity: adapter headers first, then the requested ref. */
-function resolveHeadSha(headers: Headers, ref: string): string {
-  return (
-    headers.get('x-commit-sha') ||
-    headers.get('x-github-commit-sha') ||
-    headers.get('etag')?.replace(/"/g, '') ||
-    ref
-  );
-}
-
 /**
  * Downloads and extracts a repository archive via the Git adapter.
  * Uses streaming tar extraction in Node.js — zero git CLI or direct provider dependencies required.
@@ -113,13 +101,7 @@ export async function downloadRepoArchive(params: {
       }),
     );
 
-    const headSha = resolveHeadSha(response.headers, ref);
-
-    return {
-      dir,
-      headSha,
-      cleanup: () => rm(dir, { recursive: true, force: true }),
-    };
+    return { dir };
   } catch (error) {
     await rm(dir, { recursive: true, force: true });
     throw error;

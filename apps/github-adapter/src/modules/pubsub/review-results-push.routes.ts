@@ -1,8 +1,16 @@
 import { parsePubSubPushPayload } from '@code-review-agent/pubsub';
-import { ReviewResultPayload } from '@code-review-agent/shared-types';
-import { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import {
+  NonRetryableTaskError,
+  ReviewResultPayload,
+} from '@code-review-agent/shared-types';
+import {
+  FastifyInstance,
+  FastifyPluginAsync,
+  FastifyReply,
+  FastifyRequest,
+} from 'fastify';
 
-import { GithubService } from '../github/github.service.js';
+import { formatError, GithubService } from '../github/github.service.js';
 
 export interface ReviewResultsPushRoutesOptions {
   githubService: GithubService;
@@ -11,11 +19,8 @@ export interface ReviewResultsPushRoutesOptions {
 function hasValidPrReference(
   payload: ReviewResultPayload | undefined,
 ): boolean {
-  if (!payload) {
-    return false;
-  }
   return Boolean(
-    payload.owner && payload.repo && typeof payload.prNumber === 'number',
+    payload?.owner && payload.repo && typeof payload.prNumber === 'number',
   );
 }
 
@@ -28,6 +33,31 @@ function buildPostReviewOptions(payload: ReviewResultPayload) {
     ticketCoverage: payload.ticketCoverage,
     comments: payload.comments || [],
   };
+}
+
+function handlePostReviewError(
+  error: unknown,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): FastifyReply {
+  if (error instanceof NonRetryableTaskError) {
+    request.log.warn(
+      `[ReviewResultsPush] Non-retryable failure, acking: ${error.message}`,
+    );
+    return reply.status(200).send({
+      success: false,
+      reason: 'Non-retryable failure',
+      error: error.message,
+    });
+  }
+  const message = formatError(error);
+  request.log.error(
+    `[ReviewResultsPush] Error posting review results: ${message}`,
+  );
+  return reply.status(500).send({
+    success: false,
+    error: message,
+  });
 }
 
 export const reviewResultsPushRoutes: FastifyPluginAsync<
@@ -68,17 +98,11 @@ export const reviewResultsPushRoutes: FastifyPluginAsync<
         buildPostReviewOptions(payload),
       );
       return reply.status(200).send({
-        success: true,
+        success: res.success,
         data: res,
       });
     } catch (error) {
-      request.log.error(
-        `[ReviewResultsPush] Error posting review results: ${String(error)}`,
-      );
-      return reply.status(500).send({
-        success: false,
-        error: String(error),
-      });
+      return handlePostReviewError(error, request, reply);
     }
   });
 };

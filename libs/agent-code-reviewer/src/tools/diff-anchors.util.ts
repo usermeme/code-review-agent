@@ -71,17 +71,6 @@ export function parseNewSideRanges(diff: string): Map<string, LineRange[]> {
   return ranges;
 }
 
-/** True when the given NEW-side line falls inside one of the file's hunks. */
-export function isLineInDiff(
-  ranges: Map<string, LineRange[]>,
-  path: string,
-  line: number,
-): boolean {
-  const fileRanges = ranges.get(path);
-  if (!fileRanges) return false;
-  return fileRanges.some((range) => line >= range.start && line <= range.end);
-}
-
 /**
  * Finds a diff hunk in `path` that covers (or overlaps) `[startLine, endLine]`
  * and clamps both bounds into that single hunk. GitHub requires `start_line`

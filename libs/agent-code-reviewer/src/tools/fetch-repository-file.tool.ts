@@ -4,37 +4,16 @@ import { z } from 'zod';
 
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
 import { isIgnoredDiffPath } from '../utils/diff.util.js';
-
-const BLOCKED_FILE_EXTENSIONS = [
-  '.lock',
-  '-lock.json',
-  '.min.js',
-  '.min.css',
-  '.map',
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.gif',
-  '.ico',
-  '.svg',
-  '.woff',
-  '.woff2',
-  '.ttf',
-  '.eot',
-  '.tar',
-  '.gz',
-  '.zip',
-];
+import {
+  fetchCachedRepoFile,
+  readPinnedCoordinates,
+  type RepoToolDependencies,
+} from './repo-tool-context.util.js';
 
 const MAX_LINES = 250;
 const MAX_CHARACTERS = 15_000;
 
-export interface FetchRepositoryFileToolDependencies {
-  gitAdapter?: GitAdapterContract;
-  defaultOwner?: string;
-  defaultRepo?: string;
-  cache?: Map<string, string>;
-}
+export type FetchRepositoryFileToolDependencies = RepoToolDependencies;
 
 /** Where the file is read from: pinned coordinates plus the (clamped) ref. */
 interface FileFetchTarget {
@@ -50,30 +29,6 @@ interface LineWindow {
 }
 
 type RawFileFetchOutcome = { rawContent: string } | { error: string };
-
-function readPinnedCoordinate(
-  stateValue: string | undefined,
-  fallback: string | undefined,
-): string {
-  return stateValue || fallback || '';
-}
-
-// Coordinates are fixed to the PR under review: model-supplied
-// owner/repo are no longer accepted, and state/deps are the only
-// sources. This blocks prompt-injected cross-repo reads.
-function readRepositoryCoordinates(
-  meta: PrMeta | undefined,
-  deps: FetchRepositoryFileToolDependencies,
-): { owner: string; repo: string } {
-  return {
-    owner: readPinnedCoordinate(meta?.owner, deps.defaultOwner),
-    repo: readPinnedCoordinate(meta?.repo, deps.defaultRepo),
-  };
-}
-
-function readDefaultRef(meta: PrMeta | undefined): string | undefined {
-  return meta?.branch || meta?.headSha || undefined;
-}
 
 function listAllowedRefs(meta: PrMeta | undefined): string[] {
   return [meta?.branch, meta?.baseRef, meta?.headSha].filter((r): r is string =>
@@ -101,29 +56,21 @@ function resolveFetchTarget(
   deps: FetchRepositoryFileToolDependencies,
   requestedRef: string | undefined,
 ): FileFetchTarget {
-  const coordinates = readRepositoryCoordinates(meta, deps);
-  const defaultRef = readDefaultRef(meta);
+  const { owner, repo, ref: defaultRef } = readPinnedCoordinates(meta, deps);
   if (!isDisallowedRef(meta, requestedRef)) {
     return {
-      ...coordinates,
+      owner,
+      repo,
       ref: requestedRef || defaultRef,
       refNotice: undefined,
     };
   }
-  const ref = defaultRef;
   return {
-    ...coordinates,
-    ref,
-    refNotice: `Requested ref '${requestedRef}' is not this PR's head/base branch; the file was read from '${ref}'.`,
+    owner,
+    repo,
+    ref: defaultRef,
+    refNotice: `Requested ref '${requestedRef}' is not this PR's head/base branch; the file was read from '${defaultRef}'.`,
   };
-}
-
-function isBlockedFilePath(path: string): boolean {
-  const lowerPath = path.toLowerCase();
-  return (
-    BLOCKED_FILE_EXTENSIONS.some((ext) => lowerPath.endsWith(ext)) ||
-    isIgnoredDiffPath(path)
-  );
 }
 
 function validateFetchRequest(
@@ -132,7 +79,7 @@ function validateFetchRequest(
   repo: string,
   path: string,
 ): { error: string } | { gitAdapter: GitAdapterContract } {
-  if (isBlockedFilePath(path)) {
+  if (isIgnoredDiffPath(path)) {
     return {
       error: `File path '${path}' matches blocked extensions (lockfiles, minified files, or binary assets).`,
     };
@@ -156,20 +103,18 @@ async function fetchRawFileContent(
   target: FileFetchTarget,
   path: string,
 ): Promise<RawFileFetchOutcome> {
-  const cacheKey = `${target.owner}:${target.repo}:${target.ref || 'default'}:${path}`;
-  const cachedContent = fileCache.get(cacheKey);
-  if (cachedContent) {
-    return { rawContent: cachedContent };
-  }
   try {
-    const fileResult = await gitAdapter.getFileContent(
-      target.owner,
-      target.repo,
+    const rawContent = await fetchCachedRepoFile(
+      {
+        gitAdapter,
+        fileCache,
+        owner: target.owner,
+        repo: target.repo,
+        ref: target.ref,
+      },
       path,
-      target.ref,
     );
-    fileCache.set(cacheKey, fileResult.content);
-    return { rawContent: fileResult.content };
+    return { rawContent };
   } catch (err) {
     return {
       error: `Failed to fetch file '${path}': ${String(err)}`,
@@ -179,21 +124,13 @@ async function fetchRawFileContent(
 
 function resolveLineWindow(
   totalLines: number,
-  startLine: number | undefined,
-  endLine: number | undefined,
+  startLine = 1,
+  endLine = totalLines,
 ): LineWindow {
-  const start = startLine ? Math.max(1, startLine) : 1;
-  let end = endLine
-    ? Math.min(totalLines, endLine)
-    : Math.min(totalLines, start + MAX_LINES - 1);
-
-  if (end < start) {
-    end = start;
-  }
-  if (end - start + 1 > MAX_LINES) {
-    end = start + MAX_LINES - 1;
-  }
-  return { start, end };
+  const maxLine = Math.max(1, totalLines);
+  const start = Math.min(maxLine, Math.max(1, startLine));
+  const cappedEnd = Math.min(maxLine, endLine, start + MAX_LINES - 1);
+  return { start, end: Math.max(start, cappedEnd) };
 }
 
 function capContentCharacters(content: string): string {

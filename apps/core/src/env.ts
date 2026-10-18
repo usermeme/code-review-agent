@@ -5,7 +5,7 @@ import {
 } from '@code-review-agent/llm';
 import { z } from 'zod';
 
-export const coreBaseEnvSchema = z.object({
+const coreBaseEnvSchema = z.object({
   HOST: z.string().min(1),
   PORT: z.string().transform(Number),
   GIT_ADAPTER_URL: z.string().min(1),
@@ -22,8 +22,6 @@ export const coreEnvSchema = z.discriminatedUnion('LLM_PROVIDER', [
   coreBaseEnvSchema.merge(mockLlmConfigSchema),
 ]);
 
-export type CoreEnvSchema = typeof coreEnvSchema;
-export type CoreEnv = z.infer<CoreEnvSchema>;
-export type CoreEnvService = EnvService<CoreEnvSchema>;
+export type CoreEnvService = EnvService<typeof coreEnvSchema>;
 
 export const envService: CoreEnvService = new EnvService(coreEnvSchema);

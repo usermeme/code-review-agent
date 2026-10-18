@@ -7,11 +7,6 @@ export interface CreateLlmOptions {
   modelOverride?: string;
 }
 
-/** Mock provider fallback when no model name was configured or overridden. */
-function resolveMockModel(model: string | undefined): string {
-  return model || 'mock-model';
-}
-
 export class LlmFactory {
   constructor(private readonly config: LlmConfig) {}
 
@@ -27,9 +22,7 @@ export class LlmFactory {
         });
       }
       case 'mock': {
-        return new MockLlm({
-          model: resolveMockModel(model),
-        });
+        return new MockLlm({ model });
       }
       default: {
         const unreachable: never = this.config;

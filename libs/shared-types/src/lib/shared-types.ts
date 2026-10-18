@@ -12,14 +12,6 @@ export interface PRState {
   error?: string;
 }
 
-export interface ContextReadyPayload {
-  provider: string;
-  owner: string;
-  repo: string;
-  prNumber: number;
-  summary: string;
-}
-
 export interface RepositoryContext {
   prKey: string;
   summary: string;
@@ -46,8 +38,8 @@ export interface PRMeta {
 
 export interface PREventPayload {
   prMeta: PRMeta;
-  diff: string;
-  changedFiles: string[];
+  diff?: string;
+  changedFiles?: string[];
 }
 
 export interface ReviewCommentPayload {
@@ -72,18 +64,6 @@ export interface ReviewResultPayload {
   comments: ReviewCommentPayload[];
   summary?: string;
   ticketCoverage?: string;
-}
-
-export interface WebhookEventPayload {
-  action: string;
-  prNumber: number;
-  owner: string;
-  repo: string;
-  htmlUrl: string;
-  cloneUrl?: string;
-  ref?: string;
-  installationId?: number;
-  isIncrementalUpdate?: boolean;
 }
 
 export interface PRDiffResult {

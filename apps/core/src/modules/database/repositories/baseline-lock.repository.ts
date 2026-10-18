@@ -13,7 +13,7 @@ import { DatabaseService } from '../interfaces/database.interface.js';
  * holder blocks nobody longer than the TTL, and waiters eventually build
  * anyway (correctness over dedup).
  */
-export interface BaselineLockRecord {
+interface BaselineLockRecord {
   baselineKey: string;
   ownerId: string;
   acquiredAt: Date;
@@ -23,12 +23,9 @@ const COLLECTION = 'baseline_locks';
 const DEFAULT_TTL_MS = 20 * 60 * 1000;
 
 /** True while the lock record is younger than (or exactly at) the TTL. */
-function isLockStillFresh(
-  existing: BaselineLockRecord,
-  ttlMs: number,
-): boolean {
+function isLockStillFresh(existing: BaselineLockRecord): boolean {
   const age = Date.now() - new Date(existing.acquiredAt).getTime();
-  return Number.isFinite(age) && age <= ttlMs;
+  return Number.isFinite(age) && age <= DEFAULT_TTL_MS;
 }
 
 export class BaselineLockRepository {
@@ -38,11 +35,7 @@ export class BaselineLockRepository {
    * Attempts to acquire (or take over an expired) lock for `baselineKey`.
    * Returns true when this owner now holds the lock.
    */
-  async tryAcquire(
-    baselineKey: string,
-    ownerId: string,
-    ttlMs: number = DEFAULT_TTL_MS,
-  ): Promise<boolean> {
+  async tryAcquire(baselineKey: string, ownerId: string): Promise<boolean> {
     const created = await this.db.createDocumentIfMissing<BaselineLockRecord>(
       COLLECTION,
       baselineKey,
@@ -56,13 +49,10 @@ export class BaselineLockRepository {
       COLLECTION,
       baselineKey,
     );
-    if (!existing) {
-      // Deleted between the two calls — next attempt wins.
+    if (!existing || isLockStillFresh(existing)) {
       return false;
     }
-    if (isLockStillFresh(existing, ttlMs)) {
-      return false;
-    }
+
     // Expired lock — take it over (benign race: worst case two builds).
     await this.db.setDocument<BaselineLockRecord>(COLLECTION, baselineKey, {
       ownerId,

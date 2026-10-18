@@ -1,10 +1,16 @@
-import { Octokit } from '@octokit/rest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GithubService, GithubServiceDependencies } from './github.service.js';
+import {
+  GithubAppNotInstalledError,
+  GithubAuthProvider,
+} from './github-auth.service.js';
 
 describe('GithubService (Adapter)', () => {
   let service: GithubService;
+  let mockAuthService: {
+    getOctokit: ReturnType<typeof vi.fn>;
+  };
   let mockOctokit: {
     rest: {
       pulls: {
@@ -48,8 +54,12 @@ describe('GithubService (Adapter)', () => {
       },
     };
 
+    mockAuthService = {
+      getOctokit: vi.fn().mockResolvedValue(mockOctokit),
+    };
+
     const deps: GithubServiceDependencies = {
-      octokit: mockOctokit as unknown as Octokit,
+      authService: mockAuthService as unknown as GithubAuthProvider,
     };
 
     service = new GithubService(deps);
@@ -67,6 +77,7 @@ describe('GithubService (Adapter)', () => {
 
     expect(result.diff).toBe('diff --git a/foo.ts b/foo.ts');
     expect(result.changedFiles).toEqual(['foo.ts']);
+    expect(mockAuthService.getOctokit).toHaveBeenCalledWith('owner', 'repo');
     expect(mockOctokit.rest.pulls.get).toHaveBeenCalledWith({
       owner: 'owner',
       repo: 'repo',
@@ -94,6 +105,7 @@ describe('GithubService (Adapter)', () => {
 
     expect(result.totalCount).toBe(1);
     expect(result.items[0].path).toBe('src/foo.ts');
+    expect(mockAuthService.getOctokit).toHaveBeenCalledWith('owner', 'repo');
     expect(mockOctokit.rest.search.code).toHaveBeenCalledWith({
       q: 'calculateTax repo:owner/repo',
     });
@@ -119,6 +131,7 @@ describe('GithubService (Adapter)', () => {
 
     expect(result.path).toBe('src/index.ts');
     expect(result.content).toBe(rawCode);
+    expect(mockAuthService.getOctokit).toHaveBeenCalledWith('owner', 'repo');
   });
 
   it('fetches PR files and their contents', async () => {
@@ -161,6 +174,7 @@ describe('GithubService (Adapter)', () => {
 
     const result = await service.getRepoTarball('owner', 'repo', 'main');
 
+    expect(mockAuthService.getOctokit).toHaveBeenCalledWith('owner', 'repo');
     expect(mockOctokit.rest.repos.downloadTarballArchive).toHaveBeenCalledWith({
       owner: 'owner',
       repo: 'repo',
@@ -193,5 +207,99 @@ describe('GithubService (Adapter)', () => {
         parseSuccessResponseBody: false,
       },
     });
+  });
+
+  it('posts review and inline comments atomically in a single createReview call', async () => {
+    mockOctokit.rest.pulls.get.mockResolvedValue({
+      data: { head: { sha: 'commit-sha-1' } },
+    });
+    mockOctokit.rest.pulls.createReview.mockResolvedValue({
+      data: { id: 99 },
+    });
+
+    const result = await service.postReview({
+      owner: 'acme',
+      repo: 'widget',
+      prNumber: 7,
+      summary: 'All good',
+      comments: [{ path: 'src/a.ts', line: 12, body: 'Nit' }],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.reviewId).toBe('99');
+    expect(mockAuthService.getOctokit).toHaveBeenCalledWith('acme', 'widget');
+    expect(mockOctokit.rest.pulls.createReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: 'acme',
+        repo: 'widget',
+        pull_number: 7,
+        commit_id: 'commit-sha-1',
+        comments: [{ path: 'src/a.ts', line: 12, body: 'Nit' }],
+      }),
+    );
+    expect(mockOctokit.rest.pulls.createReviewComment).not.toHaveBeenCalled();
+  });
+
+  it('falls back to summary review + per-comment createReviewComment when batched createReview fails with 422', async () => {
+    mockOctokit.rest.pulls.get.mockResolvedValue({
+      data: { head: { sha: 'commit-sha-1' } },
+    });
+    mockOctokit.rest.pulls.createReview
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Unprocessable Entity'), { status: 422 }),
+      )
+      .mockResolvedValueOnce({ data: { id: 99 } });
+    mockOctokit.rest.pulls.createReviewComment.mockResolvedValue({
+      data: { id: 100 },
+    });
+
+    const result = await service.postReview({
+      owner: 'acme',
+      repo: 'widget',
+      prNumber: 7,
+      summary: 'All good',
+      comments: [{ path: 'src/a.ts', line: 12, body: 'Nit' }],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.reviewId).toBe('99');
+    expect(mockOctokit.rest.pulls.createReview).toHaveBeenCalledTimes(2);
+    expect(mockOctokit.rest.pulls.createReviewComment).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates GithubAppNotInstalledError from postReview without swallowing it', async () => {
+    mockAuthService.getOctokit.mockRejectedValueOnce(
+      new GithubAppNotInstalledError('uninstalled', 'repo'),
+    );
+
+    await expect(
+      service.postReview({
+        owner: 'uninstalled',
+        repo: 'repo',
+        prNumber: 1,
+        summary: 'Summary',
+        comments: [],
+      }),
+    ).rejects.toThrow('GitHub App is not installed on uninstalled/repo');
+  });
+
+  it('rethrows transient 5xx/429 errors during review submission so Pub/Sub retries', async () => {
+    mockOctokit.rest.pulls.get.mockResolvedValue({
+      data: { head: { sha: 'commit-sha-1' } },
+    });
+    const rateLimitError = Object.assign(new Error('Rate limit exceeded'), {
+      status: 429,
+    });
+    mockOctokit.rest.pulls.createReview.mockRejectedValueOnce(rateLimitError);
+
+    await expect(
+      service.postReview({
+        owner: 'acme',
+        repo: 'widget',
+        prNumber: 7,
+        summary: 'Summary',
+        comments: [],
+      }),
+    ).rejects.toBe(rateLimitError);
   });
 });

@@ -81,10 +81,6 @@ export interface RunReviewOptions {
   timeoutMs?: number;
 }
 
-function isEmptyBaselineText(trimmed: string): boolean {
-  return !trimmed || trimmed === '{}';
-}
-
 /** True when `parsed` is a plain JSON object usable as named baseline sections. */
 function isSectionRecord(parsed: unknown): parsed is Record<string, string> {
   return (
@@ -111,7 +107,7 @@ export function parseBaselineSections(
   if (!baselineContext) return {};
   if (typeof baselineContext === 'object') return baselineContext;
   const trimmed = baselineContext.trim();
-  if (isEmptyBaselineText(trimmed)) return {};
+  if (!trimmed) return {};
   return parseBaselineJson(trimmed) ?? { architecture: trimmed };
 }
 

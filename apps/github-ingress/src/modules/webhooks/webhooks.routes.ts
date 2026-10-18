@@ -7,9 +7,7 @@ export interface WebhooksRoutesOptions {
 }
 
 function extractRawBody(rawBody: string | Buffer): string {
-  return typeof rawBody === 'string'
-    ? rawBody
-    : (rawBody?.toString('utf8') ?? '');
+  return typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
 }
 
 export const webhooksRoutes: FastifyPluginAsync<WebhooksRoutesOptions> = async (
@@ -23,28 +21,20 @@ export const webhooksRoutes: FastifyPluginAsync<WebhooksRoutesOptions> = async (
       return reply.code(400).send({ error: 'Missing raw body' });
     }
 
-    try {
-      const rawBody = extractRawBody(request.rawBody);
-      const isValid = await ingressService.verifySignature(
-        request.headers,
-        rawBody,
-      );
-      if (!isValid) {
-        throw new Error('Verification failed');
-      }
-    } catch (error) {
-      fastify.log.error(`Webhook Signature Verification Failed: ${error}`);
+    const rawBody = extractRawBody(request.rawBody);
+    const isValid = await ingressService.verifySignature(
+      request.headers,
+      rawBody,
+    );
+    if (!isValid) {
+      fastify.log.error('Webhook Signature Verification Failed');
       return reply.code(401).send({ error: 'Invalid signature' });
     }
 
-    const payload = request.body;
-
-    const result = await ingressService.processWebhook(
+    return ingressService.processWebhook(
       request.headers,
-      payload,
+      request.body,
       fastify.log,
     );
-
-    return result;
   });
 };

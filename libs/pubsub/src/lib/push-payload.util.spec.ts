@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { parsePubSubPushPayload } from './push-payload.util.js';
 
 describe('parsePubSubPushPayload', () => {

@@ -10,6 +10,21 @@ interface SynthesisInput {
   agentDocs?: string;
 }
 
+const REQUIRED_SECTIONS_HEADER = `Output markdown with EXACTLY these top-level sections, in this order, using these exact headings:
+## Architecture
+## Modules
+## Internal Patterns & Conventions
+## Error Handling & Testing
+## Agent Docs (verbatim)`;
+
+function formatSynthesisFooter(input: SynthesisInput): string {
+  return `Overflow paths:
+${(input.overflow || []).join('\n')}
+
+Agent docs:
+${input.agentDocs || ''}`;
+}
+
 /** True when a stored baseline context exists and carries sections. */
 function hasExistingSections(
   existingContext: Record<string, string> | undefined,
@@ -22,12 +37,7 @@ function buildIncrementalPrompt(
   input: SynthesisInput,
 ): string {
   return `You are updating a repository context document incrementally based on recent file changes.
-Output markdown with EXACTLY these top-level sections, in this order, using these exact headings:
-## Architecture
-## Modules
-## Internal Patterns & Conventions
-## Error Handling & Testing
-## Agent Docs (verbatim)
+${REQUIRED_SECTIONS_HEADER}
 
 Update the existing context where necessary using the new per-chunk summaries. If a module was removed or changed, reflect that. Keep the rest of the context intact.
 Copy the provided agent docs into the last section unchanged.
@@ -38,21 +48,12 @@ ${JSON.stringify(existingContext, null, 2)}
 New Per-chunk summaries (from changed files):
 ${input.summaries.join('\n\n')}
 
-Overflow paths:
-${(input.overflow || []).join('\n')}
-
-Agent docs:
-${input.agentDocs || ''}`;
+${formatSynthesisFooter(input)}`;
 }
 
 function buildBaselinePrompt(input: SynthesisInput): string {
   return `You merge per-chunk codebase summaries into one repository context document.
-Output markdown with EXACTLY these top-level sections, in this order, using these exact headings:
-## Architecture
-## Modules
-## Internal Patterns & Conventions
-## Error Handling & Testing
-## Agent Docs (verbatim)
+${REQUIRED_SECTIONS_HEADER}
 Under "Modules", one short paragraph per module/directory. Under "Internal Patterns & Conventions",
 list every convention a code reviewer should enforce, citing where it is established.
 Copy the provided agent docs into the last section unchanged.
@@ -60,11 +61,7 @@ Copy the provided agent docs into the last section unchanged.
 Per-chunk summaries:
 ${input.summaries.join('\n\n')}
 
-Overflow paths:
-${(input.overflow || []).join('\n')}
-
-Agent docs:
-${input.agentDocs || ''}`;
+${formatSynthesisFooter(input)}`;
 }
 
 /**
@@ -87,23 +84,16 @@ export async function synthesizeContext(
   );
 
   if (!summaries || summaries.length === 0) {
-    if (hasExistingSections(existingContext)) {
-      return existingContext;
-    }
     throw new Error('No chunk summaries found. Did summarizeChunks run?');
   }
 
-  let prompt: string;
-
-  if (hasExistingSections(existingContext)) {
-    prompt = buildIncrementalPrompt(existingContext, {
-      summaries,
-      overflow,
-      agentDocs,
-    });
-  } else {
-    prompt = buildBaselinePrompt({ summaries, overflow, agentDocs });
-  }
+  const prompt = hasExistingSections(existingContext)
+    ? buildIncrementalPrompt(existingContext, {
+        summaries,
+        overflow,
+        agentDocs,
+      })
+    : buildBaselinePrompt({ summaries, overflow, agentDocs });
 
   const text = await generateText(llm, { prompt });
 

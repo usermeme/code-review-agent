@@ -1,9 +1,9 @@
 import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 import fastifyRawBody from 'fastify-raw-body';
 
-import { healthModule } from './modules/health/health.module.js';
+import { healthRoutes } from './modules/health/health.routes.js';
 import { GithubIngressService } from './modules/webhooks/ingress.service.js';
-import { webhooksModule } from './modules/webhooks/webhooks.module.js';
+import { webhooksRoutes } from './modules/webhooks/webhooks.routes.js';
 
 export interface BuildServerOptions {
   ingressService: GithubIngressService;
@@ -24,11 +24,11 @@ export async function buildServer(
 
   const { ingressService } = options;
 
-  // 1. Health check module
-  await server.register(healthModule);
+  // 1. Health check routes
+  await server.register(healthRoutes);
 
-  // 2. Webhook Ingress module
-  await server.register(webhooksModule, {
+  // 2. Webhook Ingress routes
+  await server.register(webhooksRoutes, {
     prefix: '/api/v1/webhooks',
     ingressService,
   });

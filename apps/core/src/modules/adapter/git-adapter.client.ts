@@ -1,11 +1,41 @@
 import { ENDPOINTS, interpolatePath } from '@code-review-agent/endpoints';
-import type {
-  CodeSearchResult,
-  FileContentResult,
-  GitAdapterContract,
-  PRDiffResult,
-  PRFile,
+import {
+  type CodeSearchResult,
+  type FileContentResult,
+  type GitAdapterContract,
+  NonRetryableTaskError,
+  type PRDiffResult,
+  type PRFile,
 } from '@code-review-agent/shared-types';
+
+interface AdapterErrorBody {
+  error?: string;
+  nonRetryable?: boolean;
+}
+
+async function readErrorBody(res: Response): Promise<AdapterErrorBody | null> {
+  try {
+    return (await res.json()) as AdapterErrorBody;
+  } catch {
+    return null;
+  }
+}
+
+async function throwAdapterError(
+  res: Response,
+  action: string,
+): Promise<never> {
+  const body = await readErrorBody(res);
+  if (body?.nonRetryable) {
+    const detail = body.error || `HTTP ${res.status} ${res.statusText}`;
+    throw new NonRetryableTaskError(
+      `Failed to ${action} from git adapter: ${detail}`,
+    );
+  }
+  throw new Error(
+    `Failed to ${action} from git adapter: HTTP ${res.status} ${res.statusText}`,
+  );
+}
 
 export class GitAdapterClient implements GitAdapterContract {
   private baseUrl: string;
@@ -22,14 +52,7 @@ export class GitAdapterClient implements GitAdapterContract {
     const path = interpolatePath(ENDPOINTS.PR_DIFF, {
       Path: { owner, repo, prNumber },
     });
-    const url = `${this.baseUrl}${path}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(
-        `Failed to fetch PR diff from git adapter: HTTP ${res.status} ${res.statusText}`,
-      );
-    }
-    return (await res.json()) as PRDiffResult;
+    return this.fetchJson<PRDiffResult>(path, 'fetch PR diff');
   }
 
   async getPRFiles(
@@ -40,14 +63,7 @@ export class GitAdapterClient implements GitAdapterContract {
     const path = interpolatePath(ENDPOINTS.PR_FILES, {
       Path: { owner, repo, prNumber },
     });
-    const url = `${this.baseUrl}${path}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(
-        `Failed to fetch PR files from git adapter: HTTP ${res.status} ${res.statusText}`,
-      );
-    }
-    return (await res.json()) as PRFile[];
+    return this.fetchJson<PRFile[]>(path, 'fetch PR files');
   }
 
   async searchCode(
@@ -59,14 +75,7 @@ export class GitAdapterClient implements GitAdapterContract {
       Path: { owner, repo },
       Query: { q: query },
     });
-    const url = `${this.baseUrl}${path}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(
-        `Failed to search code from git adapter: HTTP ${res.status} ${res.statusText}`,
-      );
-    }
-    return (await res.json()) as CodeSearchResult;
+    return this.fetchJson<CodeSearchResult>(path, 'search code');
   }
 
   async getFileContent(
@@ -79,14 +88,10 @@ export class GitAdapterClient implements GitAdapterContract {
       Path: { owner, repo, path },
       Query: ref ? { ref } : undefined,
     });
-    const url = `${this.baseUrl}${interpolated}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(
-        `Failed to fetch file content from git adapter: HTTP ${res.status} ${res.statusText}`,
-      );
-    }
-    return (await res.json()) as FileContentResult;
+    return this.fetchJson<FileContentResult>(
+      interpolated,
+      'fetch file content',
+    );
   }
 
   async getRepoTarball(
@@ -98,13 +103,19 @@ export class GitAdapterClient implements GitAdapterContract {
       Path: { owner, repo },
       Query: ref ? { ref } : undefined,
     });
-    const url = `${this.baseUrl}${path}`;
-    const res = await fetch(url);
+    return this.fetchResponse(path, 'fetch repo tarball');
+  }
+
+  private async fetchResponse(path: string, action: string): Promise<Response> {
+    const res = await fetch(`${this.baseUrl}${path}`);
     if (!res.ok) {
-      throw new Error(
-        `Failed to fetch repo tarball from git adapter: HTTP ${res.status} ${res.statusText}`,
-      );
+      return throwAdapterError(res, action);
     }
     return res;
+  }
+
+  private async fetchJson<T>(path: string, action: string): Promise<T> {
+    const res = await this.fetchResponse(path, action);
+    return (await res.json()) as T;
   }
 }

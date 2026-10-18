@@ -1,41 +1,37 @@
-import { EnvService } from '@code-review-agent/env';
 import { IWorldOptions, setWorldConstructor, World } from '@cucumber/cucumber';
-import { Octokit } from '@octokit/rest';
 import { FastifyInstance, LightMyRequestResponse } from 'fastify';
 
 import { buildServer as buildAdapterServer } from '../../../github-adapter/src/app.js';
-import {
-  adapterEnvSchema,
-  AdapterEnvService,
-} from '../../../github-adapter/src/env.js';
 import { GithubService } from '../../../github-adapter/src/modules/github/github.service.js';
-import { MockOctokit } from './doubles/mock-octokit.js';
+import {
+  GithubAppClient,
+  GithubAuthService,
+} from '../../../github-adapter/src/modules/github/github-auth.service.js';
+import { MockGithubApp, MockOctokit } from './doubles/mock-octokit.js';
 
 export class GithubAdapterWorld extends World {
   public app!: FastifyInstance;
   public octokit: MockOctokit;
-  public githubService!: GithubService;
-  public envService!: AdapterEnvService;
+  public githubApp: MockGithubApp;
   public lastResponse?: LightMyRequestResponse;
 
   constructor(options: IWorldOptions) {
     super(options);
     this.octokit = new MockOctokit();
+    this.githubApp = new MockGithubApp(this.octokit);
   }
 
   async initApp(): Promise<void> {
-    this.envService = new EnvService(adapterEnvSchema, {
-      HOST: '0.0.0.0',
-      PORT: '8080',
-      GITHUB_TOKEN: 'test-github-token',
+    const authService = new GithubAuthService({
+      app: this.githubApp as unknown as GithubAppClient,
     });
 
-    this.githubService = new GithubService({
-      octokit: this.octokit as unknown as Octokit,
+    const githubService = new GithubService({
+      authService,
     });
 
     this.app = await buildAdapterServer({
-      githubService: this.githubService,
+      githubService,
       fastifyOptions: { logger: false },
     });
   }
@@ -44,7 +40,7 @@ export class GithubAdapterWorld extends World {
     if (this.app) {
       await this.app.close();
     }
-    this.octokit.clear();
+    this.githubApp.clear();
   }
 }
 

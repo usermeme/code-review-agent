@@ -4,10 +4,12 @@ import {
   type ReadonlyContext,
   type SingleBeforeModelCallback,
 } from '@google/adk';
-import { z } from 'zod';
 
 import { STATE } from '../constants/state-keys.constant.js';
-import { ticketReportSchema } from '../schemas/review.schema.js';
+import {
+  reviewerFocusInputSchema,
+  ticketReportSchema,
+} from '../schemas/review.schema.js';
 
 function instruction(ctx: ReadonlyContext): string {
   const tickets = ctx.state.get(STATE.tickets);
@@ -53,11 +55,7 @@ export function createTicketAgent({
       'Call it once per review.',
     model: llm,
     instruction,
-    inputSchema: z.object({
-      focus: z
-        .string()
-        .describe('One-paragraph hint on what to pay special attention to'),
-    }),
+    inputSchema: reviewerFocusInputSchema,
     outputSchema: ticketReportSchema,
     includeContents: 'none',
     disallowTransferToParent: true,

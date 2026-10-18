@@ -15,6 +15,12 @@ export interface PostedReview {
   body: string;
   event?: string;
   commit_id?: string;
+  comments?: Array<{
+    path: string;
+    body: string;
+    line?: number;
+    start_line?: number;
+  }>;
 }
 
 export interface PostedIssueComment {
@@ -75,6 +81,17 @@ export class MockOctokit {
       },
       createReview: async (params: PostedReview) => {
         this.postedReviews.push(params);
+        for (const comment of params.comments ?? []) {
+          this.postedComments.push({
+            owner: params.owner,
+            repo: params.repo,
+            pull_number: params.pull_number,
+            body: comment.body,
+            path: comment.path,
+            line: comment.line ?? 0,
+            commit_id: params.commit_id ?? '',
+          });
+        }
         return { data: { id: this.postedReviews.length } };
       },
     },
@@ -126,5 +143,40 @@ export class MockOctokit {
     this.postedComments = [];
     this.postedReviews = [];
     this.postedIssueComments = [];
+  }
+}
+
+export class MockGithubApp {
+  public uninstalledRepos = new Set<string>();
+  public requestedInstallations: { owner: string; repo: string }[] = [];
+
+  constructor(private readonly installationOctokit: MockOctokit) {}
+
+  octokit = {
+    rest: {
+      apps: {
+        getRepoInstallation: async (params: {
+          owner: string;
+          repo: string;
+        }) => {
+          this.requestedInstallations.push(params);
+          if (this.uninstalledRepos.has(`${params.owner}/${params.repo}`)) {
+            throw Object.assign(new Error('Not Found'), { status: 404 });
+          }
+          return { data: { id: 1001 } };
+        },
+      },
+    },
+  };
+
+  async getInstallationOctokit(_installationId: number) {
+    void _installationId;
+    return this.installationOctokit;
+  }
+
+  clear(): void {
+    this.uninstalledRepos.clear();
+    this.requestedInstallations = [];
+    this.installationOctokit.clear();
   }
 }

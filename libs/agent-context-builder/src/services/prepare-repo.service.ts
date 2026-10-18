@@ -33,7 +33,6 @@ export interface PrepareRepoDependencies {
 const CHUNK_OPTIONS = {
   maxChunkTokens: 25_000,
   maxChunks: 50,
-  extraIgnores: [] as string[],
 };
 
 /**
@@ -133,12 +132,11 @@ export async function prepareRepository(
     gitAdapter: deps.gitAdapter,
   });
 
-  const files = await collectFiles(snapshot.dir, CHUNK_OPTIONS.extraIgnores);
+  const files = await collectFiles(snapshot.dir);
   const agentDocs = collectAgentDocs(files);
   const { chunks, overflow } = buildChunks(files, CHUNK_OPTIONS);
 
   state.set(STATE.repoDir, snapshot.dir);
-  state.set(STATE.headSha, snapshot.headSha);
   state.set(STATE.chunks, chunks);
   state.set(STATE.overflowPaths, overflow);
   state.set(STATE.agentDocs, agentDocs);

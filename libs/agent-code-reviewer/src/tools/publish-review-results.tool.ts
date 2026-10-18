@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 import { LIMITS } from '../constants/limits.constant.js';
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
-import { findingSchema } from '../schemas/review.schema.js';
+import { type Finding, findingSchema } from '../schemas/review.schema.js';
 import {
   clampRangeToDiff,
   type LineRange,
@@ -16,8 +16,6 @@ const SEVERITY_RANK: Record<'critical' | 'major' | 'minor', number> = {
   major: 1,
   minor: 2,
 };
-
-type Finding = z.infer<typeof findingSchema>;
 
 type SessionState = Context['state'];
 
@@ -76,21 +74,18 @@ function filterHighConfidence(findings: Finding[]): Finding[] {
   return findings.filter((f) => f.confidence >= LIMITS.confidenceThreshold);
 }
 
-function readFindingEndLine(f: Finding): number {
-  return f.endLine || f.startLine || 1;
-}
-
-function readFindingStartLine(f: Finding): number {
-  return Math.min(f.startLine || readFindingEndLine(f), readFindingEndLine(f));
+function normalizeFindingRange(f: Finding): LineRange {
+  const a = f.startLine || f.endLine || 1;
+  const b = f.endLine || a;
+  return { start: Math.min(a, b), end: Math.max(a, b) };
 }
 
 function clampFindingToHunks(
   ranges: Map<string, LineRange[]>,
   f: Finding,
 ): Finding[] {
-  const endLine = readFindingEndLine(f);
-  const startLine = readFindingStartLine(f);
-  const clamped = clampRangeToDiff(ranges, f.path, startLine, endLine);
+  const { start, end } = normalizeFindingRange(f);
+  const clamped = clampRangeToDiff(ranges, f.path, start, end);
   if (!clamped) return [];
   return [
     {
@@ -103,7 +98,10 @@ function clampFindingToHunks(
 
 function clampToDiffHunks(findings: Finding[], diff: string): Finding[] {
   if (!diff.trim()) {
-    return findings;
+    return findings.map((f) => {
+      const { start, end } = normalizeFindingRange(f);
+      return { ...f, startLine: start, endLine: end };
+    });
   }
   const ranges = parseNewSideRanges(diff);
   return findings.flatMap((f) => clampFindingToHunks(ranges, f));
@@ -148,14 +146,12 @@ function buildReviewComment(f: Finding) {
   // of the contract — teams never applied the ```suggestion blocks and
   // they were the largest per-comment token cost.
   const commentBody = `### [${f.severity.toUpperCase()}] ${f.title}\n\n${truncateFindingBody(f.body)}`;
-  const endLine = readFindingEndLine(f);
-  const startLine = readFindingStartLine(f);
   return {
     path: f.path,
     // NEW-side line numbers; the provider adapter maps these to
     // start_line/line so multi-line findings anchor to their range.
-    startPosition: startLine === endLine ? undefined : startLine,
-    position: endLine,
+    startPosition: f.startLine === f.endLine ? undefined : f.startLine,
+    position: f.endLine,
     body: commentBody,
   };
 }
@@ -227,8 +223,6 @@ export function createPublishReviewResultsTool(
         summary: input.summary,
         ticketCoverage: input.ticketCoverage,
       };
-
-      state?.set(STATE.reviewResult, payload);
 
       if (deps.onPublishResult) {
         await deps.onPublishResult(payload);

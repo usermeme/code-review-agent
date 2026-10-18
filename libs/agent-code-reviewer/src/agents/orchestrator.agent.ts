@@ -20,15 +20,12 @@ import { createProblemsAgent } from './problems.agent.js';
 import { createQualityAgent } from './quality.agent.js';
 import { createTicketAgent } from './ticket.agent.js';
 
-function estimateTokens(text: string) {
-  return Math.ceil(text.length / 4);
-}
-
 /** The orchestrator's own diff view — capped to keep the parent prompt small. */
 function buildDiffView(fullDiff: string): string {
-  if (estimateTokens(fullDiff) > LIMITS.maxDiffTokensInOrchestratorPrompt) {
+  const maxChars = LIMITS.maxDiffTokensInOrchestratorPrompt * 4;
+  if (fullDiff.length > maxChars) {
     return (
-      fullDiff.slice(0, LIMITS.maxDiffTokensInOrchestratorPrompt * 4) +
+      fullDiff.slice(0, maxChars) +
       '\n... [truncated for the orchestrator view only; the reviewer agents receive the whole (filtered) diff]'
     );
   }
