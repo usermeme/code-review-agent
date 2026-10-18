@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { prepareDiff } from './diff.util.js';
+import { prepareDiff, stripUnreviewableOmissions } from './diff.util.js';
 
 const fileDiff = (path: string, body: string) =>
   `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n${body}\n`;
@@ -83,5 +83,47 @@ describe('prepareDiff', () => {
 
   it('passes through text without file headers', () => {
     expect(prepareDiff('not a diff').diff).toBe('not a diff');
+  });
+});
+
+describe('stripUnreviewableOmissions', () => {
+  it('drops ignored names from the note but keeps budget omissions', () => {
+    const prepared = prepareDiff(
+      [
+        fileDiff('src/app.ts', '+const a = 1;'),
+        fileDiff('src/big.ts', `+${'x'.repeat(5_000)}`),
+        fileDiff('src/next.ts', `+${'y'.repeat(900)}`),
+        fileDiff('pnpm-lock.yaml', '+lock'),
+      ].join(''),
+      { maxChars: 1_200, maxFileChars: 1_000 },
+    );
+
+    const stripped = stripUnreviewableOmissions(prepared.diff);
+
+    expect(stripped).not.toContain('pnpm-lock.yaml');
+    expect(stripped).toContain('src/next.ts (over_budget)');
+    expect(stripped).toContain('+const a = 1;');
+  });
+
+  it('removes the note entirely when nothing review-relevant was omitted', () => {
+    const prepared = prepareDiff(
+      [
+        fileDiff('src/app.ts', '+const a = 1;'),
+        fileDiff('yarn.lock', '+l'),
+      ].join(''),
+    );
+
+    const stripped = stripUnreviewableOmissions(prepared.diff);
+
+    expect(stripped.startsWith('diff --git')).toBe(true);
+    expect(stripped).not.toContain('Files omitted');
+    expect(stripped).not.toContain('yarn.lock');
+    expect(stripped).toContain('+const a = 1;');
+  });
+
+  it('passes diffs without an omission note through untouched', () => {
+    const diff = fileDiff('src/app.ts', '+const a = 1;');
+
+    expect(stripUnreviewableOmissions(diff)).toBe(diff);
   });
 });

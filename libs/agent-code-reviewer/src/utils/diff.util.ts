@@ -267,3 +267,19 @@ export function prepareDiff(
     originalChars: diff.length,
   };
 }
+
+/**
+ * Rewrites the omission note down to what reviewers can act on.
+ *
+ * Names of ignored or binary files carry no review signal — nobody reads
+ * lockfiles, generated code or images — so they must never reach a model
+ * prompt. Files dropped for budget stay listed so reviewers know which
+ * source they did not see. Passes diffs without a note through untouched.
+ */
+export function stripUnreviewableOmissions(diff: string): string {
+  const { cleanPreamble, priorOmitted } = parsePriorOmittedNote(diff);
+  const actionable = priorOmitted.filter(
+    (entry) => entry.reason === 'over_budget',
+  );
+  return `${buildOmissionNote(actionable)}${cleanPreamble}`;
+}

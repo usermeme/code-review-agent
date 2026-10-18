@@ -34,7 +34,11 @@ import {
   ReviewBudgetExceededError,
   ReviewTimeoutError,
 } from './utils/budget.util.js';
-import { isIgnoredDiffPath, prepareDiff } from './utils/diff.util.js';
+import {
+  isIgnoredDiffPath,
+  prepareDiff,
+  stripUnreviewableOmissions,
+} from './utils/diff.util.js';
 
 /**
  * Validated review input. Parsing happens in code (fail-fast) — the payload
@@ -334,7 +338,7 @@ export async function runReview(
       },
       stateDelta: {
         [STATE.prMeta]: meta,
-        [STATE.diff]: prepareDiff(parsed.diff).diff,
+        [STATE.diff]: stripUnreviewableOmissions(prepareDiff(parsed.diff).diff),
         [STATE.changedFiles]: filteredChangedFiles,
         [STATE.tickets]: parsed.tickets,
         ...buildContextSectionsState(sections),
