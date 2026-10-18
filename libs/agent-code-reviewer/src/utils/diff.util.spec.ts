@@ -36,14 +36,17 @@ describe('prepareDiff', () => {
       fileDiff('src/last.ts', `+${'z'.repeat(900)}`),
     ].join('');
 
-    const result = prepareDiff(diff, { maxChars: 2_500, maxFileChars: 1_000 });
+    // Truncation snaps to a line boundary, so the single 5k-char line of
+    // src/big.ts collapses to headers + marker (~130 chars) and the two
+    // ~990-char files decide the budget: next still fits, last does not.
+    const result = prepareDiff(diff, { maxChars: 2_000, maxFileChars: 1_000 });
 
     expect(result.includedFiles).toEqual(['src/big.ts', 'src/next.ts']);
     expect(result.omitted).toEqual([
       { path: 'src/last.ts', reason: 'over_budget' },
     ]);
     expect(result.diff).toContain('[diff of src/big.ts truncated');
-    expect(result.diff.length).toBeLessThan(2_700);
+    expect(result.diff.length).toBeLessThan(2_200);
   });
 
   it('is strictly idempotent even when files were truncated and omitted', () => {
