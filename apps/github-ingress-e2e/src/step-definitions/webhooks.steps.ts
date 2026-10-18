@@ -1,8 +1,23 @@
 import assert from 'node:assert/strict';
 
+import { PREventPayload, PRMeta } from '@code-review-agent/shared-types';
 import { Then, When } from '@cucumber/cucumber';
 
 import { GithubIngressWorld } from '../support/world.js';
+
+function matchesPrEvent(
+  event: PREventPayload,
+  action: string,
+  repo: string,
+  prNumber: number,
+): boolean {
+  const prMeta: Partial<PRMeta> = event.prMeta ?? {};
+  return (
+    prMeta.action === action &&
+    prMeta.repo === repo &&
+    prMeta.prNumber === prNumber
+  );
+}
 
 When(
   'GitHub sends a {string} event for {string} PR #{int} with action {string}',
@@ -174,11 +189,8 @@ Then(
     prNumber: number,
   ) {
     assert(this.ingestedEvents.length > 0, 'No PR events received by Pub/Sub');
-    const event = this.ingestedEvents.find(
-      (e) =>
-        e.prMeta?.action === action &&
-        e.prMeta?.repo === repo &&
-        e.prMeta?.prNumber === prNumber,
+    const event = this.ingestedEvents.find((e) =>
+      matchesPrEvent(e, action, repo, prNumber),
     );
     assert(
       event,

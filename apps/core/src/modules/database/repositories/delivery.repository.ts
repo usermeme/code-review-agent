@@ -21,6 +21,12 @@ const COLLECTION = 'processed_deliveries';
 /** A claim older than this is presumed leaked by a crashed instance. */
 const STALE_AFTER_MS = 15 * 60 * 1000;
 
+/** True while a 'processing' claim is younger than the stale threshold. */
+function isClaimStillFresh(existing: DeliveryRecord): boolean {
+  const age = Date.now() - new Date(existing.startedAt).getTime();
+  return Number.isFinite(age) && age < STALE_AFTER_MS;
+}
+
 export class DeliveryRepository {
   constructor(private readonly db: DatabaseService) {}
 
@@ -50,8 +56,7 @@ export class DeliveryRepository {
     if (existing.status === 'done') {
       return false;
     }
-    const age = Date.now() - new Date(existing.startedAt).getTime();
-    if (Number.isFinite(age) && age < STALE_AFTER_MS) {
+    if (isClaimStillFresh(existing)) {
       return false;
     }
     // Stale claim from a crashed instance — take it over.

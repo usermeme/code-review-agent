@@ -22,6 +22,15 @@ export interface BaselineLockRecord {
 const COLLECTION = 'baseline_locks';
 const DEFAULT_TTL_MS = 20 * 60 * 1000;
 
+/** True while the lock record is younger than (or exactly at) the TTL. */
+function isLockStillFresh(
+  existing: BaselineLockRecord,
+  ttlMs: number,
+): boolean {
+  const age = Date.now() - new Date(existing.acquiredAt).getTime();
+  return Number.isFinite(age) && age <= ttlMs;
+}
+
 export class BaselineLockRepository {
   constructor(private readonly db: DatabaseService) {}
 
@@ -51,8 +60,7 @@ export class BaselineLockRepository {
       // Deleted between the two calls — next attempt wins.
       return false;
     }
-    const age = Date.now() - new Date(existing.acquiredAt).getTime();
-    if (Number.isFinite(age) && age <= ttlMs) {
+    if (isLockStillFresh(existing, ttlMs)) {
       return false;
     }
     // Expired lock — take it over (benign race: worst case two builds).

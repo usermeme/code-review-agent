@@ -79,7 +79,6 @@ code-review-agent/
 │   ├── agent-code-reviewer/    # ADK agent library for diff review & inline findings
 │   ├── pubsub/                 # Abstract Pub/Sub consumer & push envelope parsing utilities
 │   ├── env/                    # Type-safe environment manager with eager Zod schema validation
-│   ├── contracts/              # Protobuf schemas & ConnectRPC client/server contracts (Legacy/Internal)
 │   └── shared-types/           # Common domain TypeScript interfaces & schemas
 ├── .github/
 │   └── workflows/
@@ -225,6 +224,7 @@ jobs:
             --memory 2Gi \
             --cpu 2 \
             --no-cpu-throttling \
+            --timeout 900 \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
@@ -265,19 +265,30 @@ jobs:
           # 1. PR Events Push Subscription to Core
           # max-delivery-attempts + dead-letter-topic stop poison messages from
           # redelivering forever (each redelivery of a review costs real LLM spend).
+          # Core runs the review inside the push request. The review aborts
+          # itself after 8 minutes — under the 600s ack deadline and the 900s
+          # Cloud Run --timeout — but a cold baseline build can push the total
+          # past the ack deadline. Pub/Sub then redelivers while the first
+          # attempt is still running; the messageId dedup acks the redelivery,
+          # so if Cloud Run kills the original at 900s the event is lost until
+          # the next webhook for that PR (known gap for cold-repo events).
           gcloud pubsub subscriptions create pr-events-sub \
             --topic=pr-events \
             --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events" \
             --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --ack-deadline=600 \
             --max-delivery-attempts=3 \
-            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/pr-events-dlq" || \
+            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/pr-events-dlq" \
+            --min-retry-delay=30s \
+            --max-retry-delay=600s || \
           gcloud pubsub subscriptions update pr-events-sub \
             --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events" \
             --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --ack-deadline=600 \
             --max-delivery-attempts=3 \
-            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/pr-events-dlq"
+            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/pr-events-dlq" \
+            --min-retry-delay=30s \
+            --max-retry-delay=600s
 
           # 2. Review Results Push Subscription to Adapter
           gcloud pubsub subscriptions create review-results-sub \
@@ -286,13 +297,27 @@ jobs:
             --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --ack-deadline=60 \
             --max-delivery-attempts=5 \
-            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/review-results-dlq" || \
+            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/review-results-dlq" \
+            --min-retry-delay=30s \
+            --max-retry-delay=600s || \
           gcloud pubsub subscriptions update review-results-sub \
             --push-endpoint="${ADAPTER_URL}/api/v1/pubsub/review-results" \
             --push-auth-service-account="code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --ack-deadline=60 \
             --max-delivery-attempts=5 \
-            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/review-results-dlq"
+            --dead-letter-topic="projects/${{ env.GCP_PROJECT_ID }}/topics/review-results-dlq" \
+            --min-retry-delay=30s \
+            --max-retry-delay=600s
+
+          # Dead-lettering also needs the Pub/Sub service agent to be able to
+          # ack the failed message on the source subscription; without this
+          # binding max-delivery-attempts does not stop redelivery.
+          PROJECT_NUMBER=$(gcloud projects describe "${{ env.GCP_PROJECT_ID }}" --format 'value(projectNumber)')
+          for SUB in pr-events-sub review-results-sub; do
+            gcloud pubsub subscriptions add-iam-policy-binding "${SUB}" \
+              --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com" \
+              --role="roles/pubsub.subscriber" --quiet
+          done
 ```
 
 ---
@@ -356,6 +381,15 @@ for DLQ in pr-events-dlq review-results-dlq; do
   gcloud pubsub topics add-iam-policy-binding "${DLQ}" \
     --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com" \
     --role="roles/pubsub.publisher" --quiet
+done
+
+# A topic with no subscription drops what it receives: give each DLQ a pull
+# subscription so dead-lettered events are kept (7 days) for inspection/replay.
+for DLQ in pr-events-dlq review-results-dlq; do
+  if ! gcloud pubsub subscriptions describe "${DLQ}-sub" &>/dev/null; then
+    gcloud pubsub subscriptions create "${DLQ}-sub" \
+      --topic="${DLQ}" --message-retention-duration=7d
+  fi
 done
 
 # 4. Create Service Account

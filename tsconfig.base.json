@@ -17,7 +17,6 @@
     "paths": {
       "@code-review-agent/env": ["./libs/env/src/index.ts"],
       "@code-review-agent/shared-types": ["./libs/shared-types/src/index.ts"],
-      "@code-review-agent/contracts": ["./libs/contracts/src/index.ts"],
       "@code-review-agent/agent-context-builder": [
         "./libs/agent-context-builder/src/index.ts"
       ],

@@ -1,6 +1,20 @@
 import { realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 
+/** True when `path` is `dirPath` itself or nested inside it. */
+function isInsideDir(path: string, dirPath: string): boolean {
+  return path === dirPath || path.startsWith(dirPath + sep);
+}
+
+/** realpath that maps any failure (missing path, permission, ...) to null. */
+async function tryRealpath(path: string): Promise<string | null> {
+  try {
+    return await realpath(path);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Resolves a repo-relative path and jails it to the checkout: returns null
  * when the path escapes `dir`, either lexically (`..`, absolute paths) or
@@ -17,21 +31,18 @@ export async function resolveInsideCheckout(
   relPath: string,
 ): Promise<string | null> {
   const resolvedPath = resolve(dir, relPath);
-  if (resolvedPath !== dir && !resolvedPath.startsWith(dir + sep)) {
+  if (!isInsideDir(resolvedPath, dir)) {
     return null;
   }
 
-  let realDirPath: string;
-  try {
-    realDirPath = await realpath(dir);
-  } catch {
+  const realDirPath = await tryRealpath(dir);
+  if (realDirPath === null) {
     return null;
   }
 
   try {
     const realPath = await realpath(resolvedPath);
-    const isInsideCheckout =
-      realPath === realDirPath || realPath.startsWith(realDirPath + sep);
+    const isInsideCheckout = isInsideDir(realPath, realDirPath);
     if (isInsideCheckout) {
       return realPath;
     }

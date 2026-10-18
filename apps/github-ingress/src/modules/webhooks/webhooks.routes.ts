@@ -6,6 +6,12 @@ export interface WebhooksRoutesOptions {
   ingressService: GithubIngressService;
 }
 
+function extractRawBody(rawBody: string | Buffer): string {
+  return typeof rawBody === 'string'
+    ? rawBody
+    : (rawBody?.toString('utf8') ?? '');
+}
+
 export const webhooksRoutes: FastifyPluginAsync<WebhooksRoutesOptions> = async (
   fastify,
   options,
@@ -18,10 +24,7 @@ export const webhooksRoutes: FastifyPluginAsync<WebhooksRoutesOptions> = async (
     }
 
     try {
-      const rawBody =
-        typeof request.rawBody === 'string'
-          ? request.rawBody
-          : (request.rawBody?.toString('utf8') ?? '');
+      const rawBody = extractRawBody(request.rawBody);
       const isValid = await ingressService.verifySignature(
         request.headers,
         rawBody,

@@ -1,5 +1,5 @@
 import type { GitAdapterContract } from '@code-review-agent/shared-types';
-import { FunctionTool } from '@google/adk';
+import { type Context, FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
 import { LIMITS } from '../constants/limits.constant.js';
@@ -24,6 +24,7 @@ export interface LoadRepoSkillToolDependencies {
   gitAdapter?: GitAdapterContract;
   defaultOwner?: string;
   defaultRepo?: string;
+  cache?: Map<string, string>;
 }
 
 export interface LoadRepoSkillResult {
@@ -33,6 +34,25 @@ export interface LoadRepoSkillResult {
 }
 
 const FRONTMATTER_REGEX = /^---\s*\n[\s\S]*?\n---\s*\n?/;
+
+type SessionState = Context['state'];
+
+/** Pinned repository coordinates plus the shared file cache used for fetches. */
+interface SkillFileFetcher {
+  gitAdapter: GitAdapterContract;
+  fileCache: Map<string, string>;
+  owner: string;
+  repo: string;
+  ref: string | undefined;
+}
+
+/** Mutable accumulator for one loadRepoSkill invocation. */
+interface SkillStaging {
+  bodies: Record<string, LoadedRepoSkill>;
+  loaded: LoadRepoSkillResult['loaded'];
+  skipped: LoadRepoSkillResult['skipped'];
+  totalChars: number;
+}
 
 /** Removes the YAML frontmatter block — name/description already live in the catalogue. */
 export function stripSkillFrontmatter(content: string): string {
@@ -80,9 +100,203 @@ function catalogueMatch(
   });
 }
 
+function readPinnedCoordinate(
+  stateValue: string | undefined,
+  fallback: string | undefined,
+): string {
+  return stateValue || fallback || '';
+}
+
+function readPinnedRef(meta: PrMeta | undefined): string | undefined {
+  return meta?.branch || meta?.headSha || undefined;
+}
+
+// Coordinates are fixed to the PR under review (state/deps only) —
+// same pinning as every other repository tool.
+function readSkillCoordinates(
+  meta: PrMeta | undefined,
+  deps: LoadRepoSkillToolDependencies,
+): { owner: string; repo: string; ref: string | undefined } {
+  return {
+    owner: readPinnedCoordinate(meta?.owner, deps.defaultOwner),
+    repo: readPinnedCoordinate(meta?.repo, deps.defaultRepo),
+    ref: readPinnedRef(meta),
+  };
+}
+
+function readSkillLoadContext(
+  ctx: Context | undefined,
+  deps: LoadRepoSkillToolDependencies,
+) {
+  const state = ctx?.state;
+  const meta = state?.get<PrMeta>(STATE.prMeta);
+  return { state, ...readSkillCoordinates(meta, deps) };
+}
+
+function skipAllSkills(
+  input: { skills: string[] },
+  reason: string,
+): LoadRepoSkillResult {
+  return {
+    loaded: [],
+    skipped: input.skills.map((requested) => ({ requested, reason })),
+  };
+}
+
+function validateSkillLoadRequest(
+  deps: LoadRepoSkillToolDependencies,
+  owner: string,
+  repo: string,
+): { error: string } | { gitAdapter: GitAdapterContract } {
+  if (!deps.gitAdapter) {
+    return { error: 'Git adapter is not configured.' };
+  }
+  if (!owner || !repo) {
+    return { error: 'Repository owner and name are required.' };
+  }
+  return { gitAdapter: deps.gitAdapter };
+}
+
+function readSkillCatalogueOrError(
+  state: SessionState | undefined,
+): RepoSkillSummary[] | { skipReason: string } {
+  const catalogue = state?.get<RepoSkillSummary[]>(STATE.repoSkills) ?? [];
+  if (catalogue.length === 0) {
+    return {
+      skipReason: 'No skill catalogue in state — call getRepoGuidelines first.',
+    };
+  }
+  return catalogue;
+}
+
+function createSkillStaging(state: SessionState | undefined): SkillStaging {
+  const bodies: Record<string, LoadedRepoSkill> = {
+    ...(state?.get<Record<string, LoadedRepoSkill>>(STATE.repoSkillBodies) ??
+      {}),
+  };
+  return {
+    bodies,
+    loaded: [],
+    skipped: [],
+    totalChars: Object.values(bodies).reduce(
+      (sum, skill) => sum + skill.content.length,
+      0,
+    ),
+  };
+}
+
+async function fetchSkillBody(
+  fetcher: SkillFileFetcher,
+  path: string,
+): Promise<string> {
+  const cacheKey = `${fetcher.owner}:${fetcher.repo}:${fetcher.ref || 'default'}:${path}`;
+  let rawContent = fetcher.fileCache.get(cacheKey);
+  if (rawContent === undefined) {
+    const res = await fetcher.gitAdapter.getFileContent(
+      fetcher.owner,
+      fetcher.repo,
+      path,
+      fetcher.ref,
+    );
+    rawContent = res?.content ?? '';
+    fetcher.fileCache.set(cacheKey, rawContent);
+  }
+  return rawContent;
+}
+
+async function fetchAndStageSkillBody(
+  staging: SkillStaging,
+  fetcher: SkillFileFetcher,
+  match: RepoSkillSummary,
+  requested: string,
+): Promise<void> {
+  try {
+    const rawContent = await fetchSkillBody(fetcher, match.path);
+    let content = stripSkillFrontmatter(rawContent);
+    if (!content) {
+      staging.skipped.push({ requested, reason: 'empty skill body' });
+      return;
+    }
+    const truncated = content.length > LIMITS.maxSkillBodyChars;
+    if (truncated) {
+      content = content.slice(0, LIMITS.maxSkillBodyChars);
+    }
+    if (staging.totalChars + content.length > LIMITS.maxTotalSkillChars) {
+      staging.skipped.push({
+        requested,
+        reason: `total staged-skill budget (${LIMITS.maxTotalSkillChars} chars) reached`,
+      });
+      return;
+    }
+    staging.totalChars += content.length;
+    staging.bodies[match.path] = {
+      name: match.name,
+      path: match.path,
+      content,
+      truncated,
+    };
+    staging.loaded.push({
+      name: match.name,
+      path: match.path,
+      chars: content.length,
+    });
+  } catch (err) {
+    staging.skipped.push({ requested, reason: `fetch failed: ${String(err)}` });
+  }
+}
+
+async function stageRequestedSkill(
+  staging: SkillStaging,
+  fetcher: SkillFileFetcher,
+  catalogue: RepoSkillSummary[],
+  requested: string,
+): Promise<void> {
+  const match = catalogueMatch(catalogue, requested);
+  if (!match) {
+    staging.skipped.push({
+      requested,
+      reason: 'not in the repository skill catalogue',
+    });
+    return;
+  }
+  if (staging.bodies[match.path]) {
+    staging.skipped.push({ requested, reason: 'already loaded' });
+    return;
+  }
+  if (Object.keys(staging.bodies).length >= LIMITS.maxLoadedSkills) {
+    staging.skipped.push({
+      requested,
+      reason: `cap of ${LIMITS.maxLoadedSkills} staged skills reached`,
+    });
+    return;
+  }
+
+  await fetchAndStageSkillBody(staging, fetcher, match, requested);
+}
+
+function commitStagedSkills(
+  state: SessionState | undefined,
+  staging: SkillStaging,
+): void {
+  if (state && staging.loaded.length > 0) {
+    state.set(STATE.repoSkillBodies, staging.bodies);
+  }
+}
+
+function buildLoadNote(
+  loaded: LoadRepoSkillResult['loaded'],
+): string | undefined {
+  return loaded.length > 0
+    ? 'Staged in shared state: reviewer sub-agents dispatched from now on see the full bodies. ' +
+        'You receive only this acknowledgement, by design.'
+    : undefined;
+}
+
 export function createLoadRepoSkillTool(
   deps: LoadRepoSkillToolDependencies = {},
 ) {
+  const fileCache = deps.cache ?? new Map<string, string>();
+
   return new FunctionTool({
     name: 'loadRepoSkill',
     description:
@@ -101,118 +315,37 @@ export function createLoadRepoSkillTool(
         ),
     }),
     execute: async (input, ctx): Promise<LoadRepoSkillResult> => {
-      const state = ctx?.state;
-      const meta = state?.get<PrMeta>(STATE.prMeta);
-      // Coordinates are fixed to the PR under review (state/deps only) —
-      // same pinning as every other repository tool.
-      const owner = meta?.owner || deps.defaultOwner || '';
-      const repo = meta?.repo || deps.defaultRepo || '';
-      const ref = meta?.branch;
+      const { state, owner, repo, ref } = readSkillLoadContext(ctx, deps);
 
-      const skipAll = (reason: string): LoadRepoSkillResult => ({
-        loaded: [],
-        skipped: input.skills.map((requested) => ({ requested, reason })),
-      });
-
-      if (!deps.gitAdapter) {
-        return skipAll('Git adapter is not configured.');
-      }
-      if (!owner || !repo) {
-        return skipAll('Repository owner and name are required.');
+      const validation = validateSkillLoadRequest(deps, owner, repo);
+      if ('error' in validation) {
+        return skipAllSkills(input, validation.error);
       }
 
-      const catalogue = state?.get<RepoSkillSummary[]>(STATE.repoSkills) ?? [];
-      if (catalogue.length === 0) {
-        return skipAll(
-          'No skill catalogue in state — call getRepoGuidelines first.',
-        );
+      const catalogue = readSkillCatalogueOrError(state);
+      if (!Array.isArray(catalogue)) {
+        return skipAllSkills(input, catalogue.skipReason);
       }
 
-      const bodies: Record<string, LoadedRepoSkill> = {
-        ...(state?.get<Record<string, LoadedRepoSkill>>(
-          STATE.repoSkillBodies,
-        ) ?? {}),
+      const staging = createSkillStaging(state);
+      const fetcher: SkillFileFetcher = {
+        gitAdapter: validation.gitAdapter,
+        fileCache,
+        owner,
+        repo,
+        ref,
       };
-      const loaded: LoadRepoSkillResult['loaded'] = [];
-      const skipped: LoadRepoSkillResult['skipped'] = [];
-      let totalChars = Object.values(bodies).reduce(
-        (sum, skill) => sum + skill.content.length,
-        0,
-      );
 
       for (const requested of input.skills) {
-        const match = catalogueMatch(catalogue, requested);
-        if (!match) {
-          skipped.push({
-            requested,
-            reason: 'not in the repository skill catalogue',
-          });
-          continue;
-        }
-        if (bodies[match.path]) {
-          skipped.push({ requested, reason: 'already loaded' });
-          continue;
-        }
-        if (Object.keys(bodies).length >= LIMITS.maxLoadedSkills) {
-          skipped.push({
-            requested,
-            reason: `cap of ${LIMITS.maxLoadedSkills} staged skills reached`,
-          });
-          continue;
-        }
-
-        try {
-          const res = await deps.gitAdapter.getFileContent(
-            owner,
-            repo,
-            match.path,
-            ref,
-          );
-          let content = stripSkillFrontmatter(res?.content ?? '');
-          if (!content) {
-            skipped.push({ requested, reason: 'empty skill body' });
-            continue;
-          }
-          const truncated = content.length > LIMITS.maxSkillBodyChars;
-          if (truncated) {
-            content = content.slice(0, LIMITS.maxSkillBodyChars);
-          }
-          if (totalChars + content.length > LIMITS.maxTotalSkillChars) {
-            skipped.push({
-              requested,
-              reason: `total staged-skill budget (${LIMITS.maxTotalSkillChars} chars) reached`,
-            });
-            continue;
-          }
-          totalChars += content.length;
-          bodies[match.path] = {
-            name: match.name,
-            path: match.path,
-            content,
-            truncated,
-          };
-          loaded.push({
-            name: match.name,
-            path: match.path,
-            chars: content.length,
-          });
-        } catch (err) {
-          skipped.push({ requested, reason: `fetch failed: ${String(err)}` });
-        }
+        await stageRequestedSkill(staging, fetcher, catalogue, requested);
       }
 
-      if (state && loaded.length > 0) {
-        state.set(STATE.repoSkillBodies, bodies);
-      }
+      commitStagedSkills(state, staging);
 
       return {
-        loaded,
-        skipped,
-        note:
-          loaded.length > 0
-            ? 'Staged in shared state: reviewer sub-agents dispatched from now on see the full bodies. ' +
-              'You receive only this acknowledgement, by design.'
-            : undefined,
+        loaded: staging.loaded,
+        skipped: staging.skipped,
+        note: buildLoadNote(staging.loaded),
       };
     },
   });

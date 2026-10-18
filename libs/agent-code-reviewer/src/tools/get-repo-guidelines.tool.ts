@@ -1,5 +1,8 @@
-import type { GitAdapterContract } from '@code-review-agent/shared-types';
-import { FunctionTool } from '@google/adk';
+import {
+  type CodeSearchItem,
+  type GitAdapterContract,
+} from '@code-review-agent/shared-types';
+import { type Context, FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
 import { LIMITS } from '../constants/limits.constant.js';
@@ -22,6 +25,7 @@ export interface GetRepoGuidelinesToolDependencies {
   gitAdapter?: GitAdapterContract;
   defaultOwner?: string;
   defaultRepo?: string;
+  cache?: Map<string, string>;
 }
 
 const CANDIDATE_RULE_FILES = [
@@ -30,6 +34,23 @@ const CANDIDATE_RULE_FILES = [
   '.cursorrules',
   'CONTRIBUTING.md',
 ];
+
+const IGNORED_SKILL_DIRS = /(^|\/)(node_modules|vendor|dist)\//;
+
+/** Pinned repository coordinates plus the shared file cache used for fetches. */
+interface RepoFileFetcher {
+  gitAdapter: GitAdapterContract;
+  fileCache: Map<string, string>;
+  owner: string;
+  repo: string;
+  ref: string | undefined;
+}
+
+function truncate(text: string, max: number, label: string): string {
+  return text.length > max
+    ? `${text.slice(0, max)}\n... [${label} truncated: ${text.length} chars]`
+    : text;
+}
 
 export function parseSkillFrontmatter(content: string): {
   name?: string;
@@ -61,9 +82,200 @@ export function parseSkillFrontmatter(content: string): {
   return { name, description };
 }
 
+function readPinnedCoordinate(
+  stateValue: string | undefined,
+  fallback: string | undefined,
+): string {
+  return stateValue || fallback || '';
+}
+
+function readPinnedRef(meta: PrMeta | undefined): string | undefined {
+  return meta?.branch || meta?.headSha || undefined;
+}
+
+// Owner/repo/ref are fixed to the PR under review (state/deps only) —
+// a prompt-injected agent cannot point this tool at another repository.
+function readGuidelinesCoordinates(
+  meta: PrMeta | undefined,
+  deps: GetRepoGuidelinesToolDependencies,
+): { owner: string; repo: string; ref: string | undefined } {
+  return {
+    owner: readPinnedCoordinate(meta?.owner, deps.defaultOwner),
+    repo: readPinnedCoordinate(meta?.repo, deps.defaultRepo),
+    ref: readPinnedRef(meta),
+  };
+}
+
+function emptyGuidelinesResult(message: string): GetRepoGuidelinesResult {
+  return {
+    rules: '',
+    ruleSources: [],
+    skills: [],
+    message,
+  };
+}
+
+function validateGuidelinesRequest(
+  deps: GetRepoGuidelinesToolDependencies,
+  owner: string,
+  repo: string,
+): { error: string } | { gitAdapter: GitAdapterContract } {
+  if (!deps.gitAdapter) {
+    return { error: 'Git adapter is not configured.' };
+  }
+
+  if (!owner || !repo) {
+    return { error: 'Owner and repo are required.' };
+  }
+
+  return { gitAdapter: deps.gitAdapter };
+}
+
+async function fetchRemoteFileContent(
+  fetcher: RepoFileFetcher,
+  path: string,
+): Promise<string | undefined> {
+  const res = await fetcher.gitAdapter?.getFileContent(
+    fetcher.owner,
+    fetcher.repo,
+    path,
+    fetcher.ref,
+  );
+  return res?.content;
+}
+
+async function fetchFileCached(
+  fetcher: RepoFileFetcher,
+  path: string,
+): Promise<string | undefined> {
+  const cacheKey = `${fetcher.owner}:${fetcher.repo}:${fetcher.ref || 'default'}:${path}`;
+  const cached = fetcher.fileCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const content = await fetchRemoteFileContent(fetcher, path);
+  if (content !== undefined) {
+    fetcher.fileCache.set(cacheKey, content);
+  }
+  return content;
+}
+
+async function readRuleFile(
+  fetcher: RepoFileFetcher,
+  fileName: string,
+): Promise<{ fileName: string; content: string } | null> {
+  try {
+    const content = await fetchFileCached(fetcher, fileName);
+    if (content && content.trim()) {
+      return { fileName, content: content.trim() };
+    }
+  } catch {
+    // File does not exist, continue
+  }
+  return null;
+}
+
+function collectRuleResults(
+  ruleResults: Array<{ fileName: string; content: string } | null>,
+): { collectedRules: string[]; ruleSources: string[] } {
+  const collectedRules: string[] = [];
+  const ruleSources: string[] = [];
+  for (const result of ruleResults) {
+    if (!result) continue;
+    collectedRules.push(
+      `### ${result.fileName}\n\n${truncate(result.content, LIMITS.maxRuleFileChars, result.fileName)}`,
+    );
+    ruleSources.push(result.fileName);
+  }
+  return { collectedRules, ruleSources };
+}
+
+function selectSkillFiles(items: CodeSearchItem[]): CodeSearchItem[] {
+  // Cap the fetch fan-out: a repo with hundreds of SKILL.md files must
+  // not turn catalogue discovery into hundreds of adapter round-trips.
+  // Repos often mirror the same skills for several agent tools
+  // (.agents/, .opencode/, ...); fetch each skill directory name once.
+  const seenSkillDirs = new Set<string>();
+  return items
+    .filter(
+      (item) =>
+        item.path.endsWith('SKILL.md') && !IGNORED_SKILL_DIRS.test(item.path),
+    )
+    .filter((item) => {
+      const dir = item.path.split('/').slice(-2, -1)[0] ?? item.path;
+      if (seenSkillDirs.has(dir)) return false;
+      seenSkillDirs.add(dir);
+      return true;
+    })
+    .slice(0, LIMITS.maxSkillCatalogueEntries);
+}
+
+function resolveSkillName(
+  name: string | undefined,
+  file: CodeSearchItem,
+): string {
+  return name || file.path.split('/').slice(-2, -1)[0] || file.name;
+}
+
+async function readSkillSummary(
+  fetcher: RepoFileFetcher,
+  file: CodeSearchItem,
+): Promise<RepoSkillSummary | null> {
+  try {
+    const rawContent = await fetchFileCached(fetcher, file.path);
+    if (rawContent === undefined) return null;
+    const { name, description } = parseSkillFrontmatter(rawContent);
+    const skillName = resolveSkillName(name, file);
+    return {
+      name: skillName,
+      path: file.path,
+      description: description || 'No description provided.',
+    } satisfies RepoSkillSummary;
+  } catch {
+    // Failed to fetch specific skill file, skip
+    return null;
+  }
+}
+
+async function discoverRepoSkills(
+  fetcher: RepoFileFetcher,
+): Promise<RepoSkillSummary[]> {
+  try {
+    const searchResult = await fetcher.gitAdapter.searchCode(
+      fetcher.owner,
+      fetcher.repo,
+      'filename:SKILL.md',
+    );
+    const skillFiles = selectSkillFiles(searchResult?.items || []);
+
+    const skillResults = await Promise.all(
+      skillFiles.map((file) => readSkillSummary(fetcher, file)),
+    );
+    return skillResults.filter((s) => s !== null);
+  } catch {
+    // Code search not available or failed, continue with rules
+    return [];
+  }
+}
+
+function storeGuidelinesState(
+  ctx: Context | undefined,
+  combinedRules: string,
+  skills: RepoSkillSummary[],
+): void {
+  const state = ctx?.state;
+  if (state) {
+    if (combinedRules) {
+      state.set(STATE.ctxAgentDocs, combinedRules);
+      state.set(STATE.repoRules, combinedRules);
+    }
+    state.set(STATE.repoSkills, skills);
+  }
+}
+
 export function createGetRepoGuidelinesTool(
   deps: GetRepoGuidelinesToolDependencies = {},
 ) {
+  const fileCache = deps.cache ?? new Map<string, string>();
+
   return new FunctionTool({
     name: 'getRepoGuidelines',
     description:
@@ -71,116 +283,39 @@ export function createGetRepoGuidelinesTool(
     parameters: z.object({}),
     execute: async (_input, ctx): Promise<GetRepoGuidelinesResult> => {
       const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-      // Owner/repo/ref are fixed to the PR under review (state/deps only) —
-      // a prompt-injected agent cannot point this tool at another repository.
-      const owner = meta?.owner || deps.defaultOwner || '';
-      const repo = meta?.repo || deps.defaultRepo || '';
-      const ref = meta?.branch;
+      const { owner, repo, ref } = readGuidelinesCoordinates(meta, deps);
 
-      if (!deps.gitAdapter) {
-        return {
-          rules: '',
-          ruleSources: [],
-          skills: [],
-          message: 'Git adapter is not configured.',
-        };
+      const validation = validateGuidelinesRequest(deps, owner, repo);
+      if ('error' in validation) {
+        return emptyGuidelinesResult(validation.error);
       }
-
-      if (!owner || !repo) {
-        return {
-          rules: '',
-          ruleSources: [],
-          skills: [],
-          message: 'Owner and repo are required.',
-        };
-      }
+      const fetcher: RepoFileFetcher = {
+        gitAdapter: validation.gitAdapter,
+        fileCache,
+        owner,
+        repo,
+        ref,
+      };
 
       // 1. Fetch candidate rule files (in parallel — this sits on the
       // critical path of every review)
       const ruleResults = await Promise.all(
-        CANDIDATE_RULE_FILES.map(async (fileName) => {
-          try {
-            const res = await deps.gitAdapter?.getFileContent(
-              owner,
-              repo,
-              fileName,
-              ref,
-            );
-            if (res?.content && res.content.trim()) {
-              return { fileName, content: res.content.trim() };
-            }
-          } catch {
-            // File does not exist, continue
-          }
-          return null;
-        }),
+        CANDIDATE_RULE_FILES.map((fileName) => readRuleFile(fetcher, fileName)),
       );
-
-      const collectedRules: string[] = [];
-      const ruleSources: string[] = [];
-      for (const result of ruleResults) {
-        if (!result) continue;
-        collectedRules.push(`### ${result.fileName}\n\n${result.content}`);
-        ruleSources.push(result.fileName);
-      }
+      const { collectedRules, ruleSources } = collectRuleResults(ruleResults);
 
       // 2. Discover available repository skills
-      const skills: RepoSkillSummary[] = [];
+      const skills = await discoverRepoSkills(fetcher);
 
-      try {
-        const searchResult = await deps.gitAdapter.searchCode(
-          owner,
-          repo,
-          'filename:SKILL.md',
-        );
+      // Capped: the rules are returned to the orchestrator, whose history is
+      // re-sent on every later turn.
+      const combinedRules = truncate(
+        collectedRules.join('\n\n---\n\n'),
+        LIMITS.maxTotalRuleChars,
+        'repository rules',
+      );
 
-        // Cap the fetch fan-out: a repo with hundreds of SKILL.md files must
-        // not turn catalogue discovery into hundreds of adapter round-trips.
-        const skillFiles = (searchResult?.items || [])
-          .filter((item) => item.path.endsWith('SKILL.md'))
-          .slice(0, LIMITS.maxSkillCatalogueEntries);
-
-        const skillResults = await Promise.all(
-          skillFiles.map(async (file) => {
-            try {
-              const skillContent = await deps.gitAdapter?.getFileContent(
-                owner,
-                repo,
-                file.path,
-                ref,
-              );
-              if (!skillContent) return null;
-              const { name, description } = parseSkillFrontmatter(
-                skillContent.content,
-              );
-              const skillName =
-                name || file.path.split('/').slice(-2, -1)[0] || file.name;
-              return {
-                name: skillName,
-                path: file.path,
-                description: description || 'No description provided.',
-              } satisfies RepoSkillSummary;
-            } catch {
-              // Failed to fetch specific skill file, skip
-              return null;
-            }
-          }),
-        );
-        skills.push(...skillResults.filter((s) => s !== null));
-      } catch {
-        // Code search not available or failed, continue with rules
-      }
-
-      const combinedRules = collectedRules.join('\n\n---\n\n');
-
-      const state = ctx?.state;
-      if (state) {
-        if (combinedRules) {
-          state.set(STATE.ctxAgentDocs, combinedRules);
-          state.set(STATE.repoRules, combinedRules);
-        }
-        state.set(STATE.repoSkills, skills);
-      }
+      storeGuidelinesState(ctx, combinedRules, skills);
 
       return {
         rules: combinedRules || '(no agent rules found in repository)',

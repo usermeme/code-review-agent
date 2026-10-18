@@ -40,6 +40,8 @@ export interface PRMeta {
   cloneUrl?: string;
   baseRef?: string;
   isIncrementalUpdate?: boolean;
+  /** Head commit of the PR at the time of the event. */
+  headSha?: string;
 }
 
 export interface PREventPayload {

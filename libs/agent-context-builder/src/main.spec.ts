@@ -8,6 +8,7 @@ import {
   type LlmRequest,
   type LlmResponse,
 } from '@google/adk';
+import type { Part } from '@google/genai';
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildContext } from './main.js';
@@ -49,6 +50,23 @@ const SECTIONS_MARKDOWN = [
   '# AGENTS.md',
 ].join('\n');
 
+function readFirstPartText(parts: Part[] | undefined): string {
+  return parts?.[0]?.text ?? '';
+}
+
+/** Text of the first part of the request's first content, as sent to the model. */
+function readRequestText(request: LlmRequest): string {
+  return readFirstPartText(request.contents?.[0]?.parts);
+}
+
+/** Deterministic fake-model responder: chunk-summary prompt vs synthesis prompt. */
+function respondWithCannedMarkdown(request: LlmRequest): string {
+  const text = readRequestText(request);
+  return text.includes('analyzing one chunk')
+    ? 'Chunk summary: Fastify services.'
+    : SECTIONS_MARKDOWN;
+}
+
 function incrementalAdapter(files: Array<Record<string, unknown>>) {
   return {
     getPRFiles: vi.fn().mockResolvedValue(files),
@@ -57,12 +75,7 @@ function incrementalAdapter(files: Array<Record<string, unknown>>) {
 
 describe('buildContext (deterministic pipeline)', () => {
   it('runs incremental pipeline: summarize, synthesize, store — without an orchestrator model turn', async () => {
-    const llm = new FakeLlm((request) => {
-      const text = request.contents?.[0]?.parts?.[0]?.text ?? '';
-      return text.includes('analyzing one chunk')
-        ? 'Chunk summary: Fastify services.'
-        : SECTIONS_MARKDOWN;
-    });
+    const llm = new FakeLlm(respondWithCannedMarkdown);
     const onStoreContext = vi.fn();
 
     const sections = await buildContext({

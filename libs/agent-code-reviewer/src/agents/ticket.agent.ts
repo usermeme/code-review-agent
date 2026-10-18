@@ -1,4 +1,9 @@
-import { type BaseLlm, LlmAgent, type ReadonlyContext } from '@google/adk';
+import {
+  type BaseLlm,
+  LlmAgent,
+  type ReadonlyContext,
+  type SingleBeforeModelCallback,
+} from '@google/adk';
 import { z } from 'zod';
 
 import { STATE } from '../constants/state-keys.constant.js';
@@ -34,9 +39,13 @@ faithfully; do not invent requirements the ticket does not state. Summarize over
 
 export interface CreateTicketAgentPayload {
   llm: BaseLlm;
+  beforeModelCallback?: SingleBeforeModelCallback;
 }
 
-export function createTicketAgent({ llm }: CreateTicketAgentPayload): LlmAgent {
+export function createTicketAgent({
+  llm,
+  beforeModelCallback,
+}: CreateTicketAgentPayload): LlmAgent {
   return new LlmAgent({
     name: 'ticket_comparison_agent',
     description:
@@ -53,5 +62,6 @@ export function createTicketAgent({ llm }: CreateTicketAgentPayload): LlmAgent {
     includeContents: 'none',
     disallowTransferToParent: true,
     disallowTransferToPeers: true,
+    beforeModelCallback,
   });
 }

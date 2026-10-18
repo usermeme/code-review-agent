@@ -13,10 +13,6 @@ export default defineConfig({
         __dirname,
         'libs/shared-types/src/index.ts',
       ),
-      '@code-review-agent/contracts': path.resolve(
-        __dirname,
-        'libs/contracts/src/index.ts',
-      ),
       '@code-review-agent/agent-context-builder': path.resolve(
         __dirname,
         'libs/agent-context-builder/src/index.ts',

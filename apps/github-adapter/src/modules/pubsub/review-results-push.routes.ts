@@ -8,6 +8,28 @@ export interface ReviewResultsPushRoutesOptions {
   githubService: GithubService;
 }
 
+function hasValidPrReference(
+  payload: ReviewResultPayload | undefined,
+): boolean {
+  if (!payload) {
+    return false;
+  }
+  return Boolean(
+    payload.owner && payload.repo && typeof payload.prNumber === 'number',
+  );
+}
+
+function buildPostReviewOptions(payload: ReviewResultPayload) {
+  return {
+    owner: payload.owner,
+    repo: payload.repo,
+    prNumber: payload.prNumber,
+    summary: payload.summary || '',
+    ticketCoverage: payload.ticketCoverage,
+    comments: payload.comments || [],
+  };
+}
+
 export const reviewResultsPushRoutes: FastifyPluginAsync<
   ReviewResultsPushRoutesOptions
 > = async (
@@ -28,11 +50,7 @@ export const reviewResultsPushRoutes: FastifyPluginAsync<
       });
     }
 
-    if (
-      !payload?.owner ||
-      !payload?.repo ||
-      typeof payload?.prNumber !== 'number'
-    ) {
+    if (!hasValidPrReference(payload)) {
       request.log.warn(
         '[ReviewResultsPush] Invalid payload structure in push message',
       );
@@ -46,14 +64,9 @@ export const reviewResultsPushRoutes: FastifyPluginAsync<
       request.log.info(
         `[ReviewResultsPush] Posting review results for ${payload.owner}/${payload.repo} #${payload.prNumber}`,
       );
-      const res = await options.githubService.postReview({
-        owner: payload.owner,
-        repo: payload.repo,
-        prNumber: payload.prNumber,
-        summary: payload.summary || '',
-        ticketCoverage: payload.ticketCoverage,
-        comments: payload.comments || [],
-      });
+      const res = await options.githubService.postReview(
+        buildPostReviewOptions(payload),
+      );
       return reply.status(200).send({
         success: true,
         data: res,

@@ -2,19 +2,22 @@ import { randomUUID } from 'node:crypto';
 
 import {
   parseBaselineSections,
+  prepareDiff,
   type ReviewExecutionInput,
   type RunReviewOptions,
   type StoreDiscussionInput,
 } from '@code-review-agent/agent-code-reviewer';
-import type { ContextLoader } from '@code-review-agent/agent-context-builder';
-import {
-  IngestPREventRequest,
-  IngestPREventResponse,
-} from '@code-review-agent/contracts';
+import type {
+  BuildContextOptions,
+  ContextLoader,
+} from '@code-review-agent/agent-context-builder';
 import {
   ContextReadyPayload,
   GitAdapterContract,
+  NonRetryableTaskError,
   PREventPayload,
+  PRMeta,
+  PRState,
   ReviewResultPayload,
 } from '@code-review-agent/shared-types';
 import type { BaseLlm } from '@google/adk';
@@ -46,10 +49,23 @@ interface BaselineBuildParams {
     body?: string;
     cloneUrl?: string;
     baseRef?: string;
+    headSha?: string;
   };
   diff: string;
   changedFiles?: string[];
   logger?: FastifyBaseLogger;
+}
+
+/** PR metadata as persisted alongside a PR record. */
+type StoredPrMeta = NonNullable<PRState['prMeta']>;
+
+/** Outcome of waiting for another instance's baseline build. */
+type BaselineSlotOutcome = { summary: string } | 'acquire' | null;
+
+export interface PREventResult {
+  success: boolean;
+  status: 'queued' | 'reviewing' | 'ignored' | 'duplicate' | 'failed' | 'error';
+  message: string;
 }
 
 export interface EventOrchestratorDependencies {
@@ -66,6 +82,160 @@ export interface EventOrchestratorDependencies {
   llm: BaseLlm;
   /** Optional cheaper model for context-build chunk summarization. */
   summaryLlm?: BaseLlm;
+}
+
+/** PR actions that trigger a review (as opposed to merge bookkeeping/ignore). */
+const REVIEW_ACTIONS = [
+  'opened',
+  'synchronize',
+  'reopened',
+  'review_requested',
+  'manual_trigger',
+];
+
+function isReviewableAction(action: string): boolean {
+  return REVIEW_ACTIONS.includes(action);
+}
+
+/** True when the event is a PR merge that should refresh the baseline. */
+function isMergedPrEvent(meta: PRMeta): boolean {
+  return meta.action === 'closed' && Boolean(meta.isIncrementalUpdate);
+}
+
+/** Normalizes the buildContext result into the summary string we persist. */
+function toSummaryString(sections: Record<string, string> | string): string {
+  return typeof sections === 'string' ? sections : JSON.stringify(sections);
+}
+
+/** Renders a changed-file list into the newline-joined string reviews consume. */
+function toChangedFilesString(changedFiles: string[] | undefined): string {
+  return Array.isArray(changedFiles)
+    ? changedFiles.join('\n')
+    : (changedFiles ?? '');
+}
+
+/** The event-carried diff/files, defaulted the way the review path expects. */
+function readRequestedChanges(req: PREventPayload): {
+  diff: string;
+  changedFiles: string[];
+} {
+  return { diff: req.diff || '', changedFiles: req.changedFiles || [] };
+}
+
+/** True when the event carried no usable diff, so the adapter must supply it. */
+function needsDiffFetch(diff: string, changedFiles: string[]): boolean {
+  return !diff || changedFiles.length === 0;
+}
+
+/** First truthy of event value, stored value, and fallback. */
+function backfillField(
+  value: string | undefined,
+  stored: string | undefined,
+  fallback: string,
+): string {
+  return value || stored || fallback;
+}
+
+/** True when the event already carries the metadata `/review` comments omit. */
+function hasCompletePrMeta(meta: PRMeta): boolean {
+  return Boolean(meta.branch && meta.title && meta.author);
+}
+
+/** Fills gaps in the event metadata from the stored PR record; event wins. */
+function mergeStoredPrMeta(meta: PRMeta, storedMeta: StoredPrMeta): PRMeta {
+  return {
+    ...meta,
+    title: backfillField(meta.title, storedMeta['title'], ''),
+    author: backfillField(meta.author, storedMeta['author'], ''),
+    branch: backfillField(meta.branch, storedMeta['branch'], ''),
+    body: backfillField(meta.body, storedMeta['body'], ''),
+    baseRef: backfillField(meta.baseRef, storedMeta['baseRef'], 'main'),
+    headSha: meta.headSha || storedMeta['headSha'],
+  };
+}
+
+/** Reads a stored PR-meta text field, defaulting to '' when missing. */
+function storedMetaField(
+  meta: StoredPrMeta,
+  key: 'title' | 'author' | 'branch' | 'body',
+): string {
+  return meta[key] || '';
+}
+
+/** Review prMeta fields sourced from the stored (pending) PR record. */
+function readPendingReviewMeta(storedMeta: StoredPrMeta | undefined) {
+  const meta: StoredPrMeta = storedMeta ?? {};
+  return {
+    title: storedMetaField(meta, 'title'),
+    author: storedMetaField(meta, 'author'),
+    branch: storedMetaField(meta, 'branch'),
+    body: storedMetaField(meta, 'body'),
+    baseRef: meta['baseRef'],
+    headSha: meta['headSha'],
+  };
+}
+
+/** Review input for a context-ready event, sourced from the stored PR record. */
+function buildPendingReviewInput(
+  payload: ContextReadyPayload,
+  pendingPR: PRState | null,
+): ReviewExecutionInput {
+  return {
+    prMeta: {
+      provider: payload.provider,
+      owner: payload.owner,
+      repo: payload.repo,
+      number: payload.prNumber,
+      ...readPendingReviewMeta(pendingPR?.prMeta),
+    },
+    diff: pendingPR?.diff || '',
+    changedFiles: toChangedFilesString(pendingPR?.changedFiles),
+    tickets: [],
+  };
+}
+
+/** Review input for an in-process review of the event's own PR metadata. */
+function buildReviewInput(
+  meta: PRMeta,
+  diff: string,
+  changedFiles: string[] | undefined,
+): ReviewExecutionInput {
+  return {
+    prMeta: {
+      provider: meta.provider,
+      owner: meta.owner,
+      repo: meta.repo,
+      number: meta.prNumber,
+      title: meta.title,
+      author: meta.author,
+      branch: meta.branch,
+      body: meta.body,
+      baseRef: meta.baseRef,
+      headSha: meta.headSha,
+    },
+    diff,
+    changedFiles: toChangedFilesString(changedFiles),
+    tickets: [],
+  };
+}
+
+/** The prMeta payload for a PR status row: headSha only when known. */
+function buildStoredPrMeta(meta: BaselineBuildParams['meta']) {
+  return {
+    title: meta.title,
+    author: meta.author,
+    branch: meta.branch,
+    body: meta.body,
+    baseRef: meta.baseRef,
+    ...(meta.headSha ? { headSha: meta.headSha } : {}),
+  };
+}
+
+/** Type guard for the "stored summary appeared while waiting" outcome. */
+function hasStoredSummary(
+  outcome: BaselineSlotOutcome,
+): outcome is { summary: string } {
+  return Boolean(outcome && typeof outcome === 'object');
 }
 
 export class EventOrchestratorService {
@@ -121,16 +291,16 @@ export class EventOrchestratorService {
   }
 
   async ingestPREvent(
-    req: IngestPREventRequest | PREventPayload,
+    req: PREventPayload,
     logger?: FastifyBaseLogger,
-  ): Promise<IngestPREventResponse> {
+  ): Promise<PREventResult> {
     const meta = req.prMeta;
     if (!meta) {
       return {
         success: false,
         status: 'error',
         message: 'Missing PR metadata',
-      } as IngestPREventResponse;
+      };
     }
 
     const { provider, owner, repo, prNumber, action } = meta;
@@ -140,137 +310,208 @@ export class EventOrchestratorService {
     logger?.info(`[Core] Ingesting PR event: ${action} for ${prKey}`);
 
     // If PR is merged, trigger incremental context update in-process
-    if (action === 'closed' && meta.isIncrementalUpdate) {
-      logger?.info(
-        `[Core] PR merged event for ${prKey}. Triggering incremental context build.`,
+    if (isMergedPrEvent(meta)) {
+      return this.buildIncrementalBaselineContext(
+        meta,
+        prKey,
+        baselineKey,
+        logger,
       );
-      const sections = await this.agentService.buildContext({
-        provider,
-        owner,
-        repo,
-        prNumber,
-        cloneUrl: meta.cloneUrl,
-        ref: meta.baseRef,
-        isIncrementalUpdate: true,
-        llm: this.llm,
-        summaryLlm: this.summaryLlm,
-        contextLoader: this.createContextLoader(),
-        gitAdapter: this.gitAdapterClient,
-      });
-
-      const summary =
-        typeof sections === 'string' ? sections : JSON.stringify(sections);
-      await this.contextRepository.saveContext(baselineKey, { summary });
-
-      return {
-        success: true,
-        status: 'queued',
-        message: 'Incremental context build completed for merged PR',
-      } as IngestPREventResponse;
     }
 
-    if (
-      action === 'opened' ||
-      action === 'synchronize' ||
-      action === 'reopened' ||
-      action === 'review_requested' ||
-      action === 'manual_trigger'
-    ) {
-      let diff = req.diff || '';
-      let changedFiles = req.changedFiles || [];
-
-      if (!diff || changedFiles.length === 0) {
-        try {
-          logger?.info(
-            `[Core] Fetching diff and changed files from git adapter for ${prKey}`,
-          );
-          const adapterData = await this.gitAdapterClient.getPRDiff(
-            owner,
-            repo,
-            prNumber,
-          );
-          diff = adapterData.diff;
-          changedFiles = adapterData.changedFiles;
-        } catch (err) {
-          logger?.warn(
-            `[Core] Failed to fetch PR diff from adapter for ${prKey}: ${err}`,
-          );
-        }
-      }
-
-      // Check if baseline context exists in Firestore
-      const existingContext =
-        await this.contextRepository.getContext(baselineKey);
-
-      const storedSummary = existingContext?.summary;
-      const baselineSummary =
-        (this.isValidSummary(storedSummary) ? storedSummary : null) ??
-        (await this.buildAndSaveBaselineContext({
-          baselineKey,
-          prKey,
-          provider,
-          owner,
-          repo,
-          prNumber,
-          meta,
-          diff,
-          changedFiles,
-          logger,
-        }));
-
-      // Run review in-process
-      logger?.info(
-        `[Core] Baseline context ready. Running review for ${prKey} in-process.`,
-      );
-      await this.prRepository.updatePRStatus(prKey, {
-        provider,
-        owner,
-        repo,
-        prNumber,
-        status: 'reviewing',
-        diff,
-        changedFiles,
-      });
-
-      const changedFilesStr = Array.isArray(changedFiles)
-        ? changedFiles.join('\n')
-        : (changedFiles ?? '');
-
-      const reviewResult = await this.runReviewOrFail(
-        prKey,
-        {
-          prMeta: {
-            provider,
-            owner,
-            repo,
-            number: prNumber,
-            title: meta.title,
-            author: meta.author,
-            branch: meta.branch,
-            body: meta.body,
-            baseRef: meta.baseRef,
-          },
-          diff,
-          changedFiles: changedFilesStr,
-          tickets: [],
-        },
-        this.createRunReviewOptions(baselineSummary),
-      );
-
-      await this.handleReviewResults(reviewResult, prKey, logger);
-
-      return {
-        success: true,
-        status: 'reviewing',
-        message: 'Review completed and results published',
-      } as IngestPREventResponse;
+    if (isReviewableAction(action)) {
+      return this.reviewPullRequest(req, meta, prKey, baselineKey, logger);
     }
 
     return {
       success: true,
       status: 'ignored',
       message: `Ignored action: ${action}`,
-    } as IngestPREventResponse;
+    };
+  }
+
+  /** Runs the incremental baseline refresh triggered by a merged PR event. */
+  private async buildIncrementalBaselineContext(
+    meta: PRMeta,
+    prKey: string,
+    baselineKey: string,
+    logger?: FastifyBaseLogger,
+  ): Promise<PREventResult> {
+    logger?.info(
+      `[Core] PR merged event for ${prKey}. Triggering incremental context build.`,
+    );
+    const sections = await this.agentService.buildContext({
+      provider: meta.provider,
+      owner: meta.owner,
+      repo: meta.repo,
+      prNumber: meta.prNumber,
+      cloneUrl: meta.cloneUrl,
+      ref: meta.baseRef,
+      isIncrementalUpdate: true,
+      llm: this.llm,
+      summaryLlm: this.summaryLlm,
+      contextLoader: this.createContextLoader(),
+      gitAdapter: this.gitAdapterClient,
+    });
+
+    const summary = toSummaryString(sections);
+    await this.contextRepository.saveContext(baselineKey, { summary });
+
+    return {
+      success: true,
+      status: 'queued',
+      message: 'Incremental context build completed for merged PR',
+    };
+  }
+
+  /**
+   * Review path for `opened`/`synchronize`/`reopened`/`review_requested`/
+   * `manual_trigger` events: resolve metadata, ensure diff + baseline
+   * context, then run the review in-process and publish its results.
+   */
+  private async reviewPullRequest(
+    req: PREventPayload,
+    meta: PRMeta,
+    prKey: string,
+    baselineKey: string,
+    logger?: FastifyBaseLogger,
+  ): Promise<PREventResult> {
+    const { provider, owner, repo, prNumber } = meta;
+    let { diff, changedFiles } = readRequestedChanges(req);
+
+    // Manual `/review` comments arrive from GitHub's `issue_comment` webhook,
+    // which omits `pull_request.head.ref` / `head.sha`; backfill any missing
+    // PR metadata from the stored PR record when available.
+    const resolvedMeta = await this.resolvePrMeta(meta, prKey);
+
+    if (needsDiffFetch(diff, changedFiles)) {
+      ({ diff, changedFiles } = await this.fetchDiffFromAdapter(
+        { diff, changedFiles },
+        owner,
+        repo,
+        prNumber,
+        prKey,
+        logger,
+      ));
+    }
+
+    // Filter and cap once, before the diff is stored or sent to any LLM:
+    // Firestore rejects documents over 1 MiB, and a failed write here would
+    // fail (and redeliver) the whole event.
+    diff = prepareDiff(diff).diff;
+
+    const buildParams: BaselineBuildParams = {
+      baselineKey,
+      prKey,
+      provider,
+      owner,
+      repo,
+      prNumber,
+      meta: resolvedMeta,
+      diff,
+      changedFiles,
+      logger,
+    };
+
+    const baselineSummary = await this.resolveBaselineSummary(buildParams);
+
+    // Run review in-process
+    logger?.info(
+      `[Core] Baseline context ready. Running review for ${prKey} in-process.`,
+    );
+    await this.recordPrBuildStatus(buildParams, 'reviewing');
+
+    const reviewResult = await this.runReviewOrFail(
+      prKey,
+      buildReviewInput(resolvedMeta, diff, changedFiles),
+      this.createRunReviewOptions(baselineSummary),
+    );
+
+    await this.handleReviewResults(reviewResult, prKey, logger);
+
+    return {
+      success: true,
+      status: 'reviewing',
+      message: 'Review completed and results published',
+    };
+  }
+
+  /** Backfills missing PR metadata from the stored PR record, if any. */
+  private async resolvePrMeta(meta: PRMeta, prKey: string): Promise<PRMeta> {
+    if (hasCompletePrMeta(meta)) {
+      return meta;
+    }
+    const storedPR = await this.prRepository
+      .getPRStatus(prKey)
+      .catch(() => null);
+    const storedMeta = storedPR?.prMeta;
+    if (!storedMeta) {
+      return meta;
+    }
+    return mergeStoredPrMeta(meta, storedMeta);
+  }
+
+  /**
+   * Fetches diff + changed files from the git adapter, falling back to the
+   * values the event carried when the adapter call fails.
+   */
+  private async fetchDiffFromAdapter(
+    fallback: { diff: string; changedFiles: string[] },
+    owner: string,
+    repo: string,
+    prNumber: number,
+    prKey: string,
+    logger?: FastifyBaseLogger,
+  ): Promise<{ diff: string; changedFiles: string[] }> {
+    try {
+      logger?.info(
+        `[Core] Fetching diff and changed files from git adapter for ${prKey}`,
+      );
+      const adapterData = await this.gitAdapterClient.getPRDiff(
+        owner,
+        repo,
+        prNumber,
+      );
+      return { diff: adapterData.diff, changedFiles: adapterData.changedFiles };
+    } catch (err) {
+      logger?.warn(
+        `[Core] Failed to fetch PR diff from adapter for ${prKey}: ${err}`,
+      );
+      return fallback;
+    }
+  }
+
+  /** Returns the stored baseline summary when valid, else builds + saves one. */
+  private async resolveBaselineSummary(
+    params: BaselineBuildParams,
+  ): Promise<string> {
+    // Check if baseline context exists in Firestore
+    const existingContext = await this.contextRepository.getContext(
+      params.baselineKey,
+    );
+
+    const storedSummary = existingContext?.summary;
+    if (this.isValidSummary(storedSummary)) {
+      return storedSummary;
+    }
+    return this.buildAndSaveBaselineContext(params);
+  }
+
+  /** Persists the PR row while a baseline build/review is in progress. */
+  private async recordPrBuildStatus(
+    params: BaselineBuildParams,
+    status: 'queued' | 'reviewing',
+  ): Promise<void> {
+    await this.prRepository.updatePRStatus(params.prKey, {
+      provider: params.provider,
+      owner: params.owner,
+      repo: params.repo,
+      prNumber: params.prNumber,
+      status,
+      diff: params.diff,
+      changedFiles: params.changedFiles,
+      prMeta: buildStoredPrMeta(params.meta),
+    });
   }
 
   async handleContextReady(
@@ -294,28 +535,9 @@ export class EventOrchestratorService {
     logger?.info(`[Core] Triggering code review for ${prKey}`);
     await this.prRepository.updatePRStatus(prKey, { status: 'reviewing' });
 
-    const changedFilesStr = Array.isArray(pendingPR?.changedFiles)
-      ? pendingPR.changedFiles.join('\n')
-      : (pendingPR?.changedFiles ?? '');
-
     const reviewResult = await this.runReviewOrFail(
       prKey,
-      {
-        prMeta: {
-          provider,
-          owner,
-          repo,
-          number: prNumber,
-          title: pendingPR?.prMeta?.['title'] || '',
-          author: pendingPR?.prMeta?.['author'] || '',
-          branch: pendingPR?.prMeta?.['branch'] || '',
-          body: pendingPR?.prMeta?.['body'] || '',
-          baseRef: pendingPR?.prMeta?.['baseRef'],
-        },
-        diff: pendingPR?.diff || '',
-        changedFiles: changedFilesStr,
-        tickets: [],
-      },
+      buildPendingReviewInput(payload, pendingPR),
       this.createRunReviewOptions(summary),
     );
 
@@ -379,9 +601,18 @@ export class EventOrchestratorService {
     // another repo/PR (e.g. by prompt injection) is rejected before it is
     // ever published to the results topic.
     if (prKey !== expectedPrKey) {
-      throw new Error(
-        `Review result coordinates (${prKey}) do not match the originating PR event (${expectedPrKey}); refusing to publish.`,
-      );
+      // Deterministic, and it fires after a fully paid review: a redelivery
+      // would pay again and be rejected again.
+      const error = `Review result coordinates (${prKey}) do not match the originating PR event (${expectedPrKey}); refusing to publish.`;
+      // The route acks this non-retryable failure and marks the delivery
+      // done, so record it on the PR that triggered the review — otherwise
+      // that PR stays "reviewing" forever with the rejection only in logs.
+      await this.prRepository
+        .updatePRStatus(expectedPrKey, { status: 'failed', error })
+        .catch(() => {
+          // status bookkeeping must not mask the original failure
+        });
+      throw new NonRetryableTaskError(error);
     }
 
     logger?.info(
@@ -443,22 +674,11 @@ export class EventOrchestratorService {
 
     let acquired = await lock.tryAcquire(params.baselineKey, this.lockOwner);
     if (!acquired) {
-      params.logger?.info(
-        `[Core] Baseline build for ${params.baselineKey} is locked by another instance; waiting for its context.`,
-      );
-      const outcome = await this.awaitBaselineSlot(params.baselineKey, lock);
-      if (outcome && typeof outcome === 'object') {
-        params.logger?.info(
-          `[Core] Baseline context for ${params.baselineKey} became available while waiting; reusing it.`,
-        );
+      const outcome = await this.awaitLockedBaselineContext(params, lock);
+      if (typeof outcome !== 'boolean') {
         return outcome.summary;
       }
-      acquired = outcome === 'acquire';
-      if (!acquired) {
-        params.logger?.warn(
-          `[Core] Timed out waiting for the baseline lock on ${params.baselineKey}; building anyway.`,
-        );
-      }
+      acquired = outcome;
     }
 
     try {
@@ -471,6 +691,42 @@ export class EventOrchestratorService {
   }
 
   /**
+   * Announces the lock wait, then blocks on the other instance's build.
+   * Returns its stored summary when the context appears while waiting,
+   * otherwise whether this instance took over the lock.
+   */
+  private async awaitLockedBaselineContext(
+    params: BaselineBuildParams,
+    lock: BaselineLockRepository,
+  ): Promise<{ summary: string } | boolean> {
+    params.logger?.info(
+      `[Core] Baseline build for ${params.baselineKey} is locked by another instance; waiting for its context.`,
+    );
+    const outcome = await this.awaitBaselineSlot(params.baselineKey, lock);
+    return this.resolveBaselineSlotOutcome(params, outcome);
+  }
+
+  /** Interprets a finished lock wait: reuse, takeover, or timeout. */
+  private resolveBaselineSlotOutcome(
+    params: BaselineBuildParams,
+    outcome: BaselineSlotOutcome,
+  ): { summary: string } | boolean {
+    if (hasStoredSummary(outcome)) {
+      params.logger?.info(
+        `[Core] Baseline context for ${params.baselineKey} became available while waiting; reusing it.`,
+      );
+      return outcome;
+    }
+    const acquired = outcome === 'acquire';
+    if (!acquired) {
+      params.logger?.warn(
+        `[Core] Timed out waiting for the baseline lock on ${params.baselineKey}; building anyway.`,
+      );
+    }
+    return acquired;
+  }
+
+  /**
    * Waits for another instance's baseline build. Resolves with the stored
    * summary once it appears, `'acquire'` when this instance took over the
    * (expired) lock, or null after the wait budget — the caller then builds
@@ -479,7 +735,7 @@ export class EventOrchestratorService {
   private async awaitBaselineSlot(
     baselineKey: string,
     lock: BaselineLockRepository,
-  ): Promise<{ summary: string } | 'acquire' | null> {
+  ): Promise<BaselineSlotOutcome> {
     const deadline = Date.now() + BASELINE_LOCK_WAIT_MS;
     while (Date.now() < deadline) {
       await new Promise((resolve) =>
@@ -501,23 +757,22 @@ export class EventOrchestratorService {
     params.logger?.info(
       `[Core] No baseline context found for ${params.baselineKey}. Building context in-process.`,
     );
-    await this.prRepository.updatePRStatus(params.prKey, {
-      provider: params.provider,
-      owner: params.owner,
-      repo: params.repo,
-      prNumber: params.prNumber,
-      status: 'queued',
-      diff: params.diff,
-      changedFiles: params.changedFiles,
-      prMeta: {
-        title: params.meta.title,
-        author: params.meta.author,
-        branch: params.meta.branch,
-        body: params.meta.body,
-      },
-    });
+    await this.recordPrBuildStatus(params, 'queued');
 
-    const sections = await this.agentService.buildContext({
+    const sections = await this.agentService.buildContext(
+      this.buildBaselineContextRequest(params),
+    );
+
+    const summary = toSummaryString(sections);
+    await this.saveBaselineSummaryIfValid(params, summary);
+    return summary;
+  }
+
+  /** Context-build request for a full (non-incremental) baseline build. */
+  private buildBaselineContextRequest(
+    params: BaselineBuildParams,
+  ): BuildContextOptions {
+    return {
       provider: params.provider,
       owner: params.owner,
       repo: params.repo,
@@ -531,11 +786,14 @@ export class EventOrchestratorService {
       summaryLlm: this.summaryLlm,
       contextLoader: this.createContextLoader(),
       gitAdapter: this.gitAdapterClient,
-    });
+    };
+  }
 
-    const summary =
-      typeof sections === 'string' ? sections : JSON.stringify(sections);
-
+  /** Saves the built summary unless it is "empty" (cache-poisoning guard). */
+  private async saveBaselineSummaryIfValid(
+    params: BaselineBuildParams,
+    summary: string,
+  ): Promise<void> {
     if (this.isValidSummary(summary)) {
       await this.contextRepository.saveContext(params.baselineKey, { summary });
     } else {
@@ -543,7 +801,6 @@ export class EventOrchestratorService {
         `[Core] Baseline context generation returned empty for ${params.baselineKey}. Skipping save to prevent cache poisoning.`,
       );
     }
-    return summary;
   }
 
   private async publishReviewResults(

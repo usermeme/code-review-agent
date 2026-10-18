@@ -3,6 +3,8 @@ import {
   type BaseTool,
   LlmAgent,
   type ReadonlyContext,
+  type SingleBeforeModelCallback,
+  type SingleBeforeToolCallback,
 } from '@google/adk';
 import { z } from 'zod';
 
@@ -10,39 +12,58 @@ import { ContextError } from '../constants/errors.constant.js';
 import { STATE } from '../constants/state-keys.constant.js';
 import { findingsReportSchema } from '../schemas/review.schema.js';
 import type { ReviewSkill } from '../skills/review.skill.js';
+import { annotateNewSideLines } from '../tools/diff-anchors.util.js';
 import {
   type LoadedRepoSkill,
   renderLoadedSkills,
 } from '../tools/load-repo-skill.tool.js';
 
+function readDiffContext(ctx: ReadonlyContext) {
+  return {
+    diff: annotateNewSideLines(ctx.state.get<string>(STATE.diff) ?? ''),
+    changedFiles: ctx.state.get<string>(STATE.changedFiles) ?? '',
+  };
+}
+
+function readBaselineContext(ctx: ReadonlyContext) {
+  return {
+    patterns:
+      ctx.state.get<string>(STATE.ctxPatterns) ||
+      ContextError.REPO_CONTEXT_NOT_LOADED,
+    agentDocs: ctx.state.get<string>(STATE.ctxAgentDocs) || '',
+    modules: ctx.state.get<string>(STATE.ctxModules) || '',
+  };
+}
+
+function buildChangedFilesContext(changedFiles: string): string {
+  return changedFiles
+    ? `\nChanged file paths in this PR (names only, NOT file contents — use fetchRepositoryFile to read a file when the diff alone is not enough evidence):\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
+    : '';
+}
+
+function buildSkillsSection(ctx: ReadonlyContext): string {
+  const repoSkills =
+    ctx.state.get<Array<{ name: string; path: string; description: string }>>(
+      STATE.repoSkills,
+    ) ?? [];
+  const stagedSkillBodies = ctx.state.get<Record<string, LoadedRepoSkill>>(
+    STATE.repoSkillBodies,
+  );
+
+  const catalogueSection =
+    repoSkills.length > 0
+      ? `\nRepository skill catalogue (name, path, description):\n${repoSkills.map((s) => `- ${s.name} (${s.path}): ${s.description}`).join('\n')}\n`
+      : '';
+  return catalogueSection + renderLoadedSkills(stagedSkillBodies);
+}
+
 const instruction =
   (skill: ReviewSkill) =>
   (ctx: ReadonlyContext): string => {
-    const diff = ctx.state.get<string>(STATE.diff) ?? '';
-    const changedFiles = ctx.state.get<string>(STATE.changedFiles) ?? '';
-    const patterns =
-      ctx.state.get<string>(STATE.ctxPatterns) ||
-      ContextError.REPO_CONTEXT_NOT_LOADED;
-    const agentDocs = ctx.state.get<string>(STATE.ctxAgentDocs) || '';
-    const modules = ctx.state.get<string>(STATE.ctxModules) || '';
-    const repoSkills =
-      ctx.state.get<Array<{ name: string; path: string; description: string }>>(
-        STATE.repoSkills,
-      ) ?? [];
-    const stagedSkillBodies = ctx.state.get<Record<string, LoadedRepoSkill>>(
-      STATE.repoSkillBodies,
-    );
-
-    const changedFilesContext = changedFiles
-      ? `\nChanged file paths in this PR (names only, NOT file contents — use fetchRepositoryFile to read a file when the diff alone is not enough evidence):\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
-      : '';
-
-    const catalogueSection =
-      repoSkills.length > 0
-        ? `\nRepository skill catalogue (name, path, description):\n${repoSkills.map((s) => `- ${s.name} (${s.path}): ${s.description}`).join('\n')}\n`
-        : '';
-    const skillsSection =
-      catalogueSection + renderLoadedSkills(stagedSkillBodies);
+    const { diff, changedFiles } = readDiffContext(ctx);
+    const { patterns, agentDocs, modules } = readBaselineContext(ctx);
+    const skillsSection = buildSkillsSection(ctx);
+    const changedFilesContext = buildChangedFilesContext(changedFiles);
 
     return `You review a pull request for code quality against THIS repository's established conventions.
 
@@ -95,12 +116,16 @@ export interface CreateQualityAgentPayload {
   skill: ReviewSkill;
   llm: BaseLlm;
   tools?: BaseTool[];
+  beforeModelCallback?: SingleBeforeModelCallback;
+  beforeToolCallback?: SingleBeforeToolCallback;
 }
 
 export function createQualityAgent({
   skill,
   llm,
   tools,
+  beforeModelCallback,
+  beforeToolCallback,
 }: CreateQualityAgentPayload): LlmAgent {
   return new LlmAgent({
     name: 'code_quality_agent',
@@ -118,5 +143,7 @@ export function createQualityAgent({
     disallowTransferToParent: true,
     disallowTransferToPeers: true,
     tools: tools ?? [],
+    beforeModelCallback,
+    beforeToolCallback,
   });
 }

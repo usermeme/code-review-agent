@@ -1,4 +1,3 @@
-import { IngestPREventRequest } from '@code-review-agent/contracts';
 import { EnvService } from '@code-review-agent/env';
 import { MockLlm } from '@code-review-agent/llm';
 import {
@@ -127,9 +126,7 @@ describe('EventOrchestratorService', () => {
     const orchestrator = createTestOrchestrator();
 
     const req = {
-      $typeName: 'core.v1.IngestPREventRequest',
       prMeta: {
-        $typeName: 'core.v1.PRMeta',
         provider: 'github',
         owner: 'test-org',
         repo: 'test-repo',
@@ -146,7 +143,7 @@ describe('EventOrchestratorService', () => {
       },
       diff: 'diff --git a/file.ts ...',
       changedFiles: ['file.ts'],
-    } as unknown as IngestPREventRequest;
+    } satisfies PREventPayload;
 
     const res = await orchestrator.ingestPREvent(req);
 
@@ -196,9 +193,7 @@ describe('EventOrchestratorService', () => {
     const orchestrator = createTestOrchestrator();
 
     const req = {
-      $typeName: 'core.v1.IngestPREventRequest',
       prMeta: {
-        $typeName: 'core.v1.PRMeta',
         provider: 'github',
         owner: 'test-org',
         repo: 'test-repo',
@@ -215,7 +210,7 @@ describe('EventOrchestratorService', () => {
       },
       diff: 'diff --git a/file.ts ...',
       changedFiles: ['file.ts'],
-    } as unknown as IngestPREventRequest;
+    } satisfies PREventPayload;
 
     const res = await orchestrator.ingestPREvent(req);
 
@@ -242,9 +237,7 @@ describe('EventOrchestratorService', () => {
     const orchestrator = createTestOrchestrator();
 
     const req = {
-      $typeName: 'core.v1.IngestPREventRequest',
       prMeta: {
-        $typeName: 'core.v1.PRMeta',
         provider: 'github',
         owner: 'test-org',
         repo: 'test-repo',
@@ -261,7 +254,7 @@ describe('EventOrchestratorService', () => {
       },
       diff: '',
       changedFiles: [],
-    } as unknown as IngestPREventRequest;
+    } satisfies PREventPayload;
 
     const res = await orchestrator.ingestPREvent(req);
 
@@ -297,6 +290,11 @@ describe('EventOrchestratorService', () => {
         'github:test-org:test-repo:42',
       ),
     ).rejects.toThrow(/do not match the originating PR event/);
+
+    expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+      'github:test-org:test-repo:42',
+      expect.objectContaining({ status: 'failed' }),
+    );
   });
 
   it('publishes review results to REVIEW_RESULTS_TOPIC when review results arrive', async () => {
@@ -396,11 +394,9 @@ describe('EventOrchestratorService', () => {
   });
 
   describe('baseline lock and discussion wiring', () => {
-    function makeOpenedRequest(): IngestPREventRequest {
+    function makeOpenedRequest(): PREventPayload {
       return {
-        $typeName: 'core.v1.IngestPREventRequest',
         prMeta: {
-          $typeName: 'core.v1.PRMeta',
           provider: 'github',
           owner: 'test-org',
           repo: 'test-repo',
@@ -417,7 +413,7 @@ describe('EventOrchestratorService', () => {
         },
         diff: 'diff --git a/file.ts ...',
         changedFiles: ['file.ts'],
-      } as unknown as IngestPREventRequest;
+      } satisfies PREventPayload;
     }
 
     it('backs the discussion tools with the repository when configured', async () => {

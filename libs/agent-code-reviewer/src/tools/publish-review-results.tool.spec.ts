@@ -329,4 +329,69 @@ describe('publishReviewResultsTool', () => {
       expect.objectContaining({ path: 'src/db.ts', position: 12 }),
     );
   });
+
+  it('clamps findings that partially extend outside a diff hunk instead of dropping them', async () => {
+    const onPublishResult = vi.fn().mockResolvedValue(undefined);
+    const tool = createPublishReviewResultsTool({ onPublishResult });
+
+    const diff = [
+      'diff --git a/src/db.ts b/src/db.ts',
+      '--- a/src/db.ts',
+      '+++ b/src/db.ts',
+      '@@ -10,3 +10,5 @@',
+      ' const a = 1;',
+      '+const q = `select ${input}`;',
+      '+const r = run(q);',
+      ' return r;',
+      ' }',
+    ].join('\n');
+
+    const stateMap = new Map<string, unknown>([
+      [
+        STATE.prMeta,
+        {
+          provider: 'github',
+          owner: 'test-owner',
+          repo: 'test-repo',
+          number: 42,
+        },
+      ],
+      [STATE.diff, diff],
+    ]);
+
+    const mockCtx = {
+      state: {
+        get: (key: string) => stateMap.get(key),
+        set: (key: string, val: unknown) => stateMap.set(key, val),
+      },
+    } as unknown;
+
+    await tool.execute(
+      {
+        summary: 'Clamped finding',
+        findings: [
+          {
+            title: 'Partially outside hunk',
+            severity: 'high',
+            path: 'src/db.ts',
+            startLine: 8,
+            endLine: 13,
+            body: 'Starts 2 lines before hunk.',
+            confidence: 0.9,
+          },
+        ],
+      },
+      mockCtx,
+    );
+
+    const payload = onPublishResult.mock.calls[0][0];
+    expect(payload.comments).toHaveLength(1);
+    expect(payload.comments[0]).toEqual(
+      expect.objectContaining({
+        path: 'src/db.ts',
+        startPosition: 10,
+        position: 13,
+      }),
+    );
+  });
 });
