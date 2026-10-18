@@ -10,6 +10,68 @@ export interface SearchRepositoryCodeToolDependencies {
   defaultRepo?: string;
 }
 
+function readPinnedCoordinate(
+  stateValue: string | undefined,
+  fallback: string | undefined,
+): string {
+  return stateValue || fallback || '';
+}
+
+// Search scope is fixed to the PR's repository (state/deps only).
+function readSearchCoordinates(
+  meta: PrMeta | undefined,
+  deps: SearchRepositoryCodeToolDependencies,
+): { owner: string; repo: string } {
+  return {
+    owner: readPinnedCoordinate(meta?.owner, deps.defaultOwner),
+    repo: readPinnedCoordinate(meta?.repo, deps.defaultRepo),
+  };
+}
+
+function emptySearchResult(message: string) {
+  return { totalCount: 0, items: [], message };
+}
+
+function validateSearchRequest(
+  deps: SearchRepositoryCodeToolDependencies,
+  owner: string,
+  repo: string,
+): { message: string } | { gitAdapter: GitAdapterContract } {
+  if (!deps.gitAdapter) {
+    return { message: 'Git adapter is not configured for code search.' };
+  }
+  if (!owner || !repo) {
+    return { message: 'Repository owner and name are required for search.' };
+  }
+  return { gitAdapter: deps.gitAdapter };
+}
+
+async function searchRepositoryCode(
+  gitAdapter: GitAdapterContract,
+  owner: string,
+  repo: string,
+  query: string,
+) {
+  try {
+    const result = await gitAdapter.searchCode(owner, repo, query);
+    const items = (result.items || []).slice(0, 5).map((item) => ({
+      name: item.name,
+      path: item.path,
+    }));
+
+    return {
+      totalCount: result.totalCount,
+      items,
+    };
+  } catch (err) {
+    return {
+      totalCount: 0,
+      items: [],
+      message: `Code search failed: ${String(err)}`,
+    };
+  }
+}
+
 export function createSearchRepositoryCodeTool(
   deps: SearchRepositoryCodeToolDependencies = {},
 ) {
@@ -24,48 +86,19 @@ export function createSearchRepositoryCodeTool(
     }),
     execute: async (input, ctx) => {
       const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-      // Search scope is fixed to the PR's repository (state/deps only).
-      const owner = meta?.owner || deps.defaultOwner || '';
-      const repo = meta?.repo || deps.defaultRepo || '';
+      const { owner, repo } = readSearchCoordinates(meta, deps);
 
-      if (!deps.gitAdapter) {
-        return {
-          totalCount: 0,
-          items: [],
-          message: 'Git adapter is not configured for code search.',
-        };
+      const validation = validateSearchRequest(deps, owner, repo);
+      if ('message' in validation) {
+        return emptySearchResult(validation.message);
       }
 
-      if (!owner || !repo) {
-        return {
-          totalCount: 0,
-          items: [],
-          message: 'Repository owner and name are required for search.',
-        };
-      }
-
-      try {
-        const result = await deps.gitAdapter.searchCode(
-          owner,
-          repo,
-          input.query,
-        );
-        const items = (result.items || []).slice(0, 5).map((item) => ({
-          name: item.name,
-          path: item.path,
-        }));
-
-        return {
-          totalCount: result.totalCount,
-          items,
-        };
-      } catch (err) {
-        return {
-          totalCount: 0,
-          items: [],
-          message: `Code search failed: ${String(err)}`,
-        };
-      }
+      return searchRepositoryCode(
+        validation.gitAdapter,
+        owner,
+        repo,
+        input.query,
+      );
     },
   });
 }

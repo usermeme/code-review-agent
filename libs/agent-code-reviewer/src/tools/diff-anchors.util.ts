@@ -6,6 +6,45 @@ export interface LineRange {
 
 const HUNK_HEADER_REGEX = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
 
+/** The NEW-side target path of a `+++ ` header line, or null for deletions. */
+function parseNewSideTarget(line: string): string | null {
+  const target = line.slice(4).trim();
+  return target === '/dev/null' ? null : target.replace(/^b\//, '');
+}
+
+/** The NEW-side range of a hunk header line, or null when it adds no lines. */
+function parseHunkRange(line: string): LineRange | null {
+  const hunk = HUNK_HEADER_REGEX.exec(line);
+  if (!hunk) return null;
+  const start = Number(hunk[1]);
+  const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+  // A +start,0 hunk adds no NEW-side lines — nothing is anchorable.
+  if (count === 0) return null;
+  return { start, end: start + count - 1 };
+}
+
+function openNewSideFile(
+  ranges: Map<string, LineRange[]>,
+  line: string,
+): string | null {
+  const currentPath = parseNewSideTarget(line);
+  if (currentPath && !ranges.has(currentPath)) {
+    ranges.set(currentPath, []);
+  }
+  return currentPath;
+}
+
+function recordHunkRange(
+  ranges: Map<string, LineRange[]>,
+  currentPath: string | null,
+  line: string,
+): void {
+  const range = parseHunkRange(line);
+  if (range && currentPath) {
+    ranges.get(currentPath)?.push(range);
+  }
+}
+
 /**
  * Parses a unified diff into the NEW-side line ranges each file's hunks
  * cover. GitHub only accepts inline review comments on lines inside these
@@ -22,23 +61,10 @@ export function parseNewSideRanges(diff: string): Map<string, LineRange[]> {
   for (const line of diff.split('\n')) {
     if (line.startsWith('diff --git ')) {
       currentPath = null;
-      continue;
-    }
-    if (line.startsWith('+++ ')) {
-      const target = line.slice(4).trim();
-      currentPath = target === '/dev/null' ? null : target.replace(/^b\//, '');
-      if (currentPath && !ranges.has(currentPath)) {
-        ranges.set(currentPath, []);
-      }
-      continue;
-    }
-    const hunk = HUNK_HEADER_REGEX.exec(line);
-    if (hunk && currentPath) {
-      const start = Number(hunk[1]);
-      const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
-      // A +start,0 hunk adds no NEW-side lines — nothing is anchorable.
-      if (count === 0) continue;
-      ranges.get(currentPath)?.push({ start, end: start + count - 1 });
+    } else if (line.startsWith('+++ ')) {
+      currentPath = openNewSideFile(ranges, line);
+    } else {
+      recordHunkRange(ranges, currentPath, line);
     }
   }
 
@@ -82,6 +108,78 @@ export function clampRangeToDiff(
   };
 }
 
+/** Mutable line-scanning state shared by the annotateNewSideLines helpers. */
+interface AnnotateState {
+  inDeletedFile: boolean;
+  nextNewLine: number | null;
+}
+
+function annotateFileBoundary(state: AnnotateState, line: string): string {
+  state.inDeletedFile = false;
+  state.nextNewLine = null;
+  return line;
+}
+
+function annotatePathHeader(state: AnnotateState, line: string): string {
+  if (line.startsWith('+++ ')) {
+    state.inDeletedFile = line.slice(4).trim() === '/dev/null';
+  }
+  state.nextNewLine = null;
+  return line;
+}
+
+function annotateHunkHeader(
+  state: AnnotateState,
+  line: string,
+  hunk: RegExpExecArray,
+): string {
+  const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+  state.nextNewLine =
+    state.inDeletedFile || count === 0 ? null : Number(hunk[1]);
+  return line;
+}
+
+function isNumberedSideLine(line: string): boolean {
+  return line.startsWith('+') || line.startsWith(' ');
+}
+
+function annotateUnnumberedLine(state: AnnotateState, line: string): string {
+  if (line.startsWith('-')) {
+    return `   ${line}`;
+  }
+  if (line.startsWith('\\')) {
+    return line;
+  }
+  state.nextNewLine = null;
+  return line;
+}
+
+function annotateContentLine(state: AnnotateState, line: string): string {
+  if (state.nextNewLine === null) {
+    return line;
+  }
+  if (!isNumberedSideLine(line)) {
+    return annotateUnnumberedLine(state, line);
+  }
+  const lineNo = state.nextNewLine;
+  state.nextNewLine += 1;
+  return `${lineNo}: ${line}`;
+}
+
+function annotateLine(state: AnnotateState, line: string): string {
+  if (line.startsWith('diff --git ')) {
+    return annotateFileBoundary(state, line);
+  }
+  if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+    return annotatePathHeader(state, line);
+  }
+  const hunk = HUNK_HEADER_REGEX.exec(line);
+  if (hunk) {
+    return annotateHunkHeader(state, line, hunk);
+  }
+  return annotateContentLine(state, line);
+}
+
 /**
  * Annotates each NEW-side line (`+` or context ` `) inside a unified diff hunk
  * with its 1-based NEW-side line number in the left column, matching the
@@ -89,46 +187,10 @@ export function clampRangeToDiff(
  * have no NEW-side line number.
  */
 export function annotateNewSideLines(diff: string): string {
-  let inDeletedFile = false;
-  let nextNewLine: number | null = null;
+  const state: AnnotateState = { inDeletedFile: false, nextNewLine: null };
 
   return diff
     .split('\n')
-    .map((line) => {
-      if (line.startsWith('diff --git ')) {
-        inDeletedFile = false;
-        nextNewLine = null;
-        return line;
-      }
-      if (line.startsWith('--- ') || line.startsWith('+++ ')) {
-        if (line.startsWith('+++ ')) {
-          inDeletedFile = line.slice(4).trim() === '/dev/null';
-        }
-        nextNewLine = null;
-        return line;
-      }
-      const hunk = HUNK_HEADER_REGEX.exec(line);
-      if (hunk) {
-        const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
-        nextNewLine = inDeletedFile || count === 0 ? null : Number(hunk[1]);
-        return line;
-      }
-      if (nextNewLine === null) {
-        return line;
-      }
-      if (line.startsWith('+') || line.startsWith(' ')) {
-        const lineNo = nextNewLine;
-        nextNewLine += 1;
-        return `${lineNo}: ${line}`;
-      }
-      if (line.startsWith('-')) {
-        return `   ${line}`;
-      }
-      if (line.startsWith('\\')) {
-        return line;
-      }
-      nextNewLine = null;
-      return line;
-    })
+    .map((line) => annotateLine(state, line))
     .join('\n');
 }

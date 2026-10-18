@@ -1,5 +1,5 @@
-import type { BaseLlm, LlmRequest } from '@google/adk';
-import type { Schema } from '@google/genai';
+import type { BaseLlm, LlmRequest, LlmResponse } from '@google/adk';
+import type { Part, Schema } from '@google/genai';
 import type { z } from 'zod';
 
 /** One-shot text generation against a BaseLlm, outside any agent/session. */
@@ -77,12 +77,22 @@ export function extractJson(text: string): unknown {
   return undefined;
 }
 
+/** Parts carried by a response's content, or none when it has no content. */
+function responseParts(response: LlmResponse): Part[] {
+  return response.content?.parts ?? [];
+}
+
+/** True when a part carries user-visible model text (not an internal thought). */
+function isSpokenTextPart(part: Part): part is Part & { text: string } {
+  return Boolean(part.text) && !('thought' in part && part.thought);
+}
+
 async function collectText(llm: BaseLlm, request: LlmRequest): Promise<string> {
   let text = '';
   for await (const response of llm.generateContentAsync(request)) {
     if (response.partial) continue;
-    for (const part of response.content?.parts ?? []) {
-      if (part.text && !('thought' in part && part.thought)) text += part.text;
+    for (const part of responseParts(response)) {
+      if (isSpokenTextPart(part)) text += part.text;
     }
   }
   return text;

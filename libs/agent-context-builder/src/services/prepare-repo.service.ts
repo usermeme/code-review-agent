@@ -1,4 +1,7 @@
-import type { GitAdapterContract } from '@code-review-agent/shared-types';
+import type {
+  GitAdapterContract,
+  PRFile,
+} from '@code-review-agent/shared-types';
 
 import { STATE } from '../constants/state-keys.constant.js';
 import { collectAgentDocs } from './agent-docs.service.js';
@@ -34,6 +37,63 @@ const CHUNK_OPTIONS = {
 };
 
 /**
+ * Applies the changed-file filters to one PR file: removed files and files
+ * without content are dropped silently; ignored/generated files are recorded
+ * in `skipped`. Returns the accepted RepoFile, or null when skipped.
+ */
+function acceptChangedFile(file: PRFile, skipped: string[]): RepoFile | null {
+  if (file.status === 'removed' || !file.content) return null;
+  if (isIgnoredPath(file.filename)) {
+    skipped.push(file.filename);
+    return null;
+  }
+  const content = acceptFileContent(file.content);
+  if (content === null) {
+    skipped.push(file.filename);
+    return null;
+  }
+  return {
+    path: file.filename,
+    content,
+    tokens: estimateTokens(content),
+  };
+}
+
+/**
+ * INCREMENTAL MODE: fetch the PR's changed files via the Git adapter and
+ * materialize them as chunks in state.
+ */
+async function prepareIncrementalUpdate(
+  gitAdapter: GitAdapterContract,
+  input: PrepareRepoInput,
+  prNumber: number,
+  state: PipelineState,
+): Promise<string> {
+  const changedFilesData = await gitAdapter.getPRFiles(
+    input.owner,
+    input.repo,
+    prNumber,
+  );
+
+  const filesRecord: RepoFile[] = [];
+  const skipped: string[] = [];
+
+  for (const file of changedFilesData) {
+    const accepted = acceptChangedFile(file, skipped);
+    if (accepted) filesRecord.push(accepted);
+  }
+
+  const agentDocs = collectAgentDocs(filesRecord);
+  const { chunks, overflow } = buildChunks(filesRecord, CHUNK_OPTIONS);
+
+  state.set(STATE.chunks, chunks);
+  state.set(STATE.overflowPaths, overflow);
+  state.set(STATE.agentDocs, agentDocs);
+
+  return `Incremental update prepared successfully. Found ${chunks.length} chunks of changed files${skipped.length > 0 ? `; skipped ${skipped.length} generated/ignored file(s)` : ''}.`;
+}
+
+/**
  * Pipeline step 1: materialize the repository (or the PR's changed files)
  * into chunks in state.
  *
@@ -54,42 +114,12 @@ export async function prepareRepository(
   }
 
   if (input.isIncrementalUpdate && input.prNumber) {
-    // INCREMENTAL MODE: fetch changed files via the Git adapter.
-    const changedFilesData = await deps.gitAdapter.getPRFiles(
-      input.owner,
-      input.repo,
+    return prepareIncrementalUpdate(
+      deps.gitAdapter,
+      input,
       input.prNumber,
+      state,
     );
-
-    const filesRecord: RepoFile[] = [];
-    const skipped: string[] = [];
-
-    for (const file of changedFilesData) {
-      if (file.status === 'removed' || !file.content) continue;
-      if (isIgnoredPath(file.filename)) {
-        skipped.push(file.filename);
-        continue;
-      }
-      const content = acceptFileContent(file.content);
-      if (content === null) {
-        skipped.push(file.filename);
-        continue;
-      }
-      filesRecord.push({
-        path: file.filename,
-        content,
-        tokens: estimateTokens(content),
-      });
-    }
-
-    const agentDocs = collectAgentDocs(filesRecord);
-    const { chunks, overflow } = buildChunks(filesRecord, CHUNK_OPTIONS);
-
-    state.set(STATE.chunks, chunks);
-    state.set(STATE.overflowPaths, overflow);
-    state.set(STATE.agentDocs, agentDocs);
-
-    return `Incremental update prepared successfully. Found ${chunks.length} chunks of changed files${skipped.length > 0 ? `; skipped ${skipped.length} generated/ignored file(s)` : ''}.`;
   }
 
   // BASELINE MODE: download the repository archive via the Git adapter.

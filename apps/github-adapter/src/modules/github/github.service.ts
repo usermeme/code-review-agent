@@ -14,6 +14,68 @@ export interface GithubServiceDependencies {
   octokit: Octokit;
 }
 
+type ReviewComment = PostReviewOptions['comments'][number];
+
+interface InlineCommentCounts {
+  postedComments: number;
+  failedComments: number;
+}
+
+type ReviewSubmission = { reviewId: string } | { failure: PostReviewResult };
+
+function decodeFileContent(data: {
+  encoding: string;
+  content: string;
+}): string {
+  if (data.encoding === 'base64' && data.content) {
+    return Buffer.from(data.content, 'base64').toString('utf8');
+  }
+  if (data.content) {
+    return data.content;
+  }
+  return '';
+}
+
+function buildCommentsFooter(comments: ReviewComment[]): string {
+  const plural = comments.length === 1 ? '' : 's';
+  return `\n\n---\n*Found ${comments.length} inline review comment${plural}.*`;
+}
+
+function buildReviewBody(
+  summary: string | undefined,
+  ticketCoverage: string | undefined,
+  comments: ReviewComment[] | undefined,
+): string {
+  let body = `## 🤖 AI Code Review Summary\n\n${summary}`;
+  if (ticketCoverage) {
+    body += `\n\n### 🎯 Ticket & Requirements Coverage\n\n${ticketCoverage}`;
+  }
+  if (comments && comments.length > 0) {
+    body += buildCommentsFooter(comments);
+  }
+  return body;
+}
+
+function resolveStartLine(
+  comment: ReviewComment,
+  line: number | undefined,
+): number | undefined {
+  // Multi-line findings anchor to their full range; GitHub requires
+  // start_line < line (side defaults to RIGHT, the NEW side).
+  return comment.startPosition && line && comment.startPosition < line
+    ? comment.startPosition
+    : undefined;
+}
+
+function buildPostedReviewMessage(
+  postedComments: number,
+  failedComments: number,
+): string {
+  return failedComments > 0
+    ? `Review posted successfully (${postedComments}/${postedComments + failedComments} inline comments posted; ${failedComments} failed — lines may be outside the diff)`
+    : 'Review posted successfully';
+}
+
 export class GithubService implements GitAdapterContract {
   private octokit: Octokit;
 
@@ -173,16 +235,9 @@ export class GithubService implements GitAdapterContract {
       throw new Error(`Path ${path} is a directory or submodule, not a file`);
     }
 
-    let decodedContent = '';
-    if (data.encoding === 'base64' && data.content) {
-      decodedContent = Buffer.from(data.content, 'base64').toString('utf8');
-    } else if (data.content) {
-      decodedContent = data.content;
-    }
-
     return {
       path: data.path,
-      content: decodedContent,
+      content: decodeFileContent(data),
       encoding: 'utf-8',
       sha: data.sha,
     };
@@ -192,28 +247,70 @@ export class GithubService implements GitAdapterContract {
     const { owner, repo, prNumber, summary, ticketCoverage, comments } =
       options;
 
-    let body = `## 🤖 AI Code Review Summary\n\n${summary}`;
-    if (ticketCoverage) {
-      body += `\n\n### 🎯 Ticket & Requirements Coverage\n\n${ticketCoverage}`;
-    }
-    if (comments && comments.length > 0) {
-      const plural = comments.length === 1 ? '' : 's';
-      body += `\n\n---\n*Found ${comments.length} inline review comment${plural}.*`;
+    const body = buildReviewBody(summary, ticketCoverage, comments);
+    const commitId = await this.resolveHeadCommitId(owner, repo, prNumber);
+
+    const submission = await this.submitReviewWithFallback(
+      owner,
+      repo,
+      prNumber,
+      body,
+      commitId,
+    );
+    if ('failure' in submission) {
+      return submission.failure;
     }
 
-    let commit_id: string | undefined;
+    // Post inline comments if commit_id is available
+    let counts: InlineCommentCounts = {
+      postedComments: 0,
+      failedComments: 0,
+    };
+    if (commitId && comments && comments.length > 0) {
+      counts = await this.postInlineComments(
+        owner,
+        repo,
+        prNumber,
+        commitId,
+        comments,
+      );
+    }
+
+    return {
+      success: true,
+      message: buildPostedReviewMessage(
+        counts.postedComments,
+        counts.failedComments,
+      ),
+      reviewId: submission.reviewId,
+    };
+  }
+
+  private async resolveHeadCommitId(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<string | undefined> {
     try {
       const prData = await this.octokitClient.rest.pulls.get({
         owner,
         repo,
         pull_number: prNumber,
       });
-      commit_id = prData.data.head.sha;
+      return prData.data.head.sha;
     } catch (e) {
       console.warn('Failed to fetch PR head sha for review summary', e);
+      return undefined;
     }
+  }
 
-    let reviewId: string;
+  private async submitReviewWithFallback(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    body: string,
+    commitId: string | undefined,
+  ): Promise<ReviewSubmission> {
     try {
       const reviewRes = await this.octokitClient.rest.pulls.createReview({
         owner,
@@ -221,9 +318,9 @@ export class GithubService implements GitAdapterContract {
         pull_number: prNumber,
         body,
         event: 'COMMENT',
-        ...(commit_id ? { commit_id } : {}),
+        ...(commitId ? { commit_id: commitId } : {}),
       });
-      reviewId = String(reviewRes.data.id);
+      return { reviewId: String(reviewRes.data.id) };
     } catch (reviewErr) {
       console.warn(
         `[GithubService] Failed to submit formal PR review, falling back to issue comment:`,
@@ -236,56 +333,60 @@ export class GithubService implements GitAdapterContract {
           issue_number: prNumber,
           body,
         });
-        reviewId = String(commentRes.data.id);
+        return { reviewId: String(commentRes.data.id) };
       } catch {
         return {
-          success: false,
-          message: `Failed to post review: ${reviewErr}`,
+          failure: {
+            success: false,
+            message: `Failed to post review: ${reviewErr}`,
+          },
         };
       }
     }
+  }
 
-    // Post inline comments if commit_id is available
+  private async postInlineComments(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    commitId: string,
+    comments: ReviewComment[],
+  ): Promise<InlineCommentCounts> {
     let postedComments = 0;
     let failedComments = 0;
-    if (commit_id && comments && comments.length > 0) {
-      for (const comment of comments) {
-        try {
-          const line = comment.line ?? comment.position;
-          // Multi-line findings anchor to their full range; GitHub requires
-          // start_line < line (side defaults to RIGHT, the NEW side).
-          const startLine =
-            comment.startPosition && line && comment.startPosition < line
-              ? comment.startPosition
-              : undefined;
-          await this.octokitClient.rest.pulls.createReviewComment({
-            owner,
-            repo,
-            pull_number: prNumber,
-            body: comment.body,
-            path: comment.path,
-            ...(startLine ? { start_line: startLine } : {}),
-            ...(line ? { line } : {}),
-            commit_id,
-          });
-          postedComments += 1;
-        } catch (error) {
-          failedComments += 1;
-          console.error(
-            `Failed to post comment to ${comment.path}:${comment.position}`,
-            error,
-          );
-        }
+    for (const comment of comments) {
+      try {
+        await this.postInlineComment(owner, repo, prNumber, comment, commitId);
+        postedComments += 1;
+      } catch (error) {
+        failedComments += 1;
+        console.error(
+          `Failed to post comment to ${comment.path}:${comment.position}`,
+          error,
+        );
       }
     }
+    return { postedComments, failedComments };
+  }
 
-    return {
-      success: true,
-      message:
-        failedComments > 0
-          ? `Review posted successfully (${postedComments}/${postedComments + failedComments} inline comments posted; ${failedComments} failed — lines may be outside the diff)`
-          : 'Review posted successfully',
-      reviewId,
-    };
+  private async postInlineComment(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    comment: ReviewComment,
+    commitId: string,
+  ): Promise<void> {
+    const line = comment.line ?? comment.position;
+    const startLine = resolveStartLine(comment, line);
+    await this.octokitClient.rest.pulls.createReviewComment({
+      owner,
+      repo,
+      pull_number: prNumber,
+      body: comment.body,
+      path: comment.path,
+      ...(startLine ? { start_line: startLine } : {}),
+      ...(line ? { line } : {}),
+      commit_id: commitId,
+    });
   }
 }

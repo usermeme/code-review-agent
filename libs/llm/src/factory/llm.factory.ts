@@ -7,11 +7,16 @@ export interface CreateLlmOptions {
   modelOverride?: string;
 }
 
+/** Mock provider fallback when no model name was configured or overridden. */
+function resolveMockModel(model: string | undefined): string {
+  return model || 'mock-model';
+}
+
 export class LlmFactory {
   constructor(private readonly config: LlmConfig) {}
 
   createLlm(options: CreateLlmOptions = {}): BaseLlm {
-    const model = options.modelOverride || this.config.REVIEW_MODEL;
+    const model = this.resolveModel(options);
 
     switch (this.config.LLM_PROVIDER) {
       case 'gemini': {
@@ -23,7 +28,7 @@ export class LlmFactory {
       }
       case 'mock': {
         return new MockLlm({
-          model: model || 'mock-model',
+          model: resolveMockModel(model),
         });
       }
       default: {
@@ -33,5 +38,10 @@ export class LlmFactory {
         );
       }
     }
+  }
+
+  /** Explicit per-call override wins; otherwise the configured review model. */
+  private resolveModel(options: CreateLlmOptions): string | undefined {
+    return options.modelOverride || this.config.REVIEW_MODEL;
   }
 }

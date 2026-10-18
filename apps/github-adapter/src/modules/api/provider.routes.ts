@@ -9,6 +9,25 @@ export interface ProviderRoutesOptions {
   githubService: GithubService;
 }
 
+function isWebReadableStream(body: unknown): boolean {
+  return (
+    typeof body === 'object' &&
+    body !== null &&
+    'getReader' in body &&
+    typeof (body as { getReader?: unknown }).getReader === 'function'
+  );
+}
+
+function toNodeReadableStream(body: unknown): NodeJS.ReadableStream {
+  return isWebReadableStream(body)
+    ? Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0])
+    : (body as NodeJS.ReadableStream);
+}
+
+function resolveCommitSha(headers: Headers, ref?: string): string {
+  return headers.get('x-github-commit-sha') || ref || 'main';
+}
+
 export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
   fastify,
   options,
@@ -100,23 +119,9 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
       }
 
       reply.header('content-type', 'application/x-gzip');
-      const sha = upstream.headers.get('x-github-commit-sha') || ref || 'main';
-      reply.header('x-commit-sha', sha);
+      reply.header('x-commit-sha', resolveCommitSha(upstream.headers, ref));
 
-      const body = upstream.body;
-      const isWebStream =
-        typeof body === 'object' &&
-        body !== null &&
-        'getReader' in body &&
-        typeof (body as { getReader?: unknown }).getReader === 'function';
-
-      const stream = isWebStream
-        ? Readable.fromWeb(
-            body as unknown as Parameters<typeof Readable.fromWeb>[0],
-          )
-        : (body as unknown as NodeJS.ReadableStream);
-
-      return reply.send(stream);
+      return reply.send(toNodeReadableStream(upstream.body));
     } catch (error) {
       fastify.log.error(`Failed to fetch repo tarball: ${error}`);
       return reply.code(500).send({ error: String(error) });

@@ -63,17 +63,7 @@ function filePriority(path: string): number {
   return 0;
 }
 
-function parsePriorOmittedNote(preamble: string): {
-  cleanPreamble: string;
-  priorOmitted: PreparedDiff['omitted'];
-} {
-  if (!preamble.startsWith(OMITTED_NOTE_PREFIX)) {
-    return { cleanPreamble: preamble, priorOmitted: [] };
-  }
-  const newlineIdx = preamble.indexOf('\n');
-  const noteLine = newlineIdx === -1 ? preamble : preamble.slice(0, newlineIdx);
-  const cleanPreamble = newlineIdx === -1 ? '' : preamble.slice(newlineIdx + 1);
-  const rawList = noteLine.slice(OMITTED_NOTE_PREFIX.length);
+function parseOmittedItemList(rawList: string): PreparedDiff['omitted'] {
   const priorOmitted: PreparedDiff['omitted'] = [];
 
   for (const part of rawList.split(', ')) {
@@ -85,7 +75,21 @@ function parsePriorOmittedNote(preamble: string): {
       });
     }
   }
-  return { cleanPreamble, priorOmitted };
+  return priorOmitted;
+}
+
+function parsePriorOmittedNote(preamble: string): {
+  cleanPreamble: string;
+  priorOmitted: PreparedDiff['omitted'];
+} {
+  if (!preamble.startsWith(OMITTED_NOTE_PREFIX)) {
+    return { cleanPreamble: preamble, priorOmitted: [] };
+  }
+  const newlineIdx = preamble.indexOf('\n');
+  const noteLine = newlineIdx === -1 ? preamble : preamble.slice(0, newlineIdx);
+  const cleanPreamble = newlineIdx === -1 ? '' : preamble.slice(newlineIdx + 1);
+  const rawList = noteLine.slice(OMITTED_NOTE_PREFIX.length);
+  return { cleanPreamble, priorOmitted: parseOmittedItemList(rawList) };
 }
 
 function splitDiff(diff: string): {
@@ -140,21 +144,19 @@ function truncateFileDiff(
   return `${head}${suffix}`;
 }
 
-export function prepareDiff(
-  diff: string,
-  options: PrepareDiffOptions = {},
-): PreparedDiff {
-  const maxChars = options.maxChars ?? DEFAULT_MAX_DIFF_CHARS;
-  const maxFileChars = options.maxFileChars ?? DEFAULT_MAX_FILE_DIFF_CHARS;
-  const { preamble, files, priorOmitted } = splitDiff(diff);
+interface DiffCandidate {
+  index: number;
+  path: string;
+  capped: string;
+  priority: number;
+}
 
-  const omitted: PreparedDiff['omitted'] = [...priorOmitted];
-  const candidates: Array<{
-    index: number;
-    path: string;
-    capped: string;
-    priority: number;
-  }> = [];
+function collectCandidates(
+  files: string[],
+  maxFileChars: number,
+  omitted: PreparedDiff['omitted'],
+): DiffCandidate[] {
+  const candidates: DiffCandidate[] = [];
 
   for (let i = 0; i < files.length; i++) {
     const fileDiff = files[i];
@@ -175,6 +177,14 @@ export function prepareDiff(
     });
   }
 
+  return candidates;
+}
+
+function selectByBudget(
+  candidates: DiffCandidate[],
+  preambleChars: number,
+  maxChars: number,
+): { keptIndices: Set<number>; overBudgetIndices: Set<number> } {
   // Allocate budget to production source files before tests and docs, while
   // preserving original relative order within each priority tier.
   const byPriority = [...candidates].sort(
@@ -182,7 +192,7 @@ export function prepareDiff(
   );
   const keptIndices = new Set<number>();
   const overBudgetIndices = new Set<number>();
-  let used = preamble.length;
+  let used = preambleChars;
 
   for (const candidate of byPriority) {
     if (used + candidate.capped.length > maxChars) {
@@ -193,6 +203,15 @@ export function prepareDiff(
     used += candidate.capped.length;
   }
 
+  return { keptIndices, overBudgetIndices };
+}
+
+function assembleKeptFiles(
+  candidates: DiffCandidate[],
+  keptIndices: Set<number>,
+  overBudgetIndices: Set<number>,
+  omitted: PreparedDiff['omitted'],
+): { kept: string[]; includedFiles: string[] } {
   const kept: string[] = [];
   const includedFiles: string[] = [];
   for (const candidate of candidates) {
@@ -203,15 +222,43 @@ export function prepareDiff(
       omitted.push({ path: candidate.path, reason: 'over_budget' });
     }
   }
+  return { kept, includedFiles };
+}
 
+function buildOmissionNote(omitted: PreparedDiff['omitted']): string {
   const listed = omitted
     .slice(0, MAX_LISTED_OMISSIONS)
     .map((o) => `${o.path} (${o.reason})`);
   if (omitted.length > MAX_LISTED_OMISSIONS) {
     listed.push(`+${omitted.length - MAX_LISTED_OMISSIONS} more`);
   }
-  const note =
-    omitted.length > 0 ? `${OMITTED_NOTE_PREFIX}${listed.join(', ')}\n` : '';
+  return omitted.length > 0
+    ? `${OMITTED_NOTE_PREFIX}${listed.join(', ')}\n`
+    : '';
+}
+
+export function prepareDiff(
+  diff: string,
+  options: PrepareDiffOptions = {},
+): PreparedDiff {
+  const maxChars = options.maxChars ?? DEFAULT_MAX_DIFF_CHARS;
+  const maxFileChars = options.maxFileChars ?? DEFAULT_MAX_FILE_DIFF_CHARS;
+  const { preamble, files, priorOmitted } = splitDiff(diff);
+
+  const omitted: PreparedDiff['omitted'] = [...priorOmitted];
+  const candidates = collectCandidates(files, maxFileChars, omitted);
+  const { keptIndices, overBudgetIndices } = selectByBudget(
+    candidates,
+    preamble.length,
+    maxChars,
+  );
+  const { kept, includedFiles } = assembleKeptFiles(
+    candidates,
+    keptIndices,
+    overBudgetIndices,
+    omitted,
+  );
+  const note = buildOmissionNote(omitted);
 
   return {
     diff: note + preamble + kept.join(''),

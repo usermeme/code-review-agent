@@ -18,25 +18,35 @@ import {
   renderLoadedSkills,
 } from '../tools/load-repo-skill.tool.js';
 
+function readRepoContext(ctx: ReadonlyContext) {
+  return {
+    diff: annotateNewSideLines(ctx.state.get<string>(STATE.diff) ?? ''),
+    changedFiles: ctx.state.get<string>(STATE.changedFiles) ?? '',
+    architecture:
+      ctx.state.get<string>(STATE.ctxArchitecture) ||
+      ContextError.REPO_CONTEXT_NOT_LOADED,
+    errorHandling:
+      ctx.state.get<string>(STATE.ctxErrorHandling) ||
+      ContextError.REPO_CONTEXT_NOT_LOADED,
+  };
+}
+
+function buildChangedFilesContext(changedFiles: string): string {
+  return changedFiles
+    ? `\nChanged file paths in this PR (names only, NOT file contents — use fetchRepositoryFile to read a file when the diff alone is not enough evidence):\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
+    : '';
+}
+
 const instruction =
   (skill: ReviewSkill) =>
   (ctx: ReadonlyContext): string => {
-    const diff = annotateNewSideLines(ctx.state.get<string>(STATE.diff) ?? '');
-    const changedFiles = ctx.state.get<string>(STATE.changedFiles) ?? '';
-    const architecture =
-      ctx.state.get<string>(STATE.ctxArchitecture) ||
-      ContextError.REPO_CONTEXT_NOT_LOADED;
-    const errorHandling =
-      ctx.state.get<string>(STATE.ctxErrorHandling) ||
-      ContextError.REPO_CONTEXT_NOT_LOADED;
+    const { diff, changedFiles, architecture, errorHandling } =
+      readRepoContext(ctx);
     const stagedSkillBodies = ctx.state.get<Record<string, LoadedRepoSkill>>(
       STATE.repoSkillBodies,
     );
     const skillsSection = renderLoadedSkills(stagedSkillBodies);
-
-    const changedFilesContext = changedFiles
-      ? `\nChanged file paths in this PR (names only, NOT file contents — use fetchRepositoryFile to read a file when the diff alone is not enough evidence):\n<UNTRUSTED_CHANGED_FILES>\n${changedFiles}\n</UNTRUSTED_CHANGED_FILES>\n`
-      : '';
+    const changedFilesContext = buildChangedFilesContext(changedFiles);
 
     return `You hunt for real defects in a pull request. Report only problems, not style.
 

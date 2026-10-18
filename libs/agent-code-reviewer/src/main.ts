@@ -3,7 +3,7 @@ import type {
   ReviewResultPayload,
 } from '@code-review-agent/shared-types';
 import { NonRetryableTaskError } from '@code-review-agent/shared-types';
-import { type BaseLlm, InMemoryRunner } from '@google/adk';
+import { type BaseLlm, type Event, InMemoryRunner } from '@google/adk';
 import { z } from 'zod';
 
 import {
@@ -30,6 +30,7 @@ import {
 } from './tools/store-discussion.tool.js';
 import {
   createLlmCallBudget,
+  type LlmCallBudget,
   ReviewBudgetExceededError,
   ReviewTimeoutError,
 } from './utils/budget.util.js';
@@ -60,6 +61,9 @@ export const reviewInputSchema = z.object({
 
 export type ReviewExecutionInput = z.input<typeof reviewInputSchema>;
 
+type ParsedReviewInput = z.infer<typeof reviewInputSchema>;
+type ParsedPrMeta = ParsedReviewInput['prMeta'];
+
 export interface RunReviewOptions {
   llm: BaseLlm;
   baselineContext?: string | Record<string, string>;
@@ -73,6 +77,29 @@ export interface RunReviewOptions {
   timeoutMs?: number;
 }
 
+function isEmptyBaselineText(trimmed: string): boolean {
+  return !trimmed || trimmed === '{}';
+}
+
+/** True when `parsed` is a plain JSON object usable as named baseline sections. */
+function isSectionRecord(parsed: unknown): parsed is Record<string, string> {
+  return (
+    Boolean(parsed) && typeof parsed === 'object' && !Array.isArray(parsed)
+  );
+}
+
+function parseBaselineJson(trimmed: string): Record<string, string> | null {
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (isSectionRecord(parsed)) {
+      return parsed;
+    }
+  } catch {
+    // Not JSON — treat the whole string as the architecture section.
+  }
+  return null;
+}
+
 /** Parses the persisted baseline context into its named sections. */
 export function parseBaselineSections(
   baselineContext: string | Record<string, string> | undefined,
@@ -80,34 +107,13 @@ export function parseBaselineSections(
   if (!baselineContext) return {};
   if (typeof baselineContext === 'object') return baselineContext;
   const trimmed = baselineContext.trim();
-  if (!trimmed || trimmed === '{}') return {};
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, string>;
-    }
-  } catch {
-    // Not JSON — treat the whole string as the architecture section.
-  }
-  return { architecture: trimmed };
+  if (isEmptyBaselineText(trimmed)) return {};
+  return parseBaselineJson(trimmed) ?? { architecture: trimmed };
 }
 
-/**
- * Runs the full PR review.
- *
- * Failures are loud: agent error events or a run that ends without calling
- * publishReviewResults throw, instead of silently publishing a misleading
- * "no findings" review. All bulk data (diff, PR meta, baseline context
- * sections) is seeded through `stateDelta` — the user message is a short
- * trigger line and no dependency object is ever serialized into model input.
- */
-export async function runReview(
-  input: ReviewExecutionInput,
-  options: RunReviewOptions,
-): Promise<ReviewResultPayload> {
-  let parsed: z.infer<typeof reviewInputSchema>;
+function parseReviewInput(input: ReviewExecutionInput): ParsedReviewInput {
   try {
-    parsed = reviewInputSchema.parse(input);
+    return reviewInputSchema.parse(input);
   } catch (err) {
     // Malformed input is deterministic — redelivery cannot fix it.
     if (err instanceof z.ZodError) {
@@ -119,21 +125,30 @@ export async function runReview(
     }
     throw err;
   }
-  const meta = parsed.prMeta;
-  const sections = parseBaselineSections(options.baselineContext);
-  const defaultRepo = `${meta.owner || ''}/${meta.repo}`.replace(/^\//, '');
+}
 
-  let resultPayload: ReviewResultPayload | null = null;
-  const fileCache = new Map<string, string>();
+function buildDefaultRepo(meta: ParsedPrMeta): string {
+  return `${meta.owner || ''}/${meta.repo}`.replace(/^\//, '');
+}
 
+interface BuildReviewToolsArgs {
+  options: RunReviewOptions;
+  meta: ParsedPrMeta;
+  fileCache: Map<string, string>;
+  defaultRepo: string;
+  onPublishResult: (payload: ReviewResultPayload) => Promise<void>;
+}
+
+function buildReviewTools({
+  options,
+  meta,
+  fileCache,
+  defaultRepo,
+  onPublishResult,
+}: BuildReviewToolsArgs): OrchestratorTools {
   const tools: OrchestratorTools = {
     publishReviewResults: createPublishReviewResultsTool({
-      onPublishResult: async (res) => {
-        resultPayload = res;
-        if (options.onPublishResult) {
-          await options.onPublishResult(res);
-        }
-      },
+      onPublishResult,
     }),
     searchRepositoryCode: createSearchRepositoryCodeTool({
       gitAdapter: options.gitAdapter,
@@ -175,6 +190,98 @@ export async function runReview(
       defaultPrNumber: meta.number,
     });
   }
+
+  return tools;
+}
+
+function buildRunTriggerMessage(meta: ParsedPrMeta): string {
+  return (
+    `Review pull request ${meta.provider || 'github'}:${meta.owner || ''}/` +
+    `${meta.repo}#${meta.number} "${meta.title}". ` +
+    `The PR metadata, diff, changed-file paths, tickets, and repository baseline context are in session state.`
+  );
+}
+
+function buildContextSectionsState(sections: Record<string, string>) {
+  const requiredSection = (key: string) =>
+    sections[key] || ContextError.REPO_CONTEXT_NOT_LOADED;
+  return {
+    [STATE.ctxArchitecture]: requiredSection('architecture'),
+    [STATE.ctxModules]: requiredSection('modules'),
+    [STATE.ctxPatterns]: requiredSection('patterns'),
+    [STATE.ctxErrorHandling]: requiredSection('errorHandling'),
+    [STATE.ctxAgentDocs]: sections['agentDocs'] || '',
+  };
+}
+
+function isAgentErrorEvent(event: Event): boolean {
+  return Boolean(event.errorCode || event.errorMessage);
+}
+
+function describeAgentErrorEvent(event: Event): string {
+  return `${event.errorCode ?? 'agent_error'}: ${event.errorMessage ?? 'unknown error'}`;
+}
+
+function resolveRunFailure(args: {
+  timedOut: boolean;
+  timeoutMs: number;
+  budget: LlmCallBudget;
+  maxLlmCalls: number;
+  failedSubAgents: string[] | undefined;
+  errors: string[];
+  defaultRepo: string;
+  prNumber: number;
+}): never {
+  // Budget and timeout overruns surface as generic ADK error events; report
+  // them as the non-retryable failures they are, so they are not redelivered.
+  if (args.timedOut) throw new ReviewTimeoutError(args.timeoutMs);
+  if (args.budget.exceeded()) {
+    throw new ReviewBudgetExceededError(
+      `Review exceeded its budget of ${args.maxLlmCalls} LLM calls.`,
+    );
+  }
+  if (args.failedSubAgents) throw new SubAgentFailedError(args.failedSubAgents);
+  if (args.errors.length > 0) {
+    throw new Error(`Code review agent failed: ${args.errors.join('; ')}`);
+  }
+  throw new Error(
+    `Code review agent finished without publishing a result (publishReviewResults was never called) for ${args.defaultRepo}#${args.prNumber}.`,
+  );
+}
+
+/**
+ * Runs the full PR review.
+ *
+ * Failures are loud: agent error events or a run that ends without calling
+ * publishReviewResults throw, instead of silently publishing a misleading
+ * "no findings" review. All bulk data (diff, PR meta, baseline context
+ * sections) is seeded through `stateDelta` — the user message is a short
+ * trigger line and no dependency object is ever serialized into model input.
+ */
+export async function runReview(
+  input: ReviewExecutionInput,
+  options: RunReviewOptions,
+): Promise<ReviewResultPayload> {
+  const parsed = parseReviewInput(input);
+  const meta = parsed.prMeta;
+  const sections = parseBaselineSections(options.baselineContext);
+  const defaultRepo = buildDefaultRepo(meta);
+
+  let resultPayload: ReviewResultPayload | null = null;
+  const fileCache = new Map<string, string>();
+
+  const tools = buildReviewTools({
+    options,
+    meta,
+    fileCache,
+    defaultRepo,
+    onPublishResult: async (res) => {
+      resultPayload = res;
+      if (options.onPublishResult) {
+        await options.onPublishResult(res);
+      }
+    },
+  });
 
   const maxLlmCalls = options.maxLlmCalls ?? LIMITS.maxLlmCalls;
   const timeoutMs = options.timeoutMs ?? LIMITS.reviewTimeoutMs;
@@ -221,10 +328,7 @@ export async function runReview(
       newMessage: {
         parts: [
           {
-            text:
-              `Review pull request ${meta.provider || 'github'}:${meta.owner || ''}/` +
-              `${meta.repo}#${meta.number} "${meta.title}". ` +
-              `The PR metadata, diff, changed-file paths, tickets, and repository baseline context are in session state.`,
+            text: buildRunTriggerMessage(meta),
           },
         ],
       },
@@ -233,23 +337,13 @@ export async function runReview(
         [STATE.diff]: prepareDiff(parsed.diff).diff,
         [STATE.changedFiles]: filteredChangedFiles,
         [STATE.tickets]: parsed.tickets,
-        [STATE.ctxArchitecture]:
-          sections['architecture'] || ContextError.REPO_CONTEXT_NOT_LOADED,
-        [STATE.ctxModules]:
-          sections['modules'] || ContextError.REPO_CONTEXT_NOT_LOADED,
-        [STATE.ctxPatterns]:
-          sections['patterns'] || ContextError.REPO_CONTEXT_NOT_LOADED,
-        [STATE.ctxErrorHandling]:
-          sections['errorHandling'] || ContextError.REPO_CONTEXT_NOT_LOADED,
-        [STATE.ctxAgentDocs]: sections['agentDocs'] || '',
+        ...buildContextSectionsState(sections),
       },
       runConfig: { maxLlmCalls },
       abortSignal: abort.signal,
     })) {
-      if (event.errorCode || event.errorMessage) {
-        errors.push(
-          `${event.errorCode ?? 'agent_error'}: ${event.errorMessage ?? 'unknown error'}`,
-        );
+      if (isAgentErrorEvent(event)) {
+        errors.push(describeAgentErrorEvent(event));
         // Stop consuming immediately: in @google/adk, an error yielded from a
         // beforeToolCallback leaves stepHadToolCalls=true with an empty-content
         // error event, which prevents LlmAgent.runAsyncImpl from exiting its
@@ -277,23 +371,14 @@ export async function runReview(
 
   // A result published before a late failure is still a complete review.
   if (resultPayload) return resultPayload;
-  // Budget and timeout overruns surface as generic ADK error events; report
-  // them as the non-retryable failures they are, so they are not redelivered.
-  if (timedOut) throw new ReviewTimeoutError(timeoutMs);
-  if (budget.exceeded()) {
-    throw new ReviewBudgetExceededError(
-      `Review exceeded its budget of ${maxLlmCalls} LLM calls.`,
-    );
-  }
-  if (failedSubAgents) throw new SubAgentFailedError(failedSubAgents);
-  if (errors.length > 0) {
-    throw new Error(`Code review agent failed: ${errors.join('; ')}`);
-  }
-  if (!resultPayload) {
-    throw new Error(
-      `Code review agent finished without publishing a result (publishReviewResults was never called) for ${defaultRepo}#${meta.number}.`,
-    );
-  }
-
-  return resultPayload;
+  resolveRunFailure({
+    timedOut,
+    timeoutMs,
+    budget,
+    maxLlmCalls,
+    failedSubAgents,
+    errors,
+    defaultRepo,
+    prNumber: meta.number,
+  });
 }

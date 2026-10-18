@@ -23,6 +23,9 @@ export default defineConfig(
     rules: {
       'simple-import-sort/imports': 'error',
       'simple-import-sort/exports': 'error',
+      // Keep functions small and single-purpose: when logic nests or branches
+      // past this budget, extract it into a named helper instead.
+      complexity: ['error', { max: 5 }],
     },
   },
   {

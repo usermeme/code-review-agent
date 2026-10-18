@@ -58,6 +58,68 @@ export interface BuildContextOptions extends ContextBuildPayload {
   }) => Promise<void> | void;
 }
 
+/** Loads the stored baseline context, but only for incremental updates. */
+async function loadExistingContext(
+  options: BuildContextOptions,
+  payload: ContextBuildPayload,
+  baselineKey: string,
+): Promise<Record<string, string> | null> {
+  if (payload.isIncrementalUpdate && options.contextLoader) {
+    return options.contextLoader(baselineKey);
+  }
+  return null;
+}
+
+/** Cheaper/faster map-step model when provided; falls back to `llm`. */
+function resolveSummaryLlm(options: BuildContextOptions): BaseLlm {
+  return options.summaryLlm ?? options.llm;
+}
+
+/** Outcome when the pipeline found nothing summarizable this run. */
+function resolveNoChunksResult(
+  existingContext: Record<string, string> | null,
+  baselineKey: string,
+): Record<string, string> {
+  if (existingContext) {
+    // Nothing summarizable changed (e.g. only lockfiles/binaries):
+    // keep the existing baseline instead of burning LLM calls.
+    return existingContext;
+  }
+  // Retrying cannot conjure summarizable files — ack-and-record instead
+  // of burning redeliveries on a deterministic failure.
+  throw new NonRetryableTaskError(
+    `No summarizable files found for ${baselineKey}; cannot build a baseline context.`,
+  );
+}
+
+/** Hands the synthesized sections to the caller-provided store hook, if any. */
+async function storeSections(
+  options: BuildContextOptions,
+  payload: ContextBuildPayload,
+  sections: Record<string, string>,
+): Promise<void> {
+  if (options.onStoreContext) {
+    await options.onStoreContext({
+      provider: payload.provider,
+      owner: payload.owner,
+      repo: payload.repo,
+      // Baseline builds are always stored under prNumber 0 (the baseline).
+      prNumber: 0,
+      sections,
+    });
+  }
+}
+
+/** Removes the temporary checkout recorded in state, if one was created. */
+async function removeCheckout(state: PipelineState): Promise<void> {
+  const repoDir = state.get<string>(STATE.repoDir);
+  if (repoDir) {
+    await rm(repoDir, { recursive: true, force: true }).catch(() => {
+      // best-effort cleanup; tmpdir reaping handles the rest
+    });
+  }
+}
+
 /**
  * Builds (or incrementally updates) the baseline repository context.
  *
@@ -80,10 +142,11 @@ export async function buildContext(
   const baselineKey = `${payload.provider}:${payload.owner}:${payload.repo}:0`;
 
   try {
-    let existingContext: Record<string, string> | null = null;
-    if (payload.isIncrementalUpdate && options.contextLoader) {
-      existingContext = await options.contextLoader(baselineKey);
-    }
+    const existingContext = await loadExistingContext(
+      options,
+      payload,
+      baselineKey,
+    );
     if (existingContext) {
       state.set(STATE.existingContext, existingContext);
     }
@@ -92,45 +155,22 @@ export async function buildContext(
 
     const chunks = state.get<unknown[]>(STATE.chunks) ?? [];
     if (chunks.length === 0) {
-      if (existingContext) {
-        // Nothing summarizable changed (e.g. only lockfiles/binaries):
-        // keep the existing baseline instead of burning LLM calls.
-        return existingContext;
-      }
-      // Retrying cannot conjure summarizable files — ack-and-record instead
-      // of burning redeliveries on a deterministic failure.
-      throw new NonRetryableTaskError(
-        `No summarizable files found for ${baselineKey}; cannot build a baseline context.`,
-      );
+      return resolveNoChunksResult(existingContext, baselineKey);
     }
 
     await summarizeChunks(
-      options.summaryLlm ?? options.llm,
+      resolveSummaryLlm(options),
       state,
       options.summaryConcurrency,
     );
     const sections = await synthesizeContext(options.llm, state);
     state.set(STATE.synthesizedSections, sections);
 
-    if (options.onStoreContext) {
-      await options.onStoreContext({
-        provider: payload.provider,
-        owner: payload.owner,
-        repo: payload.repo,
-        // Baseline builds are always stored under prNumber 0 (the baseline).
-        prNumber: 0,
-        sections,
-      });
-    }
+    await storeSections(options, payload, sections);
 
     return sections;
   } finally {
     // Always remove the temporary checkout created in baseline mode.
-    const repoDir = state.get<string>(STATE.repoDir);
-    if (repoDir) {
-      await rm(repoDir, { recursive: true, force: true }).catch(() => {
-        // best-effort cleanup; tmpdir reaping handles the rest
-      });
-    }
+    await removeCheckout(state);
   }
 }

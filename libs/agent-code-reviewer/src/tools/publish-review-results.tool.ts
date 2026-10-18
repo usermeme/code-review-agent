@@ -1,17 +1,38 @@
 import type { ReviewResultPayload } from '@code-review-agent/shared-types';
-import { FunctionTool } from '@google/adk';
+import { type Context, FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
 import { LIMITS } from '../constants/limits.constant.js';
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
 import { findingSchema } from '../schemas/review.schema.js';
-import { clampRangeToDiff, parseNewSideRanges } from './diff-anchors.util.js';
+import {
+  clampRangeToDiff,
+  type LineRange,
+  parseNewSideRanges,
+} from './diff-anchors.util.js';
 
 const SEVERITY_RANK: Record<'critical' | 'major' | 'minor', number> = {
   critical: 0,
   major: 1,
   minor: 2,
 };
+
+type Finding = z.infer<typeof findingSchema>;
+
+type SessionState = Context['state'];
+
+interface PublishTarget {
+  provider: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
+}
+
+interface DroppedFindingCounts {
+  lowConfidence: number;
+  unanchorable: number;
+  overCap: number;
+}
 
 /** Word-boundary truncation so over-long bodies can't bloat PR comments. */
 function truncateFindingBody(body: string): string {
@@ -20,6 +41,145 @@ function truncateFindingBody(body: string): string {
   const lastSpace = cut.lastIndexOf(' ');
   const trimmed = cut.slice(0, lastSpace > 0 ? lastSpace : cut.length);
   return `${trimmed.trimEnd()} …`;
+}
+
+function readPublishTarget(meta: Partial<PrMeta>): PublishTarget {
+  return {
+    provider: meta.provider || 'github',
+    owner: meta.owner || '',
+    repo: meta.repo || '',
+    prNumber: meta.number || 0,
+  };
+}
+
+function readPublishContext(ctx: Context | undefined) {
+  const state = ctx?.state;
+  return {
+    state,
+    target: readPublishTarget(state?.get<PrMeta>(STATE.prMeta) ?? {}),
+  };
+}
+
+function readReviewDiff(state: SessionState | undefined): string {
+  return state?.get<string>(STATE.diff) ?? '';
+}
+
+function assertPublishableTarget(target: PublishTarget): void {
+  if (!target.owner || !target.repo || !target.prNumber) {
+    throw new Error(
+      'Repository owner, name, and PR number are required to publish review results.',
+    );
+  }
+}
+
+function filterHighConfidence(findings: Finding[]): Finding[] {
+  return findings.filter((f) => f.confidence >= LIMITS.confidenceThreshold);
+}
+
+function readFindingEndLine(f: Finding): number {
+  return f.endLine || f.startLine || 1;
+}
+
+function readFindingStartLine(f: Finding): number {
+  return Math.min(f.startLine || readFindingEndLine(f), readFindingEndLine(f));
+}
+
+function clampFindingToHunks(
+  ranges: Map<string, LineRange[]>,
+  f: Finding,
+): Finding[] {
+  const endLine = readFindingEndLine(f);
+  const startLine = readFindingStartLine(f);
+  const clamped = clampRangeToDiff(ranges, f.path, startLine, endLine);
+  if (!clamped) return [];
+  return [
+    {
+      ...f,
+      startLine: clamped.start,
+      endLine: clamped.end,
+    },
+  ];
+}
+
+function clampToDiffHunks(findings: Finding[], diff: string): Finding[] {
+  if (!diff.trim()) {
+    return findings;
+  }
+  const ranges = parseNewSideRanges(diff);
+  return findings.flatMap((f) => clampFindingToHunks(ranges, f));
+}
+
+function rankAndCapFindings(findings: Finding[]): Finding[] {
+  const ranked = [...findings].sort(
+    (a, b) =>
+      SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
+      b.confidence - a.confidence,
+  );
+  return ranked.slice(0, LIMITS.maxFindings);
+}
+
+function selectPublishableFindings(
+  findings: Finding[],
+  diff: string,
+): { kept: Finding[]; dropped: DroppedFindingCounts } {
+  // Guardrails enforced in code, not just in the prompt: confidence is
+  // required by the schema (cannot be bypassed by omission), and the
+  // findings cap is applied here after severity/confidence ranking.
+  const highConfidence = filterHighConfidence(findings);
+
+  // Anchor validation: GitHub rejects inline comments on lines outside
+  // the diff, so drop un-anchorable findings here instead of paying for
+  // a failing API call per comment (and reporting it after the fact).
+  const anchorable = clampToDiffHunks(highConfidence, diff);
+  const kept = rankAndCapFindings(anchorable);
+
+  return {
+    kept,
+    dropped: {
+      lowConfidence: findings.length - highConfidence.length,
+      unanchorable: highConfidence.length - anchorable.length,
+      overCap: anchorable.length - kept.length,
+    },
+  };
+}
+
+function buildReviewComment(f: Finding) {
+  // Findings point at the problem; fix code is deliberately not part
+  // of the contract — teams never applied the ```suggestion blocks and
+  // they were the largest per-comment token cost.
+  const commentBody = `### [${f.severity.toUpperCase()}] ${f.title}\n\n${truncateFindingBody(f.body)}`;
+  const endLine = readFindingEndLine(f);
+  const startLine = readFindingStartLine(f);
+  return {
+    path: f.path,
+    // NEW-side line numbers; the provider adapter maps these to
+    // start_line/line so multi-line findings anchor to their range.
+    startPosition: startLine === endLine ? undefined : startLine,
+    position: endLine,
+    body: commentBody,
+  };
+}
+
+function describeDroppedFindings(dropped: DroppedFindingCounts): string {
+  const droppedNotes = [
+    dropped.lowConfidence > 0
+      ? `dropped ${dropped.lowConfidence} low-confidence`
+      : null,
+    dropped.unanchorable > 0
+      ? `dropped ${dropped.unanchorable} unanchorable (start/end line outside the diff hunks of that file)`
+      : null,
+    dropped.overCap > 0 ? `capped ${dropped.overCap} over-limit` : null,
+  ]
+    .filter(Boolean)
+    .join(', ');
+  return droppedNotes ? ` (${droppedNotes})` : '';
+}
+
+function buildPublishAcknowledgement(
+  commentCount: number,
+  dropped: DroppedFindingCounts,
+): string {
+  return `Successfully recorded ${commentCount} review findings and summary.${describeDroppedFindings(dropped)}`;
 }
 
 export interface PublishReviewResultsToolDependencies {
@@ -52,106 +212,29 @@ export function createPublishReviewResultsTool(
         .describe('List of approved review findings to post inline'),
     }),
     execute: async (input, ctx) => {
-      const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-
-      const provider = meta?.provider || 'github';
-      const owner = meta?.owner || '';
-      const repo = meta?.repo || '';
-      const prNumber = meta?.number || 0;
-
-      if (!owner || !repo || !prNumber) {
-        throw new Error(
-          'Repository owner, name, and PR number are required to publish review results.',
-        );
-      }
-
-      // Guardrails enforced in code, not just in the prompt: confidence is
-      // required by the schema (cannot be bypassed by omission), and the
-      // findings cap is applied here after severity/confidence ranking.
-      const highConfidence = input.findings.filter(
-        (f) => f.confidence >= LIMITS.confidenceThreshold,
-      );
-      const droppedLowConfidence =
-        input.findings.length - highConfidence.length;
-
-      // Anchor validation: GitHub rejects inline comments on lines outside
-      // the diff, so drop un-anchorable findings here instead of paying for
-      // a failing API call per comment (and reporting it after the fact).
-      const diff = ctx?.state?.get<string>(STATE.diff) ?? '';
-      let anchorable = highConfidence;
-      let droppedUnanchorable = 0;
-      if (diff.trim()) {
-        const ranges = parseNewSideRanges(diff);
-        anchorable = highConfidence.flatMap((f) => {
-          const endLine = f.endLine || f.startLine || 1;
-          const startLine = Math.min(f.startLine || endLine, endLine);
-          const clamped = clampRangeToDiff(ranges, f.path, startLine, endLine);
-          if (!clamped) return [];
-          return [
-            {
-              ...f,
-              startLine: clamped.start,
-              endLine: clamped.end,
-            },
-          ];
-        });
-        droppedUnanchorable = highConfidence.length - anchorable.length;
-      }
-
-      const ranked = [...anchorable].sort(
-        (a, b) =>
-          SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
-          b.confidence - a.confidence,
-      );
-      const kept = ranked.slice(0, LIMITS.maxFindings);
-      const droppedOverCap = ranked.length - kept.length;
-
-      const comments = kept.map((f) => {
-        // Findings point at the problem; fix code is deliberately not part
-        // of the contract — teams never applied the ```suggestion blocks and
-        // they were the largest per-comment token cost.
-        const commentBody = `### [${f.severity.toUpperCase()}] ${f.title}\n\n${truncateFindingBody(f.body)}`;
-        const endLine = f.endLine || f.startLine || 1;
-        const startLine = Math.min(f.startLine || endLine, endLine);
-        return {
-          path: f.path,
-          // NEW-side line numbers; the provider adapter maps these to
-          // start_line/line so multi-line findings anchor to their range.
-          startPosition: startLine === endLine ? undefined : startLine,
-          position: endLine,
-          body: commentBody,
-        };
-      });
+      const { state, target } = readPublishContext(ctx);
+      assertPublishableTarget(target);
+      const diff = readReviewDiff(state);
+      const { kept, dropped } = selectPublishableFindings(input.findings, diff);
+      const comments = kept.map(buildReviewComment);
 
       const payload: ReviewResultPayload = {
-        provider,
-        owner,
-        repo,
-        prNumber,
+        provider: target.provider,
+        owner: target.owner,
+        repo: target.repo,
+        prNumber: target.prNumber,
         comments,
         summary: input.summary,
         ticketCoverage: input.ticketCoverage,
       };
 
-      ctx?.state?.set(STATE.reviewResult, payload);
+      state?.set(STATE.reviewResult, payload);
 
       if (deps.onPublishResult) {
         await deps.onPublishResult(payload);
       }
 
-      const droppedNotes = [
-        droppedLowConfidence > 0
-          ? `dropped ${droppedLowConfidence} low-confidence`
-          : null,
-        droppedUnanchorable > 0
-          ? `dropped ${droppedUnanchorable} unanchorable (start/end line outside the diff hunks of that file)`
-          : null,
-        droppedOverCap > 0 ? `capped ${droppedOverCap} over-limit` : null,
-      ]
-        .filter(Boolean)
-        .join(', ');
-
-      return `Successfully recorded ${comments.length} review findings and summary.${droppedNotes ? ` (${droppedNotes})` : ''}`;
+      return buildPublishAcknowledgement(comments.length, dropped);
     },
   });
 }

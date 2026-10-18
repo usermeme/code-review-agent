@@ -138,6 +138,49 @@ export function acceptFileContent(content: string): string | null {
   return truncateLongFile(content);
 }
 
+/**
+ * True when a repo-relative path is filtered out: either by the shared
+ * ignore lists or by the caller's extra glob patterns.
+ */
+function shouldSkipPath(rel: string, extraIgnoreRegexes: RegExp[]): boolean {
+  return (
+    isIgnoredPath(rel) || extraIgnoreRegexes.some((regex) => regex.test(rel))
+  );
+}
+
+/**
+ * Stat/size/read checks for a single file, followed by the shared
+ * content-level filters. Returns the accepted content, or null to skip.
+ */
+async function readAcceptedContent(full: string): Promise<string | null> {
+  const info = await stat(full);
+  if (info.size > MAX_FILE_BYTES) return null;
+  let content: string;
+  try {
+    content = await readFile(full, 'utf8');
+  } catch {
+    return null;
+  }
+  return acceptFileContent(content);
+}
+
+/** Reads one non-directory entry and appends it to `files` unless filtered out. */
+async function collectFileEntry(
+  full: string,
+  rel: string,
+  extraIgnoreRegexes: RegExp[],
+  files: RepoFile[],
+): Promise<void> {
+  if (shouldSkipPath(rel, extraIgnoreRegexes)) return;
+  const accepted = await readAcceptedContent(full);
+  if (accepted === null) return;
+  files.push({
+    path: rel,
+    content: accepted,
+    tokens: estimateTokens(accepted),
+  });
+}
+
 export async function collectFiles(
   rootDir: string,
   extraIgnores: string[] = [],
@@ -155,23 +198,7 @@ export async function collectFiles(
         continue;
       }
       if (!entry.isFile()) continue;
-      if (isIgnoredPath(rel)) continue;
-      if (extraIgnoreRegexes.some((regex) => regex.test(rel))) continue;
-      const info = await stat(full);
-      if (info.size > MAX_FILE_BYTES) continue;
-      let content: string;
-      try {
-        content = await readFile(full, 'utf8');
-      } catch {
-        continue;
-      }
-      const accepted = acceptFileContent(content);
-      if (accepted === null) continue;
-      files.push({
-        path: rel,
-        content: accepted,
-        tokens: estimateTokens(accepted),
-      });
+      await collectFileEntry(full, rel, extraIgnoreRegexes, files);
     }
   }
 
@@ -186,6 +213,107 @@ function groupKey(path: string, depth: number): string {
   return segments.slice(0, Math.min(depth, segments.length - 1)).join('/');
 }
 
+/** Total tokens per top-level directory group. */
+function computeTopLevelTokens(files: RepoFile[]): Map<string, number> {
+  const topLevelTokens = new Map<string, number>();
+  for (const file of files) {
+    const topLevel = groupKey(file.path, 1);
+    topLevelTokens.set(
+      topLevel,
+      (topLevelTokens.get(topLevel) ?? 0) + file.tokens,
+    );
+  }
+  return topLevelTokens;
+}
+
+/** Group key for one file: its top-level dir, or one level deeper for oversized groups. */
+function resolveGroupKey(
+  file: RepoFile,
+  topLevelTokens: Map<string, number>,
+  maxChunkTokens: number,
+): string {
+  const topLevel = groupKey(file.path, 1);
+  return (topLevelTokens.get(topLevel) ?? 0) > maxChunkTokens
+    ? groupKey(file.path, 2)
+    : topLevel;
+}
+
+function groupFilesByDirectory(
+  files: RepoFile[],
+  maxChunkTokens: number,
+): Map<string, RepoFile[]> {
+  const topLevelTokens = computeTopLevelTokens(files);
+
+  const groups = new Map<string, RepoFile[]>();
+  for (const file of files) {
+    const key = resolveGroupKey(file, topLevelTokens, maxChunkTokens);
+    const bucket = groups.get(key) ?? [];
+    bucket.push(file);
+    groups.set(key, bucket);
+  }
+  return groups;
+}
+
+function sortedGroupEntries(
+  groups: Map<string, RepoFile[]>,
+): Array<[string, RepoFile[]]> {
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
+/** Mutable packing state shared across the greedy packing loop. */
+interface ChunkPacking {
+  chunks: Chunk[];
+  overflow: string[];
+  current: Chunk | null;
+}
+
+/** True when the open chunk exists and still has room for `fileTokens`. */
+function canExtendChunk(
+  current: Chunk | null,
+  fileTokens: number,
+  maxChunkTokens: number,
+): current is Chunk {
+  return current !== null && current.tokens + fileTokens <= maxChunkTokens;
+}
+
+/** Greedily packs one file into the open chunk, a new chunk, or the overflow list. */
+function packFile(
+  packing: ChunkPacking,
+  label: string,
+  file: RepoFile,
+  options: { maxChunkTokens: number; maxChunks: number },
+): void {
+  const fileTokens = Math.min(file.tokens, options.maxChunkTokens);
+  const current = packing.current;
+  if (
+    packing.chunks.length >= options.maxChunks &&
+    !canExtendChunk(current, fileTokens, options.maxChunkTokens)
+  ) {
+    packing.overflow.push(file.path);
+    return;
+  }
+  if (canExtendChunk(current, fileTokens, options.maxChunkTokens)) {
+    current.files.push(file);
+    current.tokens += fileTokens;
+    return;
+  }
+  const created: Chunk = { label, files: [], tokens: 0 };
+  packing.current = created;
+  packing.chunks.push(created);
+  created.files.push(file);
+  created.tokens += fileTokens;
+}
+
+/** Trims chunks past maxChunks, moving their files to the overflow list. */
+function capPackedChunks(packing: ChunkPacking, maxChunks: number): void {
+  if (packing.chunks.length > maxChunks) {
+    for (const chunk of packing.chunks.slice(maxChunks)) {
+      packing.overflow.push(...chunk.files.map((f) => f.path));
+    }
+    packing.chunks.length = maxChunks;
+  }
+}
+
 /**
  * Greedy directory-based packing: files grouped by top-level directory, groups
  * larger than the budget re-grouped one level deeper, then packed into chunks
@@ -196,60 +324,18 @@ export function buildChunks(
   files: RepoFile[],
   options: { maxChunkTokens: number; maxChunks: number },
 ): { chunks: Chunk[]; overflow: string[] } {
-  const topLevelTokens = new Map<string, number>();
-  for (const file of files) {
-    const topLevel = groupKey(file.path, 1);
-    topLevelTokens.set(
-      topLevel,
-      (topLevelTokens.get(topLevel) ?? 0) + file.tokens,
-    );
-  }
+  const groups = groupFilesByDirectory(files, options.maxChunkTokens);
+  const packing: ChunkPacking = { chunks: [], overflow: [], current: null };
 
-  const groups = new Map<string, RepoFile[]>();
-  for (const file of files) {
-    const topLevel = groupKey(file.path, 1);
-    const key =
-      (topLevelTokens.get(topLevel) ?? 0) > options.maxChunkTokens
-        ? groupKey(file.path, 2)
-        : topLevel;
-    const bucket = groups.get(key) ?? [];
-    bucket.push(file);
-    groups.set(key, bucket);
-  }
-
-  const chunks: Chunk[] = [];
-  const overflow: string[] = [];
-  let current: Chunk | null = null;
-
-  for (const [label, groupFiles] of [...groups.entries()].sort(([a], [b]) =>
-    a.localeCompare(b),
-  )) {
+  for (const [label, groupFiles] of sortedGroupEntries(groups)) {
     for (const file of groupFiles) {
-      const fileTokens = Math.min(file.tokens, options.maxChunkTokens);
-      if (
-        chunks.length >= options.maxChunks &&
-        (!current || current.tokens + fileTokens > options.maxChunkTokens)
-      ) {
-        overflow.push(file.path);
-        continue;
-      }
-      if (!current || current.tokens + fileTokens > options.maxChunkTokens) {
-        current = { label, files: [], tokens: 0 };
-        chunks.push(current);
-      }
-      current.files.push(file);
-      current.tokens += fileTokens;
+      packFile(packing, label, file, options);
     }
   }
 
-  if (chunks.length > options.maxChunks) {
-    for (const chunk of chunks.slice(options.maxChunks)) {
-      overflow.push(...chunk.files.map((f) => f.path));
-    }
-    chunks.length = options.maxChunks;
-  }
+  capPackedChunks(packing, options.maxChunks);
 
-  return { chunks, overflow };
+  return { chunks: packing.chunks, overflow: packing.overflow };
 }
 
 export function renderChunk(chunk: Chunk): string {

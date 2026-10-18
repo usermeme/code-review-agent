@@ -26,16 +26,14 @@ export function parseRepoCoordinates(cloneUrl?: string): {
 }
 
 /**
- * Downloads and extracts a repository archive via the Git adapter.
- * Uses streaming tar extraction in Node.js — zero git CLI or direct provider dependencies required.
+ * Resolves the owner/repo coordinates from the explicit params, falling back
+ * to parsing the clone URL when either is missing.
  */
-export async function downloadRepoArchive(params: {
+function resolveOwnerAndRepo(params: {
   cloneUrl?: string;
-  ref?: string;
   owner?: string;
   repo?: string;
-  gitAdapter: GitAdapterContract;
-}): Promise<RepoSnapshot> {
+}): { owner: string; repo: string } {
   let { owner, repo } = params;
   if (!owner || !repo) {
     const coords = parseRepoCoordinates(params.cloneUrl);
@@ -49,6 +47,49 @@ export async function downloadRepoArchive(params: {
     );
   }
 
+  return { owner, repo };
+}
+
+/** True for WHATWG web streams (duck-typed), as opposed to Node.js streams. */
+function isWebStream(body: unknown): boolean {
+  return (
+    typeof body === 'object' &&
+    body !== null &&
+    'getReader' in body &&
+    typeof (body as { getReader?: unknown }).getReader === 'function'
+  );
+}
+
+/** Normalizes an adapter response body into a Node.js readable stream. */
+function toNodeStream(body: unknown): NodeJS.ReadableStream {
+  return isWebStream(body)
+    ? Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0])
+    : (body as NodeJS.ReadableStream);
+}
+
+/** Best-effort commit identity: adapter headers first, then the requested ref. */
+function resolveHeadSha(headers: Headers, ref: string): string {
+  return (
+    headers.get('x-commit-sha') ||
+    headers.get('x-github-commit-sha') ||
+    headers.get('etag')?.replace(/"/g, '') ||
+    ref
+  );
+}
+
+/**
+ * Downloads and extracts a repository archive via the Git adapter.
+ * Uses streaming tar extraction in Node.js — zero git CLI or direct provider dependencies required.
+ */
+export async function downloadRepoArchive(params: {
+  cloneUrl?: string;
+  ref?: string;
+  owner?: string;
+  repo?: string;
+  gitAdapter: GitAdapterContract;
+}): Promise<RepoSnapshot> {
+  const { owner, repo } = resolveOwnerAndRepo(params);
+
   const ref = params.ref || 'main';
   const dir = await mkdtemp(join(tmpdir(), 'repoctx-'));
 
@@ -61,18 +102,7 @@ export async function downloadRepoArchive(params: {
       );
     }
 
-    const body = response.body;
-    const isWebStream =
-      typeof body === 'object' &&
-      body !== null &&
-      'getReader' in body &&
-      typeof (body as { getReader?: unknown }).getReader === 'function';
-
-    const stream = isWebStream
-      ? Readable.fromWeb(
-          body as unknown as Parameters<typeof Readable.fromWeb>[0],
-        )
-      : (body as unknown as NodeJS.ReadableStream);
+    const stream = toNodeStream(response.body);
 
     // Extract the tar.gz stream directly into dir, stripping the top-level directory prefix
     await pipeline(
@@ -83,11 +113,7 @@ export async function downloadRepoArchive(params: {
       }),
     );
 
-    const headSha =
-      response.headers.get('x-commit-sha') ||
-      response.headers.get('x-github-commit-sha') ||
-      response.headers.get('etag')?.replace(/"/g, '') ||
-      ref;
+    const headSha = resolveHeadSha(response.headers, ref);
 
     return {
       dir,
