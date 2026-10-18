@@ -12,12 +12,20 @@ The repository is organized as an **Nx Monorepo**:
 
 ```
 apps/
-  gateway/                # Fastify gateway receiving git webhooks and orchestrating pipelines
-  gateway-e2e/            # Cucumber / BDD end-to-end test suite for the gateway
-  agent-context-builder/  # Google ADK agent preparing codebase baseline and incremental context
-  agent-code-reviewer/    # Google ADK agent executing multi-agent code analysis and posting reviews
+  github-ingress/         # Fastify webhook receiver verifying HMAC and publishing PR events
+  github-ingress-e2e/     # Cucumber / BDD end-to-end test suite for github-ingress
+  github-adapter/         # Fastify GitHub App adapter for repo data & posting PR reviews
+  github-adapter-e2e/     # Cucumber / BDD end-to-end test suite for github-adapter
+  core/                   # Fastify orchestrator managing Firestore state and ADK agents
+  core-e2e/               # Cucumber / BDD end-to-end test suite for core
 libs/
-  shared-types/           # Shared TypeScript interfaces (payload contracts, PR state, etc.)
+  agent-context-builder/  # Google ADK agent preparing codebase baseline and incremental context
+  agent-code-reviewer/    # Google ADK agent executing multi-agent code analysis
+  endpoints/              # Shared endpoint definitions and URL path interpolation
+  env/                    # Zod-based environment configuration service
+  llm/                    # LLM provider factory (Gemini & mock)
+  pubsub/                 # Google Cloud Pub/Sub push envelope parser
+  shared-types/           # Shared TypeScript interfaces and error types
 ```
 
 ---
@@ -67,23 +75,23 @@ We prefer using Nx commands via `pnpm`:
 
 | Command              | Description                                               |
 | -------------------- | --------------------------------------------------------- |
-| `pnpm run typecheck` | Run TypeScript compiler typecheck across all 5 projects   |
+| `pnpm run typecheck` | Run TypeScript compiler typecheck across all projects     |
 | `pnpm run lint`      | Run ESLint across all projects                            |
-| `pnpm run test`      | Run Vitest unit tests for both agents                     |
-| `pnpm run e2e`       | Run Cucumber BDD end-to-end tests for Gateway             |
+| `pnpm run test`      | Run Vitest unit tests across apps and libraries           |
+| `pnpm run e2e`       | Run Cucumber BDD end-to-end tests across all E2E suites   |
 | `pnpm run build`     | Build production bundles for all 3 apps via `@nx/esbuild` |
 
 ### Running a Specific App or Library
 
 ```bash
 # Typecheck a single project
-pnpm nx typecheck gateway
+pnpm nx typecheck core
 
 # Run unit tests for a single project
 pnpm nx test agent-code-reviewer
 
 # Build a single project
-pnpm nx build agent-context-builder --prod
+pnpm nx build github-adapter --prod
 ```
 
 ---
@@ -92,17 +100,17 @@ pnpm nx build agent-context-builder --prod
 
 We enforce high test coverage and regression testing across the monorepo:
 
-### 1. BDD E2E Testing (`gateway-e2e`)
+### 1. BDD E2E Testing (`*-e2e`)
 
-All gateway routing, webhook signature verification, Firestore tracking, Pub/Sub ingestion, and Git adapter behavior are tested with **Cucumber** and Gherkin features located in `apps/gateway-e2e/src/features/`.
+All HTTP routing, webhook signature verification, Firestore tracking, Pub/Sub push ingestion, and GitHub App adapter behavior are tested with **Cucumber** and Gherkin features located in `apps/*-e2e/src/features/`.
 
-- When adding or changing gateway endpoints, write a `.feature` scenario first.
-- Step definitions are located in `apps/gateway-e2e/src/step-definitions/`.
-- Test doubles (in-memory database, mock Octokit, mock Pub/Sub) reside in `apps/gateway-e2e/src/support/doubles/`.
+- When adding or changing service endpoints, write a `.feature` scenario first.
+- Step definitions are located in `apps/*-e2e/src/step-definitions/`.
+- Test doubles (in-memory database, mock Octokit/GitHub App, mock Pub/Sub) reside in `apps/*-e2e/src/support/doubles/`.
 
 ### 2. Unit Testing (`vitest`)
 
-Agent tools and services are tested using **Vitest**:
+Services, routes, and agent tools are tested using **Vitest**:
 
 - Unit test files are colocated with source code using the `.spec.ts` naming convention.
 - Ensure all mocked calls clean up properly (`vi.restoreAllMocks()`).
@@ -123,9 +131,9 @@ docker compose up --build
 
 The stack exposes:
 
-- **Gateway**: `http://localhost:3000` (`/healthz` health check)
-- **Agent Context Builder**: `http://localhost:8001`
-- **Agent Code Reviewer**: `http://localhost:8002`
+- **GitHub Ingress**: `http://localhost:3000` (`/healthz` health check)
+- **Core Orchestrator**: `http://localhost:3001` (`/healthz` health check)
+- **GitHub Adapter**: `http://localhost:3002` (`/healthz` health check)
 - **Firestore Emulator**: `http://localhost:8081`
 - **Pub/Sub Emulator**: `http://localhost:8085`
 

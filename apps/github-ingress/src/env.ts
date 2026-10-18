@@ -9,7 +9,7 @@ export const ingressEnvSchema = z.object({
   GOOGLE_CLOUD_PROJECT: z.string().optional(),
 });
 
-export type IngressEnvSchema = typeof ingressEnvSchema;
+type IngressEnvSchema = typeof ingressEnvSchema;
 export type IngressEnvService = EnvService<IngressEnvSchema>;
 
 export const envService: IngressEnvService = new EnvService(ingressEnvSchema);

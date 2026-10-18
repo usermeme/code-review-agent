@@ -164,7 +164,6 @@ export async function buildContext(
       options.summaryConcurrency,
     );
     const sections = await synthesizeContext(options.llm, state);
-    state.set(STATE.synthesizedSections, sections);
 
     await storeSections(options, payload, sections);
 

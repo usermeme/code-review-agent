@@ -6,11 +6,13 @@ import {
   type SingleBeforeModelCallback,
   type SingleBeforeToolCallback,
 } from '@google/adk';
-import { z } from 'zod';
 
 import { ContextError } from '../constants/errors.constant.js';
 import { STATE } from '../constants/state-keys.constant.js';
-import { findingsReportSchema } from '../schemas/review.schema.js';
+import {
+  findingsReportSchema,
+  reviewerFocusInputSchema,
+} from '../schemas/review.schema.js';
 import type { ReviewSkill } from '../skills/review.skill.js';
 import { annotateNewSideLines } from '../tools/diff-anchors.util.js';
 import {
@@ -111,11 +113,7 @@ export function createProblemsAgent({
       'Deep defect hunt: logic bugs, race conditions, performance, data leaks, security, error handling.',
     model: llm,
     instruction: instruction(skill),
-    inputSchema: z.object({
-      focus: z
-        .string()
-        .describe('One-paragraph hint on what to pay special attention to'),
-    }),
+    inputSchema: reviewerFocusInputSchema,
     outputSchema: findingsReportSchema,
     includeContents: 'none',
     disallowTransferToParent: true,

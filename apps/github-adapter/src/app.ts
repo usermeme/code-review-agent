@@ -2,8 +2,8 @@ import Fastify, { FastifyInstance, FastifyServerOptions } from 'fastify';
 
 import { providerRoutes } from './modules/api/provider.routes.js';
 import { GithubService } from './modules/github/github.service.js';
-import { healthModule } from './modules/health/health.module.js';
-import { pubsubModule } from './modules/pubsub/pubsub.module.js';
+import { healthRoutes } from './modules/health/health.routes.js';
+import { reviewResultsPushRoutes } from './modules/pubsub/review-results-push.routes.js';
 
 export interface BuildServerOptions {
   githubService: GithubService;
@@ -17,17 +17,17 @@ export async function buildServer(
 
   const { githubService } = options;
 
-  // 1. Health check module
-  await server.register(healthModule);
+  // 1. Health check routes
+  await server.register(healthRoutes);
 
-  // 2. Provider REST API module for on-demand tools (diff, search, files)
+  // 2. Provider REST API routes for on-demand tools (diff, search, files)
   await server.register(providerRoutes, {
     prefix: '/api/v1',
     githubService,
   });
 
-  // 3. Pub/Sub Review Results Push route module
-  await server.register(pubsubModule, {
+  // 3. Pub/Sub Review Results Push route
+  await server.register(reviewResultsPushRoutes, {
     prefix: '/api/v1/pubsub',
     githubService,
   });

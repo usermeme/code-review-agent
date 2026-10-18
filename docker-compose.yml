@@ -26,7 +26,8 @@ services:
     environment:
       - PORT=8080
       - HOST=0.0.0.0
-      - GITHUB_TOKEN=dummy-token
+      - GITHUB_APP_ID=${GITHUB_APP_ID:-123456}
+      - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY:------BEGIN RSA PRIVATE KEY-----\ndummy\n-----END RSA PRIVATE KEY-----}
 
   core:
     build:

@@ -30,10 +30,11 @@ async function bootstrap() {
   const gitAdapterClient = new GitAdapterClient(
     envService.get('GIT_ADAPTER_URL'),
   );
-  const llm = new LlmFactory(envService.data).createLlm();
-  const summaryModel = envService.data.CONTEXT_SUMMARY_MODEL;
+  const llmFactory = new LlmFactory(envService.data);
+  const llm = llmFactory.createLlm();
+  const summaryModel = envService.get('CONTEXT_SUMMARY_MODEL');
   const summaryLlm = summaryModel
-    ? new LlmFactory(envService.data).createLlm({
+    ? llmFactory.createLlm({
         modelOverride: summaryModel,
       })
     : undefined;

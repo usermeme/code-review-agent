@@ -3,30 +3,15 @@ import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
+import {
+  readPinnedCoordinates,
+  type RepoToolDependencies,
+} from './repo-tool-context.util.js';
 
-export interface SearchRepositoryCodeToolDependencies {
-  gitAdapter?: GitAdapterContract;
-  defaultOwner?: string;
-  defaultRepo?: string;
-}
-
-function readPinnedCoordinate(
-  stateValue: string | undefined,
-  fallback: string | undefined,
-): string {
-  return stateValue || fallback || '';
-}
-
-// Search scope is fixed to the PR's repository (state/deps only).
-function readSearchCoordinates(
-  meta: PrMeta | undefined,
-  deps: SearchRepositoryCodeToolDependencies,
-): { owner: string; repo: string } {
-  return {
-    owner: readPinnedCoordinate(meta?.owner, deps.defaultOwner),
-    repo: readPinnedCoordinate(meta?.repo, deps.defaultRepo),
-  };
-}
+export type SearchRepositoryCodeToolDependencies = Omit<
+  RepoToolDependencies,
+  'cache'
+>;
 
 function emptySearchResult(message: string) {
   return { totalCount: 0, items: [], message };
@@ -86,7 +71,7 @@ export function createSearchRepositoryCodeTool(
     }),
     execute: async (input, ctx) => {
       const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-      const { owner, repo } = readSearchCoordinates(meta, deps);
+      const { owner, repo } = readPinnedCoordinates(meta, deps);
 
       const validation = validateSearchRequest(deps, owner, repo);
       if ('message' in validation) {

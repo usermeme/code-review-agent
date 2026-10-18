@@ -8,15 +8,10 @@ export class PrRepository {
   constructor(private db: DatabaseService) {}
 
   async updatePRStatus(prKey: string, state: Partial<PRState>): Promise<void> {
-    await this.db.setDocument<PRState>(
-      this.collection,
-      prKey,
-      {
-        ...state,
-        updatedAt: new Date(),
-      },
-      true,
-    );
+    await this.db.setDocument<PRState>(this.collection, prKey, {
+      ...state,
+      updatedAt: new Date(),
+    });
   }
 
   async getPRStatus(prKey: string): Promise<PRState | null> {

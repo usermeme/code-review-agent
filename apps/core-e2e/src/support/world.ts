@@ -1,6 +1,5 @@
 import { EnvService } from '@code-review-agent/env';
 import { LlmFactory } from '@code-review-agent/llm';
-import { ReviewResultPayload } from '@code-review-agent/shared-types';
 import { IWorldOptions, setWorldConstructor, World } from '@cucumber/cucumber';
 import { PubSub } from '@google-cloud/pubsub';
 import { FastifyInstance, LightMyRequestResponse } from 'fastify';
@@ -11,8 +10,8 @@ import { GitAdapterClient } from '../../../core/src/modules/adapter/git-adapter.
 import { ContextRepository } from '../../../core/src/modules/database/repositories/context.repository.js';
 import { DeliveryRepository } from '../../../core/src/modules/database/repositories/delivery.repository.js';
 import { PrRepository } from '../../../core/src/modules/database/repositories/pr.repository.js';
+import { InMemoryDatabaseService } from '../../../core/src/modules/database/testing/in-memory-database.service.js';
 import { EventOrchestratorService } from '../../../core/src/services/event-orchestrator.service.js';
-import { InMemoryDatabaseService } from './doubles/in-memory-db.service.js';
 import { MockPubSub } from './doubles/mock-pubsub.js';
 
 export class CoreWorld extends World {
@@ -33,13 +32,6 @@ export class CoreWorld extends World {
     this.pubsub = new MockPubSub();
     this.prRepository = new PrRepository(this.db);
     this.contextRepository = new ContextRepository(this.db);
-  }
-
-  get postedReviews(): ReviewResultPayload[] {
-    const topic = this.envService.get('REVIEW_RESULTS_TOPIC');
-    return this.pubsub
-      .getMessagesByTopic(topic)
-      .map((m) => m.json as unknown as ReviewResultPayload);
   }
 
   async initApp(): Promise<void> {

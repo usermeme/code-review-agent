@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 
-import { DataTable, Then, When } from '@cucumber/cucumber';
+import { DataTable, Given, Then, When } from '@cucumber/cucumber';
 
 import { GithubAdapterWorld } from '../support/world.js';
+
+Given(
+  'the GitHub App is not installed on {string}',
+  function (this: GithubAdapterWorld, repoFullName: string) {
+    this.githubApp.uninstalledRepos.add(repoFullName);
+  },
+);
 
 When(
   'PubSub pushes review results for {string} PR #{int} with summary {string} and comments:',
@@ -52,6 +59,31 @@ Then(
   function (this: GithubAdapterWorld) {
     assert(this.lastResponse, 'Expected a response from push request');
     assert.equal(this.lastResponse.statusCode, 200);
+  },
+);
+
+Then(
+  'the GitHub App installation is resolved for {string}',
+  function (this: GithubAdapterWorld, repoFullName: string) {
+    const [owner, repo] = repoFullName.split('/');
+    const resolved = this.githubApp.requestedInstallations.some(
+      (req) => req.owner === owner && req.repo === repo,
+    );
+    assert(
+      resolved,
+      `Expected GitHub App installation lookup for ${repoFullName}`,
+    );
+  },
+);
+
+Then(
+  'the push response indicates non-retryable error {string}',
+  function (this: GithubAdapterWorld, expectedError: string) {
+    assert(this.lastResponse, 'Expected a response from push request');
+    const body = this.lastResponse.json();
+    assert.equal(body.success, false);
+    assert.equal(body.reason, 'Non-retryable failure');
+    assert.equal(body.error, expectedError);
   },
 );
 

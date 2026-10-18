@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   annotateNewSideLines,
   clampRangeToDiff,
-  isLineInDiff,
   parseNewSideRanges,
 } from './diff-anchors.util.js';
 
@@ -48,7 +47,7 @@ describe('parseNewSideRanges', () => {
   it('skips zero-count new-side hunks (pure deletions)', () => {
     // The +21,0 hunk contributes no anchorable lines.
     expect(ranges.get('src/app.ts')).toHaveLength(1);
-    expect(isLineInDiff(ranges, 'src/app.ts', 21)).toBe(false);
+    expect(clampRangeToDiff(ranges, 'src/app.ts', 21, 21)).toBeNull();
   });
 
   it('omits deleted files entirely', () => {
@@ -62,27 +61,6 @@ describe('parseNewSideRanges', () => {
 
   it('defaults a count-less hunk header to a single line', () => {
     expect(ranges.get('single.ts')).toEqual([{ start: 8, end: 8 }]);
-  });
-});
-
-describe('isLineInDiff', () => {
-  const ranges = parseNewSideRanges(DIFF);
-
-  it('accepts lines inside and on the boundaries of a hunk', () => {
-    expect(isLineInDiff(ranges, 'src/app.ts', 1)).toBe(true);
-    expect(isLineInDiff(ranges, 'src/app.ts', 3)).toBe(true);
-    expect(isLineInDiff(ranges, 'src/app.ts', 5)).toBe(true);
-  });
-
-  it('rejects lines outside every hunk of the file', () => {
-    expect(isLineInDiff(ranges, 'src/app.ts', 6)).toBe(false);
-    expect(isLineInDiff(ranges, 'src/app.ts', 0)).toBe(false);
-    expect(isLineInDiff(ranges, 'src/app.ts', 300)).toBe(false);
-  });
-
-  it('rejects unknown and deleted files', () => {
-    expect(isLineInDiff(ranges, 'src/unknown.ts', 1)).toBe(false);
-    expect(isLineInDiff(ranges, 'deleted.ts', 1)).toBe(false);
   });
 });
 

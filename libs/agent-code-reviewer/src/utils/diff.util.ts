@@ -10,16 +10,14 @@ import { LIMITS } from '../constants/limits.constant.js';
  * preamble so the reviewers know what they did not see.
  */
 
-export const DEFAULT_MAX_DIFF_CHARS = LIMITS.maxDiffChars;
-export const DEFAULT_MAX_FILE_DIFF_CHARS = LIMITS.maxFileDiffChars;
 const MAX_LISTED_OMISSIONS = 50;
 
 const IGNORED_PATH_PATTERNS: RegExp[] = [
   /(^|\/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|npm-shrinkwrap\.json)$/,
   /(^|\/)(Cargo\.lock|Gemfile\.lock|poetry\.lock|uv\.lock|Pipfile\.lock|composer\.lock|go\.sum|mix\.lock|pubspec\.lock|Podfile\.lock|packages\.lock\.json)$/,
-  /\.lock$/,
-  /\.(min\.js|min\.css|map|snap)$/,
-  /\.(png|jpe?g|gif|ico|webp|bmp|pdf|woff2?|ttf|eot|otf|zip|gz|tar|jar|wasm)$/i,
+  /(\.lock|-lock\.json)$/i,
+  /\.(min\.js|min\.css|map|snap)$/i,
+  /\.(png|jpe?g|gif|ico|svg|webp|bmp|pdf|woff2?|ttf|eot|otf|zip|gz|tar|jar|wasm)$/i,
   /\.(pb\.go|pb\.gw\.go)$/,
   /_pb2?(_grpc)?\.(py|pyi)$/,
   /(^|\/)(node_modules|vendor|dist|build|coverage|__generated__|generated)\//,
@@ -241,8 +239,8 @@ export function prepareDiff(
   diff: string,
   options: PrepareDiffOptions = {},
 ): PreparedDiff {
-  const maxChars = options.maxChars ?? DEFAULT_MAX_DIFF_CHARS;
-  const maxFileChars = options.maxFileChars ?? DEFAULT_MAX_FILE_DIFF_CHARS;
+  const maxChars = options.maxChars ?? LIMITS.maxDiffChars;
+  const maxFileChars = options.maxFileChars ?? LIMITS.maxFileDiffChars;
   const { preamble, files, priorOmitted } = splitDiff(diff);
 
   const omitted: PreparedDiff['omitted'] = [...priorOmitted];

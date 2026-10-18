@@ -2,6 +2,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GithubService } from '../github/github.service.js';
+import { GithubAppNotInstalledError } from '../github/github-auth.service.js';
 import { reviewResultsPushRoutes } from './review-results-push.routes.js';
 
 describe('reviewResultsPushRoutes', () => {
@@ -141,5 +142,25 @@ describe('reviewResultsPushRoutes', () => {
     const body = res.json();
     expect(body.success).toBe(false);
     expect(body.error).toContain('GitHub API rate limit exceeded');
+  });
+
+  it('acknowledges (returns 200) when GitHub App is not installed to prevent redelivery loops', async () => {
+    mockGithubService.postReview.mockRejectedValueOnce(
+      new GithubAppNotInstalledError('test-org', 'test-repo'),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/review-results',
+      payload: validPayload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.success).toBe(false);
+    expect(body.reason).toBe('Non-retryable failure');
+    expect(body.error).toBe(
+      'GitHub App is not installed on test-org/test-repo',
+    );
   });
 });

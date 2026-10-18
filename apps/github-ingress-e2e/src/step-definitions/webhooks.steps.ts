@@ -19,6 +19,54 @@ function matchesPrEvent(
   );
 }
 
+function buildPrWebhookPayload(
+  repoFullName: string,
+  prNumber: number,
+  action: string,
+  merged = false,
+) {
+  const [owner, repo] = repoFullName.split('/');
+  return {
+    action,
+    pull_request: {
+      number: prNumber,
+      ...(merged ? { merged: true } : {}),
+      html_url: `https://github.com/${owner}/${repo}/pull/${prNumber}`,
+      title: `Feature for ${repo} #${prNumber}`,
+      body: 'PR test body',
+      user: { login: 'octocat' },
+      head: { ref: 'feature-branch' },
+      base: {
+        ref: 'main',
+        repo: { clone_url: `https://github.com/${owner}/${repo}.git` },
+      },
+    },
+    repository: {
+      name: repo,
+      owner: { login: owner },
+    },
+  };
+}
+
+async function sendSignedWebhook(
+  world: GithubIngressWorld,
+  eventName: string,
+  payload: unknown,
+): Promise<void> {
+  const rawBody = JSON.stringify(payload);
+  const signature = world.createHmacSignature(rawBody);
+  world.lastResponse = await world.app.inject({
+    method: 'POST',
+    url: '/api/v1/webhooks',
+    headers: {
+      'content-type': 'application/json',
+      'x-github-event': eventName,
+      'x-hub-signature-256': signature,
+    },
+    payload: rawBody,
+  });
+}
+
 When(
   'GitHub sends a {string} event for {string} PR #{int} with action {string}',
   async function (
@@ -28,40 +76,11 @@ When(
     prNumber: number,
     action: string,
   ) {
-    const [owner, repo] = repoFullName.split('/');
-    const payload = {
-      action,
-      pull_request: {
-        number: prNumber,
-        html_url: `https://github.com/${owner}/${repo}/pull/${prNumber}`,
-        title: `Feature for ${repo} #${prNumber}`,
-        body: 'PR test body',
-        user: { login: 'octocat' },
-        head: { ref: 'feature-branch' },
-        base: {
-          ref: 'main',
-          repo: { clone_url: `https://github.com/${owner}/${repo}.git` },
-        },
-      },
-      repository: {
-        name: repo,
-        owner: { login: owner },
-      },
-    };
-
-    const rawBody = JSON.stringify(payload);
-    const signature = this.createHmacSignature(rawBody);
-
-    this.lastResponse = await this.app.inject({
-      method: 'POST',
-      url: '/api/v1/webhooks',
-      headers: {
-        'content-type': 'application/json',
-        'x-github-event': eventName,
-        'x-hub-signature-256': signature,
-      },
-      payload: rawBody,
-    });
+    await sendSignedWebhook(
+      this,
+      eventName,
+      buildPrWebhookPayload(repoFullName, prNumber, action),
+    );
   },
 );
 
@@ -72,41 +91,11 @@ When(
     repoFullName: string,
     prNumber: number,
   ) {
-    const [owner, repo] = repoFullName.split('/');
-    const payload = {
-      action: 'closed',
-      pull_request: {
-        number: prNumber,
-        merged: true,
-        html_url: `https://github.com/${owner}/${repo}/pull/${prNumber}`,
-        title: `Merged PR #${prNumber}`,
-        body: 'Merged PR description',
-        user: { login: 'octocat' },
-        head: { ref: 'feature-branch' },
-        base: {
-          ref: 'main',
-          repo: { clone_url: `https://github.com/${owner}/${repo}.git` },
-        },
-      },
-      repository: {
-        name: repo,
-        owner: { login: owner },
-      },
-    };
-
-    const rawBody = JSON.stringify(payload);
-    const signature = this.createHmacSignature(rawBody);
-
-    this.lastResponse = await this.app.inject({
-      method: 'POST',
-      url: '/api/v1/webhooks',
-      headers: {
-        'content-type': 'application/json',
-        'x-github-event': 'pull_request',
-        'x-hub-signature-256': signature,
-      },
-      payload: rawBody,
-    });
+    await sendSignedWebhook(
+      this,
+      'pull_request',
+      buildPrWebhookPayload(repoFullName, prNumber, 'closed', true),
+    );
   },
 );
 
@@ -137,19 +126,7 @@ When(
       },
     };
 
-    const rawBody = JSON.stringify(payload);
-    const signature = this.createHmacSignature(rawBody);
-
-    this.lastResponse = await this.app.inject({
-      method: 'POST',
-      url: '/api/v1/webhooks',
-      headers: {
-        'content-type': 'application/json',
-        'x-github-event': 'issue_comment',
-        'x-hub-signature-256': signature,
-      },
-      payload: rawBody,
-    });
+    await sendSignedWebhook(this, 'issue_comment', payload);
   },
 );
 

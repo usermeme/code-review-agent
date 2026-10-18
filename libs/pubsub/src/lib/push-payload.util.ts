@@ -1,12 +1,15 @@
-export interface PubSubPushMessageEnvelope {
-  message: {
-    attributes?: Record<string, string>;
-    data: string;
-    messageId: string;
-    publishTime?: string;
-    orderingKey?: string;
-  };
-  subscription?: string;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object';
+}
+
+function extractPushMessage(
+  body: unknown,
+): Record<string, unknown> | undefined {
+  if (!isRecord(body)) {
+    return undefined;
+  }
+  const message = body['message'];
+  return isRecord(message) ? message : undefined;
 }
 
 /**
@@ -14,28 +17,21 @@ export interface PubSubPushMessageEnvelope {
  * Supports both standard GCP Pub/Sub base64-encoded push message envelopes and direct JSON payloads.
  */
 export function parsePubSubPushPayload<T>(body: unknown): T {
-  if (!body || typeof body !== 'object') {
+  if (!isRecord(body)) {
     throw new Error(
       'Invalid Pub/Sub push body: body must be a non-null object',
     );
   }
 
-  const obj = body as Record<string, any>;
-
-  // Check if body matches the standard Google Cloud Pub/Sub Push envelope
-  if (
-    obj['message'] &&
-    typeof obj['message'] === 'object' &&
-    typeof obj['message']['data'] === 'string'
-  ) {
+  const message = extractPushMessage(body);
+  if (message && typeof message['data'] === 'string') {
     try {
-      const decoded = Buffer.from(obj['message']['data'], 'base64').toString(
-        'utf8',
-      );
+      const decoded = Buffer.from(message['data'], 'base64').toString('utf8');
       return JSON.parse(decoded) as T;
     } catch (err) {
       throw new Error(
         `Failed to decode/parse base64 Pub/Sub push message data: ${String(err)}`,
+        { cause: err },
       );
     }
   }
@@ -51,13 +47,6 @@ export function parsePubSubPushPayload<T>(body: unknown): T {
  * still be running elsewhere.
  */
 export function extractPushMessageId(body: unknown): string | undefined {
-  if (!body || typeof body !== 'object') {
-    return undefined;
-  }
-  const message = (body as Record<string, unknown>)['message'];
-  if (!message || typeof message !== 'object') {
-    return undefined;
-  }
-  const messageId = (message as Record<string, unknown>)['messageId'];
+  const messageId = extractPushMessage(body)?.['messageId'];
   return typeof messageId === 'string' && messageId ? messageId : undefined;
 }

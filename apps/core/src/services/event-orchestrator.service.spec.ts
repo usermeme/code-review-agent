@@ -2,6 +2,7 @@ import { EnvService } from '@code-review-agent/env';
 import { MockLlm } from '@code-review-agent/llm';
 import {
   GitAdapterContract,
+  NonRetryableTaskError,
   PREventPayload,
 } from '@code-review-agent/shared-types';
 import { PubSub } from '@google-cloud/pubsub';
@@ -541,6 +542,51 @@ describe('EventOrchestratorService', () => {
         // The lock was never acquired, so there is nothing to release.
         expect(mockLockRepo.release).not.toHaveBeenCalled();
       });
+    });
+
+    it('marks PR failed and rethrows NonRetryableTaskError when getPRDiff fails with NonRetryableTaskError', async () => {
+      mockGitAdapterClient.getPRDiff = vi
+        .fn()
+        .mockRejectedValue(
+          new NonRetryableTaskError(
+            'GitHub App is not installed on test-org/test-repo',
+          ),
+        );
+      const orchestrator = createTestOrchestrator();
+
+      await expect(
+        orchestrator.ingestPREvent({
+          ...makeOpenedRequest(),
+          diff: '',
+          changedFiles: [],
+        }),
+      ).rejects.toThrow(NonRetryableTaskError);
+
+      expect(mockPrRepo.updatePRStatus).toHaveBeenLastCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({ status: 'failed' }),
+      );
+      expect(mockBuildContext).not.toHaveBeenCalled();
+      expect(mockRunReview).not.toHaveBeenCalled();
+    });
+
+    it('marks PR failed and rethrows NonRetryableTaskError when buildContext fails with NonRetryableTaskError', async () => {
+      mockBuildContext.mockRejectedValueOnce(
+        new NonRetryableTaskError(
+          'GitHub App is not installed on test-org/test-repo',
+        ),
+      );
+      const orchestrator = createTestOrchestrator();
+
+      await expect(
+        orchestrator.ingestPREvent(makeOpenedRequest()),
+      ).rejects.toThrow(NonRetryableTaskError);
+
+      expect(mockPrRepo.updatePRStatus).toHaveBeenLastCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({ status: 'failed' }),
+      );
+      expect(mockRunReview).not.toHaveBeenCalled();
     });
   });
 });

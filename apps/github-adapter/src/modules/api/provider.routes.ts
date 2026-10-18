@@ -1,9 +1,10 @@
 import { Readable } from 'node:stream';
 
 import type { EndpointPayloadRecord } from '@code-review-agent/endpoints';
-import { FastifyPluginAsync } from 'fastify';
+import { NonRetryableTaskError } from '@code-review-agent/shared-types';
+import { FastifyInstance, FastifyPluginAsync, FastifyReply } from 'fastify';
 
-import { GithubService } from '../github/github.service.js';
+import { formatError, GithubService } from '../github/github.service.js';
 
 export interface ProviderRoutesOptions {
   githubService: GithubService;
@@ -28,6 +29,21 @@ function resolveCommitSha(headers: Headers, ref?: string): string {
   return headers.get('x-github-commit-sha') || ref || 'main';
 }
 
+function sendProviderError(
+  fastify: FastifyInstance,
+  reply: FastifyReply,
+  context: string,
+  error: unknown,
+): FastifyReply {
+  if (error instanceof NonRetryableTaskError) {
+    fastify.log.warn(`${context} (non-retryable): ${error.message}`);
+    return reply.code(422).send({ error: error.message, nonRetryable: true });
+  }
+  const message = formatError(error);
+  fastify.log.error(`${context}: ${message}`);
+  return reply.code(500).send({ error: message });
+}
+
 export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
   fastify,
   options,
@@ -37,7 +53,7 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
   // 1. Fetch PR Diff & Changed Files
   fastify.get<{
     Params: NonNullable<
-      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/pulls/:number/diff']['Params']
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/pulls/:prNumber/diff']['Params']
     >;
   }>('/repos/:owner/:repo/pulls/:number/diff', async (request, reply) => {
     const { owner, repo, number } = request.params;
@@ -50,15 +66,19 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
       const result = await githubService.getPRDiff(owner, repo, prNumber);
       return result;
     } catch (error) {
-      fastify.log.error(`Failed to fetch PR diff: ${error}`);
-      return reply.code(500).send({ error: String(error) });
+      return sendProviderError(
+        fastify,
+        reply,
+        'Failed to fetch PR diff',
+        error,
+      );
     }
   });
 
   // 2. Fetch PR Files with Content
   fastify.get<{
     Params: NonNullable<
-      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/pulls/:number/files']['Params']
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/pulls/:prNumber/files']['Params']
     >;
   }>('/repos/:owner/:repo/pulls/:number/files', async (request, reply) => {
     const { owner, repo, number } = request.params;
@@ -71,8 +91,12 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
       const result = await githubService.getPRFiles(owner, repo, prNumber);
       return result;
     } catch (error) {
-      fastify.log.error(`Failed to fetch PR files: ${error}`);
-      return reply.code(500).send({ error: String(error) });
+      return sendProviderError(
+        fastify,
+        reply,
+        'Failed to fetch PR files',
+        error,
+      );
     }
   });
 
@@ -95,8 +119,7 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
       const result = await githubService.searchCode(owner, repo, query);
       return result;
     } catch (error) {
-      fastify.log.error(`Failed to search code: ${error}`);
-      return reply.code(500).send({ error: String(error) });
+      return sendProviderError(fastify, reply, 'Failed to search code', error);
     }
   });
 
@@ -123,8 +146,12 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
 
       return reply.send(toNodeReadableStream(upstream.body));
     } catch (error) {
-      fastify.log.error(`Failed to fetch repo tarball: ${error}`);
-      return reply.code(500).send({ error: String(error) });
+      return sendProviderError(
+        fastify,
+        reply,
+        'Failed to fetch repo tarball',
+        error,
+      );
     }
   });
 
@@ -149,8 +176,12 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
       const result = await githubService.getFileContent(owner, repo, path, ref);
       return result;
     } catch (error) {
-      fastify.log.error(`Failed to get file content: ${error}`);
-      return reply.code(500).send({ error: String(error) });
+      return sendProviderError(
+        fastify,
+        reply,
+        'Failed to get file content',
+        error,
+      );
     }
   });
 };

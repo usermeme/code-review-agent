@@ -63,7 +63,10 @@ function findCoordinateOffenders(
 
   check('provider', [meta.provider ?? 'github']);
   check('owner', [meta.owner]);
-  check('repo', [meta.repo, meta.owner ? `${meta.owner}/${meta.repo}` : '']);
+  check('repo', [
+    meta.repo,
+    meta.owner ? `${meta.owner}/${meta.repo}` : undefined,
+  ]);
   check('prNumber', [String(meta.number)]);
 
   return offenders;

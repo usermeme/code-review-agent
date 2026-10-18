@@ -17,6 +17,4 @@ export const llmConfigSchema = z.discriminatedUnion('LLM_PROVIDER', [
   mockLlmConfigSchema,
 ]);
 
-export type GeminiLlmConfig = z.infer<typeof geminiLlmConfigSchema>;
-export type MockLlmConfig = z.infer<typeof mockLlmConfigSchema>;
 export type LlmConfig = z.infer<typeof llmConfigSchema>;

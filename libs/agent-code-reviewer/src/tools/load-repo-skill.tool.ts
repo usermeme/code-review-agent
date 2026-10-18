@@ -5,6 +5,12 @@ import { z } from 'zod';
 import { LIMITS } from '../constants/limits.constant.js';
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
 import type { RepoSkillSummary } from './get-repo-guidelines.tool.js';
+import {
+  fetchCachedRepoFile,
+  readPinnedCoordinates,
+  type RepoFileFetcher,
+  type RepoToolDependencies,
+} from './repo-tool-context.util.js';
 
 /**
  * A repository skill body staged in shared state (STATE.repoSkillBodies) for
@@ -20,12 +26,7 @@ export interface LoadedRepoSkill {
   truncated: boolean;
 }
 
-export interface LoadRepoSkillToolDependencies {
-  gitAdapter?: GitAdapterContract;
-  defaultOwner?: string;
-  defaultRepo?: string;
-  cache?: Map<string, string>;
-}
+export type LoadRepoSkillToolDependencies = RepoToolDependencies;
 
 export interface LoadRepoSkillResult {
   loaded: Array<{ name: string; path: string; chars: number }>;
@@ -36,15 +37,6 @@ export interface LoadRepoSkillResult {
 const FRONTMATTER_REGEX = /^---\s*\n[\s\S]*?\n---\s*\n?/;
 
 type SessionState = Context['state'];
-
-/** Pinned repository coordinates plus the shared file cache used for fetches. */
-interface SkillFileFetcher {
-  gitAdapter: GitAdapterContract;
-  fileCache: Map<string, string>;
-  owner: string;
-  repo: string;
-  ref: string | undefined;
-}
 
 /** Mutable accumulator for one loadRepoSkill invocation. */
 interface SkillStaging {
@@ -100,39 +92,6 @@ function catalogueMatch(
   });
 }
 
-function readPinnedCoordinate(
-  stateValue: string | undefined,
-  fallback: string | undefined,
-): string {
-  return stateValue || fallback || '';
-}
-
-function readPinnedRef(meta: PrMeta | undefined): string | undefined {
-  return meta?.branch || meta?.headSha || undefined;
-}
-
-// Coordinates are fixed to the PR under review (state/deps only) —
-// same pinning as every other repository tool.
-function readSkillCoordinates(
-  meta: PrMeta | undefined,
-  deps: LoadRepoSkillToolDependencies,
-): { owner: string; repo: string; ref: string | undefined } {
-  return {
-    owner: readPinnedCoordinate(meta?.owner, deps.defaultOwner),
-    repo: readPinnedCoordinate(meta?.repo, deps.defaultRepo),
-    ref: readPinnedRef(meta),
-  };
-}
-
-function readSkillLoadContext(
-  ctx: Context | undefined,
-  deps: LoadRepoSkillToolDependencies,
-) {
-  const state = ctx?.state;
-  const meta = state?.get<PrMeta>(STATE.prMeta);
-  return { state, ...readSkillCoordinates(meta, deps) };
-}
-
 function skipAllSkills(
   input: { skills: string[] },
   reason: string,
@@ -185,33 +144,14 @@ function createSkillStaging(state: SessionState | undefined): SkillStaging {
   };
 }
 
-async function fetchSkillBody(
-  fetcher: SkillFileFetcher,
-  path: string,
-): Promise<string> {
-  const cacheKey = `${fetcher.owner}:${fetcher.repo}:${fetcher.ref || 'default'}:${path}`;
-  let rawContent = fetcher.fileCache.get(cacheKey);
-  if (rawContent === undefined) {
-    const res = await fetcher.gitAdapter.getFileContent(
-      fetcher.owner,
-      fetcher.repo,
-      path,
-      fetcher.ref,
-    );
-    rawContent = res?.content ?? '';
-    fetcher.fileCache.set(cacheKey, rawContent);
-  }
-  return rawContent;
-}
-
 async function fetchAndStageSkillBody(
   staging: SkillStaging,
-  fetcher: SkillFileFetcher,
+  fetcher: RepoFileFetcher,
   match: RepoSkillSummary,
   requested: string,
 ): Promise<void> {
   try {
-    const rawContent = await fetchSkillBody(fetcher, match.path);
+    const rawContent = await fetchCachedRepoFile(fetcher, match.path);
     let content = stripSkillFrontmatter(rawContent);
     if (!content) {
       staging.skipped.push({ requested, reason: 'empty skill body' });
@@ -247,7 +187,7 @@ async function fetchAndStageSkillBody(
 
 async function stageRequestedSkill(
   staging: SkillStaging,
-  fetcher: SkillFileFetcher,
+  fetcher: RepoFileFetcher,
   catalogue: RepoSkillSummary[],
   requested: string,
 ): Promise<void> {
@@ -292,6 +232,17 @@ function buildLoadNote(
     : undefined;
 }
 
+async function stageRequestedSkills(
+  staging: SkillStaging,
+  fetcher: RepoFileFetcher,
+  catalogue: RepoSkillSummary[],
+  skills: string[],
+): Promise<void> {
+  for (const requested of skills) {
+    await stageRequestedSkill(staging, fetcher, catalogue, requested);
+  }
+}
+
 export function createLoadRepoSkillTool(
   deps: LoadRepoSkillToolDependencies = {},
 ) {
@@ -315,7 +266,11 @@ export function createLoadRepoSkillTool(
         ),
     }),
     execute: async (input, ctx): Promise<LoadRepoSkillResult> => {
-      const { state, owner, repo, ref } = readSkillLoadContext(ctx, deps);
+      const state = ctx?.state;
+      const { owner, repo, ref } = readPinnedCoordinates(
+        state?.get<PrMeta>(STATE.prMeta),
+        deps,
+      );
 
       const validation = validateSkillLoadRequest(deps, owner, repo);
       if ('error' in validation) {
@@ -328,7 +283,7 @@ export function createLoadRepoSkillTool(
       }
 
       const staging = createSkillStaging(state);
-      const fetcher: SkillFileFetcher = {
+      const fetcher: RepoFileFetcher = {
         gitAdapter: validation.gitAdapter,
         fileCache,
         owner,
@@ -336,10 +291,7 @@ export function createLoadRepoSkillTool(
         ref,
       };
 
-      for (const requested of input.skills) {
-        await stageRequestedSkill(staging, fetcher, catalogue, requested);
-      }
-
+      await stageRequestedSkills(staging, fetcher, catalogue, input.skills);
       commitStagedSkills(state, staging);
 
       return {

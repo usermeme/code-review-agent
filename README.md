@@ -113,9 +113,10 @@ cd code-review-agent
 # 2. Copy and customize the environment file
 cp .env.example .env
 
-# Edit .env with your Google Gemini API key and GitHub credentials:
+# Edit .env with your Google Gemini API key and GitHub App credentials:
 # - GEMINI_API_KEY
-# - GITHUB_TOKEN
+# - GITHUB_APP_ID
+# - GITHUB_APP_PRIVATE_KEY
 # - GITHUB_WEBHOOK_SECRET
 
 # 3. Start the entire stack
@@ -241,7 +242,7 @@ jobs:
             --cpu 1 \
             --no-cpu-throttling \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,GITHUB_APP_ID=${{ secrets.GITHUB_APP_ID }},GITHUB_APP_PRIVATE_KEY=${{ secrets.GITHUB_APP_PRIVATE_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
       # 3. Deploy GitHub Ingress (Public Webhook Receiver, Zero Write Credentials)
       - name: Deploy GitHub Ingress
@@ -516,7 +517,8 @@ services:
     environment:
       - PORT=8080
       - HOST=0.0.0.0
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_APP_ID=${GITHUB_APP_ID}
+      - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY}
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
 
   core:
@@ -567,7 +569,7 @@ Please generate the complete, production-ready repository with the following fil
    - Production Docker Compose setup running both services referencing the GHCR images.
 
 5. `.env.example`:
-   - Complete template documenting all required secrets: `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`, `GEMINI_API_KEY`, `GCP_PROJECT_ID`, and `GCP_REGION`.
+   - Complete template documenting all required secrets: `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GEMINI_API_KEY`, `GCP_PROJECT_ID`, and `GCP_REGION`.
 
 6. `README.md`:
    - Step-by-step instructions on setting GitHub repository secrets/variables, running the infra setup, and triggering the deployment workflow.
@@ -589,12 +591,13 @@ Each service strictly validates required variables and fails fast at startup if 
 
 ### GitHub Adapter (`apps/github-adapter`)
 
-| Variable               | Required | Description                                                                          |
-| :--------------------- | :------: | :----------------------------------------------------------------------------------- |
-| `PORT`                 |   Yes    | Port to listen on (e.g. `8080`)                                                      |
-| `HOST`                 |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                           |
-| `GITHUB_TOKEN`         |   Yes    | GitHub Personal Access Token (classic with `repo` scope) for diff, search & comments |
-| `GOOGLE_CLOUD_PROJECT` | Optional | GCP Project ID (auto-detected when running in GCP)                                   |
+| Variable                 | Required | Description                                                                                                  |
+| :----------------------- | :------: | :----------------------------------------------------------------------------------------------------------- |
+| `PORT`                   |   Yes    | Port to listen on (e.g. `8080`)                                                                              |
+| `HOST`                   |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                                                   |
+| `GITHUB_APP_ID`          |   Yes    | GitHub App ID used to mint short-lived per-installation tokens                                               |
+| `GITHUB_APP_PRIVATE_KEY` |   Yes    | GitHub App RSA private key (accepts multi-line PEM from Secret Manager, `\n`-escaped PEM, or base64-encoded) |
+| `GOOGLE_CLOUD_PROJECT`   | Optional | GCP Project ID (auto-detected when running in GCP)                                                           |
 
 ### Core Service (`apps/core`)
 
@@ -612,9 +615,36 @@ Each service strictly validates required variables and fails fast at startup if 
 
 ---
 
-## 🔗 GitHub Webhook Configuration
+## 🔐 GitHub App & Webhook Configuration
 
-In your GitHub repository (or organization) settings under **Webhooks** → **Add webhook**:
+`github-adapter` authenticates as a **GitHub App**, minting short-lived (1-hour) installation tokens per repository via the Octokit `App` SDK so all PR reviews and inline comments are posted as `<app-name>[bot]`.
+
+### 1. GitHub App Permission Checklist
+
+Configure the following **Repository permissions** on your GitHub App:
+
+- **Contents**: `Read-only` (fetching file contents, diffs, code search, and repository tarballs)
+- **Pull requests**: `Read and write` (reading PR metadata/files and posting formal reviews & inline comments)
+- **Metadata**: `Read-only` (mandatory default for GitHub Apps)
+
+### 2. Per-Repository Installation Requirement
+
+- Install the GitHub App on every organization or individual repository (`owner/repo`) that should be reviewed.
+- `github-adapter` resolves the installation dynamically per `owner/repo` and caches the installation Octokit instance in memory, supporting repositories across multiple organizations/installations.
+- If a review event targets a repository where the GitHub App is not installed (`404` on installation lookup), `github-adapter` raises a non-retryable `GithubAppNotInstalledError` (`"GitHub App is not installed on {owner}/{repo}"`) and **ACKs** the Pub/Sub push delivery (`HTTP 200`) so the message does not enter a redelivery loop.
+
+### 3. Zero-Downtime Private Key Rotation
+
+GitHub Apps support **multiple active private keys simultaneously**, allowing zero-downtime key rotation:
+
+1. In GitHub (**Settings** → **Developer settings** → **GitHub Apps** → your app → **Private keys**), click **Generate a private key** to create a second active PEM key alongside the existing one.
+2. Add the new PEM key as the latest version of the `GITHUB_APP_PRIVATE_KEY` secret in Google Cloud Secret Manager (or your deployment environment).
+3. Redeploy `github-adapter` so new instances pick up the new key version and verify `/healthz` and a test PR review.
+4. Return to the GitHub App settings and **Delete** the old private key.
+
+### 4. Webhook Configuration
+
+In your GitHub App settings (or repository/organization **Webhooks** → **Add webhook**):
 
 1. **Payload URL**: `https://<YOUR_INGRESS_URL>/api/v1/webhooks`
 2. **Content type**: `application/json`

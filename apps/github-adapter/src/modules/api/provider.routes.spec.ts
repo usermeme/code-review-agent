@@ -4,6 +4,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GithubService } from '../github/github.service.js';
+import { GithubAppNotInstalledError } from '../github/github-auth.service.js';
 import { providerRoutes } from './provider.routes.js';
 
 describe('providerRoutes', () => {
@@ -136,5 +137,23 @@ describe('providerRoutes', () => {
       'test-repo',
       'main',
     );
+  });
+
+  it('returns 422 with nonRetryable: true when GitHub App is not installed', async () => {
+    mockGithubService.getPRDiff.mockRejectedValueOnce(
+      new GithubAppNotInstalledError('uninstalled-owner', 'uninstalled-repo'),
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/uninstalled-owner/uninstalled-repo/pulls/123/diff',
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({
+      error:
+        'GitHub App is not installed on uninstalled-owner/uninstalled-repo',
+      nonRetryable: true,
+    });
   });
 });

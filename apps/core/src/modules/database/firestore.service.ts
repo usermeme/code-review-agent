@@ -3,7 +3,7 @@ import { FastifyBaseLogger } from 'fastify';
 
 import { DatabaseService as IDatabaseService } from './interfaces/database.interface.js';
 
-export interface FirestoreDatabaseServiceDependencies {
+interface FirestoreDatabaseServiceDependencies {
   firestore: Firestore;
 }
 
@@ -22,10 +22,9 @@ export class FirestoreDatabaseService implements IDatabaseService {
     collection: string,
     docId: string,
     data: Partial<T>,
-    merge = true,
   ): Promise<void> {
     const docRef = this.firestore.collection(collection).doc(docId);
-    await docRef.set(data, { merge });
+    await docRef.set(data, { merge: true });
   }
 
   async getDocument<T>(collection: string, docId: string): Promise<T | null> {

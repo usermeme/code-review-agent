@@ -15,7 +15,6 @@ export const STATE = {
   ctxPatterns: 'repoctx:patterns',
   ctxErrorHandling: 'repoctx:errorHandling',
   ctxAgentDocs: 'repoctx:agentDocs',
-  repoRules: 'repo:rules',
   repoSkills: 'repo:skills',
   /**
    * Full SKILL.md bodies staged by the orchestrator via loadRepoSkill for
@@ -23,7 +22,6 @@ export const STATE = {
    * only the catalogue descriptions. Shape: Record<path, LoadedRepoSkill>.
    */
   repoSkillBodies: 'repo:skillBodies',
-  reviewResult: 'review:result',
 } as const;
 
 export interface PrMeta {

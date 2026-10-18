@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+export const reviewerFocusInputSchema = z.object({
+  focus: z
+    .string()
+    .describe('One-paragraph hint on what to pay special attention to'),
+});
+
 export const findingSchema = z.object({
   title: z.string(),
   severity: z.enum(['critical', 'major', 'minor']),
@@ -21,9 +27,8 @@ export type Finding = z.infer<typeof findingSchema>;
 export const findingsReportSchema = z.object({
   findings: z.array(findingSchema),
 });
-export type FindingsReport = z.infer<typeof findingsReportSchema>;
 
-export const ticketRequirementSchema = z.object({
+const ticketRequirementSchema = z.object({
   requirement: z.string(),
   status: z.enum(['implemented', 'partial', 'missing']),
   evidence: z.string().describe('Where in the diff this is (not) addressed'),
@@ -40,4 +45,3 @@ export const ticketReportSchema = z.object({
   ),
   summary: z.string(),
 });
-export type TicketReport = z.infer<typeof ticketReportSchema>;

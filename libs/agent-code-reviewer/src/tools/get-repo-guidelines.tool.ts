@@ -7,6 +7,12 @@ import { z } from 'zod';
 
 import { LIMITS } from '../constants/limits.constant.js';
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
+import {
+  fetchCachedRepoFile,
+  readPinnedCoordinates,
+  type RepoFileFetcher,
+  type RepoToolDependencies,
+} from './repo-tool-context.util.js';
 
 export interface RepoSkillSummary {
   name: string;
@@ -21,12 +27,7 @@ export interface GetRepoGuidelinesResult {
   message?: string;
 }
 
-export interface GetRepoGuidelinesToolDependencies {
-  gitAdapter?: GitAdapterContract;
-  defaultOwner?: string;
-  defaultRepo?: string;
-  cache?: Map<string, string>;
-}
+export type GetRepoGuidelinesToolDependencies = RepoToolDependencies;
 
 const CANDIDATE_RULE_FILES = [
   'AGENTS.md',
@@ -36,15 +37,6 @@ const CANDIDATE_RULE_FILES = [
 ];
 
 const IGNORED_SKILL_DIRS = /(^|\/)(node_modules|vendor|dist)\//;
-
-/** Pinned repository coordinates plus the shared file cache used for fetches. */
-interface RepoFileFetcher {
-  gitAdapter: GitAdapterContract;
-  fileCache: Map<string, string>;
-  owner: string;
-  repo: string;
-  ref: string | undefined;
-}
 
 function truncate(text: string, max: number, label: string): string {
   return text.length > max
@@ -82,30 +74,6 @@ export function parseSkillFrontmatter(content: string): {
   return { name, description };
 }
 
-function readPinnedCoordinate(
-  stateValue: string | undefined,
-  fallback: string | undefined,
-): string {
-  return stateValue || fallback || '';
-}
-
-function readPinnedRef(meta: PrMeta | undefined): string | undefined {
-  return meta?.branch || meta?.headSha || undefined;
-}
-
-// Owner/repo/ref are fixed to the PR under review (state/deps only) —
-// a prompt-injected agent cannot point this tool at another repository.
-function readGuidelinesCoordinates(
-  meta: PrMeta | undefined,
-  deps: GetRepoGuidelinesToolDependencies,
-): { owner: string; repo: string; ref: string | undefined } {
-  return {
-    owner: readPinnedCoordinate(meta?.owner, deps.defaultOwner),
-    repo: readPinnedCoordinate(meta?.repo, deps.defaultRepo),
-    ref: readPinnedRef(meta),
-  };
-}
-
 function emptyGuidelinesResult(message: string): GetRepoGuidelinesResult {
   return {
     rules: '',
@@ -131,40 +99,13 @@ function validateGuidelinesRequest(
   return { gitAdapter: deps.gitAdapter };
 }
 
-async function fetchRemoteFileContent(
-  fetcher: RepoFileFetcher,
-  path: string,
-): Promise<string | undefined> {
-  const res = await fetcher.gitAdapter?.getFileContent(
-    fetcher.owner,
-    fetcher.repo,
-    path,
-    fetcher.ref,
-  );
-  return res?.content;
-}
-
-async function fetchFileCached(
-  fetcher: RepoFileFetcher,
-  path: string,
-): Promise<string | undefined> {
-  const cacheKey = `${fetcher.owner}:${fetcher.repo}:${fetcher.ref || 'default'}:${path}`;
-  const cached = fetcher.fileCache.get(cacheKey);
-  if (cached !== undefined) return cached;
-  const content = await fetchRemoteFileContent(fetcher, path);
-  if (content !== undefined) {
-    fetcher.fileCache.set(cacheKey, content);
-  }
-  return content;
-}
-
 async function readRuleFile(
   fetcher: RepoFileFetcher,
   fileName: string,
 ): Promise<{ fileName: string; content: string } | null> {
   try {
-    const content = await fetchFileCached(fetcher, fileName);
-    if (content && content.trim()) {
+    const content = await fetchCachedRepoFile(fetcher, fileName);
+    if (content.trim()) {
       return { fileName, content: content.trim() };
     }
   } catch {
@@ -220,8 +161,8 @@ async function readSkillSummary(
   file: CodeSearchItem,
 ): Promise<RepoSkillSummary | null> {
   try {
-    const rawContent = await fetchFileCached(fetcher, file.path);
-    if (rawContent === undefined) return null;
+    const rawContent = await fetchCachedRepoFile(fetcher, file.path);
+    if (!rawContent) return null;
     const { name, description } = parseSkillFrontmatter(rawContent);
     const skillName = resolveSkillName(name, file);
     return {
@@ -265,7 +206,6 @@ function storeGuidelinesState(
   if (state) {
     if (combinedRules) {
       state.set(STATE.ctxAgentDocs, combinedRules);
-      state.set(STATE.repoRules, combinedRules);
     }
     state.set(STATE.repoSkills, skills);
   }
@@ -283,7 +223,7 @@ export function createGetRepoGuidelinesTool(
     parameters: z.object({}),
     execute: async (_input, ctx): Promise<GetRepoGuidelinesResult> => {
       const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
-      const { owner, repo, ref } = readGuidelinesCoordinates(meta, deps);
+      const { owner, repo, ref } = readPinnedCoordinates(meta, deps);
 
       const validation = validateGuidelinesRequest(deps, owner, repo);
       if ('error' in validation) {

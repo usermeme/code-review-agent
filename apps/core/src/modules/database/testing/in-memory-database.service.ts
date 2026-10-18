@@ -68,4 +68,8 @@ export class InMemoryDatabaseService implements DatabaseService {
     }
     return col;
   }
+
+  clear(): void {
+    this.collections.clear();
+  }
 }

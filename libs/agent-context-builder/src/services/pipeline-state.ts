@@ -14,8 +14,4 @@ export class PipelineState {
   set(key: string, value: unknown): void {
     this.map.set(key, value);
   }
-
-  has(key: string): boolean {
-    return this.map.has(key);
-  }
 }

@@ -172,8 +172,9 @@ export class GithubIngressService {
     this.webhooks = deps.webhooks;
   }
 
-  private async publishPREvent(payload: PREventPayload): Promise<void> {
+  private async publishPREvent(prMeta: PRMeta): Promise<void> {
     const topicName = this.envService.get('PR_EVENTS_TOPIC');
+    const payload: PREventPayload = { prMeta };
     await this.pubsub.topic(topicName).publishMessage({
       json: payload,
     });
@@ -188,7 +189,11 @@ export class GithubIngressService {
       return false;
     }
 
-    return this.webhooks.verify(rawBody, signature);
+    try {
+      return await this.webhooks.verify(rawBody, signature);
+    } catch {
+      return false;
+    }
   }
 
   async processWebhook(
@@ -240,13 +245,9 @@ export class GithubIngressService {
       `Received GitHub PR merged event: ${payload.pull_request.html_url}`,
     );
 
-    const eventPayload: PREventPayload = {
-      prMeta: buildPrMeta(payload.pull_request, ref, 'closed', true),
-      diff: '',
-      changedFiles: [],
-    };
-
-    await this.publishPREvent(eventPayload);
+    await this.publishPREvent(
+      buildPrMeta(payload.pull_request, ref, 'closed', true),
+    );
     return { ignored: false, reason: 'PR merged event published to queue' };
   }
 
@@ -261,13 +262,7 @@ export class GithubIngressService {
     );
 
     const pullRequest: Partial<PullRequestPayload> = payload.pull_request ?? {};
-    const eventPayload: PREventPayload = {
-      prMeta: buildPrMeta(pullRequest, ref, action, false),
-      diff: '',
-      changedFiles: [],
-    };
-
-    await this.publishPREvent(eventPayload);
+    await this.publishPREvent(buildPrMeta(pullRequest, ref, action, false));
     return { ignored: false, reason: 'PR event published to queue' };
   }
 
@@ -283,13 +278,7 @@ export class GithubIngressService {
       `Received GitHub manual /review trigger on ${payload.issue.html_url}`,
     );
 
-    const eventPayload: PREventPayload = {
-      prMeta: buildManualTriggerPrMeta(payload),
-      diff: '',
-      changedFiles: [],
-    };
-
-    await this.publishPREvent(eventPayload);
+    await this.publishPREvent(buildManualTriggerPrMeta(payload));
     return {
       ignored: false,
       reason: 'Manual review event published to queue',
