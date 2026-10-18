@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { isLineInDiff, parseNewSideRanges } from './diff-anchors.util.js';
+import {
+  annotateNewSideLines,
+  clampRangeToDiff,
+  isLineInDiff,
+  parseNewSideRanges,
+} from './diff-anchors.util.js';
 
 const DIFF = [
   'diff --git a/src/app.ts b/src/app.ts',
@@ -78,5 +83,41 @@ describe('isLineInDiff', () => {
   it('rejects unknown and deleted files', () => {
     expect(isLineInDiff(ranges, 'src/unknown.ts', 1)).toBe(false);
     expect(isLineInDiff(ranges, 'deleted.ts', 1)).toBe(false);
+  });
+});
+
+describe('clampRangeToDiff', () => {
+  const ranges = parseNewSideRanges(DIFF);
+
+  it('clamps partially overlapping ranges into a single hunk and rejects disjoint ones', () => {
+    expect(clampRangeToDiff(ranges, 'new/name.ts', 2, 7)).toEqual({
+      start: 5,
+      end: 7,
+    });
+    expect(clampRangeToDiff(ranges, 'new/name.ts', 6, 12)).toEqual({
+      start: 6,
+      end: 8,
+    });
+    expect(clampRangeToDiff(ranges, 'new/name.ts', 100, 105)).toBeNull();
+  });
+});
+
+describe('annotateNewSideLines', () => {
+  it('prefixes added and context lines with 1-based NEW-side line numbers and leaves deletions unnumbered', () => {
+    const annotated = annotateNewSideLines(
+      [
+        'diff --git a/src/a.ts b/src/a.ts',
+        '--- a/src/a.ts',
+        '+++ b/src/a.ts',
+        '@@ -10,3 +10,3 @@',
+        ' context',
+        '-old',
+        '+new',
+      ].join('\n'),
+    );
+
+    expect(annotated).toContain('10:  context');
+    expect(annotated).toContain('   -old');
+    expect(annotated).toContain('11: +new');
   });
 });

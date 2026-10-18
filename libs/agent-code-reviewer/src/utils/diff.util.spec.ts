@@ -46,14 +46,36 @@ describe('prepareDiff', () => {
     expect(result.diff.length).toBeLessThan(2_700);
   });
 
-  it('is stable when applied to an already prepared diff', () => {
-    const once = prepareDiff(
-      [fileDiff('src/a.ts', '+a'), fileDiff('yarn.lock', '+l')].join(''),
-    );
-    const twice = prepareDiff(once.diff);
+  it('is strictly idempotent even when files were truncated and omitted', () => {
+    const raw = [
+      fileDiff('src/big.ts', `+${'x'.repeat(5_000)}`),
+      fileDiff('src/keep.ts', `+${'y'.repeat(900)}`),
+      fileDiff('src/drop.ts', `+${'z'.repeat(900)}`),
+      fileDiff('yarn.lock', '+l'),
+    ].join('');
+    const opts = { maxChars: 2_000, maxFileChars: 1_000 };
 
-    expect(twice.includedFiles).toEqual(['src/a.ts']);
-    expect(twice.diff).toContain('+a');
+    const once = prepareDiff(raw, opts);
+    const twice = prepareDiff(once.diff, opts);
+
+    expect(twice.diff).toBe(once.diff);
+    expect(twice.includedFiles).toEqual(['src/big.ts', 'src/keep.ts']);
+    expect(twice.omitted).toEqual(once.omitted);
+  });
+
+  it('prioritizes production source files over tests and docs when over budget', () => {
+    const diff = [
+      fileDiff('README.md', `+${'d'.repeat(900)}`),
+      fileDiff('src/app.spec.ts', `+${'t'.repeat(900)}`),
+      fileDiff('src/app.ts', `+${'s'.repeat(900)}`),
+    ].join('');
+
+    const result = prepareDiff(diff, { maxChars: 2_100, maxFileChars: 2_000 });
+
+    expect(result.includedFiles).toEqual(['src/app.spec.ts', 'src/app.ts']);
+    expect(result.omitted).toEqual([
+      { path: 'README.md', reason: 'over_budget' },
+    ]);
   });
 
   it('passes through text without file headers', () => {

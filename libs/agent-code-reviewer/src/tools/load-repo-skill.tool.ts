@@ -24,6 +24,7 @@ export interface LoadRepoSkillToolDependencies {
   gitAdapter?: GitAdapterContract;
   defaultOwner?: string;
   defaultRepo?: string;
+  cache?: Map<string, string>;
 }
 
 export interface LoadRepoSkillResult {
@@ -83,6 +84,8 @@ function catalogueMatch(
 export function createLoadRepoSkillTool(
   deps: LoadRepoSkillToolDependencies = {},
 ) {
+  const fileCache = deps.cache ?? new Map<string, string>();
+
   return new FunctionTool({
     name: 'loadRepoSkill',
     description:
@@ -107,7 +110,7 @@ export function createLoadRepoSkillTool(
       // same pinning as every other repository tool.
       const owner = meta?.owner || deps.defaultOwner || '';
       const repo = meta?.repo || deps.defaultRepo || '';
-      const ref = meta?.branch;
+      const ref = meta?.branch || meta?.headSha || undefined;
 
       const skipAll = (reason: string): LoadRepoSkillResult => ({
         loaded: [],
@@ -162,13 +165,19 @@ export function createLoadRepoSkillTool(
         }
 
         try {
-          const res = await deps.gitAdapter.getFileContent(
-            owner,
-            repo,
-            match.path,
-            ref,
-          );
-          let content = stripSkillFrontmatter(res?.content ?? '');
+          const cacheKey = `${owner}:${repo}:${ref || 'default'}:${match.path}`;
+          let rawContent = fileCache.get(cacheKey);
+          if (rawContent === undefined) {
+            const res = await deps.gitAdapter.getFileContent(
+              owner,
+              repo,
+              match.path,
+              ref,
+            );
+            rawContent = res?.content ?? '';
+            fileCache.set(cacheKey, rawContent);
+          }
+          let content = stripSkillFrontmatter(rawContent);
           if (!content) {
             skipped.push({ requested, reason: 'empty skill body' });
             continue;

@@ -33,7 +33,7 @@ import {
   ReviewBudgetExceededError,
   ReviewTimeoutError,
 } from './utils/budget.util.js';
-import { prepareDiff } from './utils/diff.util.js';
+import { isIgnoredDiffPath, prepareDiff } from './utils/diff.util.js';
 
 /**
  * Validated review input. Parsing happens in code (fail-fast) — the payload
@@ -124,6 +124,7 @@ export async function runReview(
   const defaultRepo = `${meta.owner || ''}/${meta.repo}`.replace(/^\//, '');
 
   let resultPayload: ReviewResultPayload | null = null;
+  const fileCache = new Map<string, string>();
 
   const tools: OrchestratorTools = {
     publishReviewResults: createPublishReviewResultsTool({
@@ -143,16 +144,19 @@ export async function runReview(
       gitAdapter: options.gitAdapter,
       defaultOwner: meta.owner,
       defaultRepo: meta.repo,
+      cache: fileCache,
     }),
     getRepoGuidelines: createGetRepoGuidelinesTool({
       gitAdapter: options.gitAdapter,
       defaultOwner: meta.owner,
       defaultRepo: meta.repo,
+      cache: fileCache,
     }),
     loadRepoSkill: createLoadRepoSkillTool({
       gitAdapter: options.gitAdapter,
       defaultOwner: meta.owner,
       defaultRepo: meta.repo,
+      cache: fileCache,
     }),
   };
 
@@ -175,7 +179,11 @@ export async function runReview(
   const maxLlmCalls = options.maxLlmCalls ?? LIMITS.maxLlmCalls;
   const timeoutMs = options.timeoutMs ?? LIMITS.reviewTimeoutMs;
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    abort.abort();
+  }, timeoutMs);
   const budget = createLlmCallBudget(maxLlmCalls, abort.signal);
 
   let failedSubAgents: string[] | undefined;
@@ -199,6 +207,12 @@ export async function runReview(
     userId,
   });
 
+  const filteredChangedFiles = parsed.changedFiles
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !isIgnoredDiffPath(line))
+    .join('\n');
+
   const errors: string[] = [];
   const consume = async () => {
     for await (const event of runner.runAsync({
@@ -217,7 +231,7 @@ export async function runReview(
       stateDelta: {
         [STATE.prMeta]: meta,
         [STATE.diff]: prepareDiff(parsed.diff).diff,
-        [STATE.changedFiles]: parsed.changedFiles,
+        [STATE.changedFiles]: filteredChangedFiles,
         [STATE.tickets]: parsed.tickets,
         [STATE.ctxArchitecture]:
           sections['architecture'] || ContextError.REPO_CONTEXT_NOT_LOADED,
@@ -236,6 +250,11 @@ export async function runReview(
         errors.push(
           `${event.errorCode ?? 'agent_error'}: ${event.errorMessage ?? 'unknown error'}`,
         );
+        // Stop consuming immediately: in @google/adk, an error yielded from a
+        // beforeToolCallback leaves stepHadToolCalls=true with an empty-content
+        // error event, which prevents LlmAgent.runAsyncImpl from exiting its
+        // loop and would otherwise burn remaining maxLlmCalls.
+        break;
       }
     }
   };
@@ -248,6 +267,7 @@ export async function runReview(
     await Promise.race([consume(), deadline]);
   } finally {
     clearTimeout(timer);
+    abort.abort();
     await runner.sessionService.deleteSession({
       appName: runner.appName,
       userId,
@@ -259,7 +279,7 @@ export async function runReview(
   if (resultPayload) return resultPayload;
   // Budget and timeout overruns surface as generic ADK error events; report
   // them as the non-retryable failures they are, so they are not redelivered.
-  if (abort.signal.aborted) throw new ReviewTimeoutError(timeoutMs);
+  if (timedOut) throw new ReviewTimeoutError(timeoutMs);
   if (budget.exceeded()) {
     throw new ReviewBudgetExceededError(
       `Review exceeded its budget of ${maxLlmCalls} LLM calls.`,

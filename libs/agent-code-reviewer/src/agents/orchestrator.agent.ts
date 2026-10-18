@@ -140,8 +140,8 @@ export interface CreateOrchestratorPayload {
   hasTickets: boolean;
   /** Shared by the orchestrator and every sub-agent. */
   budget: LlmCallBudget;
-  /** Called when publishing is blocked because a sub-agent failed. */
-  onSubAgentFailure?: (agents: string[]) => void;
+  /** Called when a sub-agent fails (or clears on retry) so the host can surface SubAgentFailedError. */
+  onSubAgentFailure?: (agents: string[] | undefined) => void;
 }
 
 const SUB_AGENT_NAMES = new Set([
@@ -185,31 +185,39 @@ export class SubAgentFailedError extends NonRetryableTaskError {
  * as a clean "no findings" review. Track each sub-agent's latest outcome and
  * block publishing while any of them is failed; a successful retry clears it.
  */
-function createSubAgentGuard(onFailure?: (agents: string[]) => void): {
+function createSubAgentGuard(
+  onFailure?: (agents: string[] | undefined) => void,
+): {
   after: SingleAfterToolCallback;
   before: SingleBeforeToolCallback;
 } {
   const succeeded = new Map<string, boolean>();
+  const getFailed = () =>
+    [...succeeded].filter(([, ok]) => !ok).map(([n]) => n);
   return {
     after: ({ tool, response }) => {
       if (SUB_AGENT_NAMES.has(tool.name)) {
         // The tool-call limiter short-circuits an over-limit sub-agent call
         // with an {error} response without running it; that must not count
         // as (or clear) a success, or a failed sub-agent could be laundered
-        // into a publishable review by one more blocked retry.
-        succeeded.set(
-          tool.name,
+        // into a publishable review by one more blocked retry. Conversely,
+        // once a sub-agent has succeeded and returned findings into the
+        // orchestrator's history, a redundant over-limit call must not mark
+        // it failed.
+        const ok =
           typeof response === 'object' &&
-            response !== null &&
-            Object.keys(response).length > 0 &&
-            !('error' in response),
-        );
+          response !== null &&
+          Object.keys(response).length > 0 &&
+          !('error' in response);
+        succeeded.set(tool.name, (succeeded.get(tool.name) ?? false) || ok);
+        const failed = getFailed();
+        onFailure?.(failed.length > 0 ? failed : undefined);
       }
       return undefined;
     },
     before: ({ tool }) => {
       if (tool.name !== 'publishReviewResults') return undefined;
-      const failed = [...succeeded].filter(([, ok]) => !ok).map(([n]) => n);
+      const failed = getFailed();
       // Throw, and report through onFailure: ADK surfaces the throw as a
       // generic error (the run may even continue), and runReview rethrows
       // SubAgentFailedError from the recorded failures — non-retryable —

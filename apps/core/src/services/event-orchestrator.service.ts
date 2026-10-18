@@ -44,6 +44,7 @@ interface BaselineBuildParams {
     body?: string;
     cloneUrl?: string;
     baseRef?: string;
+    headSha?: string;
   };
   diff: string;
   changedFiles?: string[];
@@ -183,6 +184,28 @@ export class EventOrchestratorService {
       let diff = req.diff || '';
       let changedFiles = req.changedFiles || [];
 
+      // Manual `/review` comments arrive from GitHub's `issue_comment` webhook,
+      // which omits `pull_request.head.ref` / `head.sha`; backfill any missing
+      // PR metadata from the stored PR record when available.
+      let resolvedMeta = meta;
+      if (!meta.branch || !meta.title || !meta.author) {
+        const storedPR = await this.prRepository
+          .getPRStatus(prKey)
+          .catch(() => null);
+        const storedMeta = storedPR?.prMeta;
+        if (storedMeta) {
+          resolvedMeta = {
+            ...meta,
+            title: meta.title || storedMeta['title'] || '',
+            author: meta.author || storedMeta['author'] || '',
+            branch: meta.branch || storedMeta['branch'] || '',
+            body: meta.body || storedMeta['body'] || '',
+            baseRef: meta.baseRef || storedMeta['baseRef'] || 'main',
+            headSha: meta.headSha || storedMeta['headSha'],
+          };
+        }
+      }
+
       if (!diff || changedFiles.length === 0) {
         try {
           logger?.info(
@@ -221,7 +244,7 @@ export class EventOrchestratorService {
           owner,
           repo,
           prNumber,
-          meta,
+          meta: resolvedMeta,
           diff,
           changedFiles,
           logger,
@@ -239,6 +262,14 @@ export class EventOrchestratorService {
         status: 'reviewing',
         diff,
         changedFiles,
+        prMeta: {
+          title: resolvedMeta.title,
+          author: resolvedMeta.author,
+          branch: resolvedMeta.branch,
+          body: resolvedMeta.body,
+          baseRef: resolvedMeta.baseRef,
+          ...(resolvedMeta.headSha ? { headSha: resolvedMeta.headSha } : {}),
+        },
       });
 
       const changedFilesStr = Array.isArray(changedFiles)
@@ -253,12 +284,12 @@ export class EventOrchestratorService {
             owner,
             repo,
             number: prNumber,
-            title: meta.title,
-            author: meta.author,
-            branch: meta.branch,
-            body: meta.body,
-            baseRef: meta.baseRef,
-            headSha: meta.headSha,
+            title: resolvedMeta.title,
+            author: resolvedMeta.author,
+            branch: resolvedMeta.branch,
+            body: resolvedMeta.body,
+            baseRef: resolvedMeta.baseRef,
+            headSha: resolvedMeta.headSha,
           },
           diff,
           changedFiles: changedFilesStr,
@@ -321,6 +352,7 @@ export class EventOrchestratorService {
           branch: pendingPR?.prMeta?.['branch'] || '',
           body: pendingPR?.prMeta?.['body'] || '',
           baseRef: pendingPR?.prMeta?.['baseRef'],
+          headSha: pendingPR?.prMeta?.['headSha'],
         },
         diff: pendingPR?.diff || '',
         changedFiles: changedFilesStr,
@@ -533,6 +565,8 @@ export class EventOrchestratorService {
         author: params.meta.author,
         branch: params.meta.branch,
         body: params.meta.body,
+        baseRef: params.meta.baseRef,
+        ...(params.meta.headSha ? { headSha: params.meta.headSha } : {}),
       },
     });
 

@@ -3,6 +3,7 @@ import { FunctionTool } from '@google/adk';
 import { z } from 'zod';
 
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
+import { isIgnoredDiffPath } from '../utils/diff.util.js';
 
 const BLOCKED_FILE_EXTENSIONS = [
   '.lock',
@@ -74,17 +75,28 @@ export function createFetchRepositoryFileTool(
       const repo = meta?.repo || deps.defaultRepo || '';
 
       // Clamp ref to the PR's own head/base refs (or head SHA); anything
-      // else silently falls back to the head branch with a notice.
-      let ref = input.ref || meta?.branch;
+      // else silently falls back to the head branch/SHA with a notice.
+      const defaultRef = meta?.branch || meta?.headSha || undefined;
+      let ref = input.ref || defaultRef;
       let refNotice: string | undefined;
-      const allowedRefs = [meta?.branch, meta?.baseRef, meta?.headSha];
-      if (meta && input.ref && !allowedRefs.includes(input.ref)) {
-        ref = meta.branch;
+      const allowedRefs = [meta?.branch, meta?.baseRef, meta?.headSha].filter(
+        (r): r is string => Boolean(r),
+      );
+      if (
+        meta &&
+        input.ref &&
+        allowedRefs.length > 0 &&
+        !allowedRefs.includes(input.ref)
+      ) {
+        ref = defaultRef;
         refNotice = `Requested ref '${input.ref}' is not this PR's head/base branch; the file was read from '${ref}'.`;
       }
 
       const lowerPath = input.path.toLowerCase();
-      if (BLOCKED_FILE_EXTENSIONS.some((ext) => lowerPath.endsWith(ext))) {
+      if (
+        BLOCKED_FILE_EXTENSIONS.some((ext) => lowerPath.endsWith(ext)) ||
+        isIgnoredDiffPath(input.path)
+      ) {
         return {
           error: `File path '${input.path}' matches blocked extensions (lockfiles, minified files, or binary assets).`,
         };

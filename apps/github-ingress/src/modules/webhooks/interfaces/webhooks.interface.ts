@@ -18,6 +18,9 @@ export interface GithubWebhookPayload {
   issue?: {
     number: number;
     html_url: string;
+    title?: string;
+    body?: string;
+    user?: { login: string };
     pull_request?: unknown;
   };
   comment?: {
@@ -25,6 +28,7 @@ export interface GithubWebhookPayload {
   };
   repository?: {
     name: string;
+    clone_url?: string;
     owner?: {
       login: string;
     };

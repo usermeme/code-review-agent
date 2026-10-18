@@ -22,6 +22,7 @@ export interface GetRepoGuidelinesToolDependencies {
   gitAdapter?: GitAdapterContract;
   defaultOwner?: string;
   defaultRepo?: string;
+  cache?: Map<string, string>;
 }
 
 const CANDIDATE_RULE_FILES = [
@@ -72,6 +73,8 @@ export function parseSkillFrontmatter(content: string): {
 export function createGetRepoGuidelinesTool(
   deps: GetRepoGuidelinesToolDependencies = {},
 ) {
+  const fileCache = deps.cache ?? new Map<string, string>();
+
   return new FunctionTool({
     name: 'getRepoGuidelines',
     description:
@@ -83,7 +86,7 @@ export function createGetRepoGuidelinesTool(
       // a prompt-injected agent cannot point this tool at another repository.
       const owner = meta?.owner || deps.defaultOwner || '';
       const repo = meta?.repo || deps.defaultRepo || '';
-      const ref = meta?.branch;
+      const ref = meta?.branch || meta?.headSha || undefined;
 
       if (!deps.gitAdapter) {
         return {
@@ -103,19 +106,30 @@ export function createGetRepoGuidelinesTool(
         };
       }
 
+      const fetchCached = async (path: string): Promise<string | undefined> => {
+        const cacheKey = `${owner}:${repo}:${ref || 'default'}:${path}`;
+        const cached = fileCache.get(cacheKey);
+        if (cached !== undefined) return cached;
+        const res = await deps.gitAdapter?.getFileContent(
+          owner,
+          repo,
+          path,
+          ref,
+        );
+        if (res?.content !== undefined) {
+          fileCache.set(cacheKey, res.content);
+        }
+        return res?.content;
+      };
+
       // 1. Fetch candidate rule files (in parallel — this sits on the
       // critical path of every review)
       const ruleResults = await Promise.all(
         CANDIDATE_RULE_FILES.map(async (fileName) => {
           try {
-            const res = await deps.gitAdapter?.getFileContent(
-              owner,
-              repo,
-              fileName,
-              ref,
-            );
-            if (res?.content && res.content.trim()) {
-              return { fileName, content: res.content.trim() };
+            const content = await fetchCached(fileName);
+            if (content && content.trim()) {
+              return { fileName, content: content.trim() };
             }
           } catch {
             // File does not exist, continue
@@ -166,16 +180,9 @@ export function createGetRepoGuidelinesTool(
         const skillResults = await Promise.all(
           skillFiles.map(async (file) => {
             try {
-              const skillContent = await deps.gitAdapter?.getFileContent(
-                owner,
-                repo,
-                file.path,
-                ref,
-              );
-              if (!skillContent) return null;
-              const { name, description } = parseSkillFrontmatter(
-                skillContent.content,
-              );
+              const rawContent = await fetchCached(file.path);
+              if (rawContent === undefined) return null;
+              const { name, description } = parseSkillFrontmatter(rawContent);
               const skillName =
                 name || file.path.split('/').slice(-2, -1)[0] || file.name;
               return {

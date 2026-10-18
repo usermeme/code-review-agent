@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { LIMITS } from '../constants/limits.constant.js';
 import { type PrMeta, STATE } from '../constants/state-keys.constant.js';
 import { findingSchema } from '../schemas/review.schema.js';
-import { isLineInDiff, parseNewSideRanges } from './diff-anchors.util.js';
+import { clampRangeToDiff, parseNewSideRanges } from './diff-anchors.util.js';
 
 const SEVERITY_RANK: Record<'critical' | 'major' | 'minor', number> = {
   critical: 0,
@@ -82,13 +82,18 @@ export function createPublishReviewResultsTool(
       let droppedUnanchorable = 0;
       if (diff.trim()) {
         const ranges = parseNewSideRanges(diff);
-        anchorable = highConfidence.filter((f) => {
+        anchorable = highConfidence.flatMap((f) => {
           const endLine = f.endLine || f.startLine || 1;
           const startLine = Math.min(f.startLine || endLine, endLine);
-          return (
-            isLineInDiff(ranges, f.path, startLine) &&
-            isLineInDiff(ranges, f.path, endLine)
-          );
+          const clamped = clampRangeToDiff(ranges, f.path, startLine, endLine);
+          if (!clamped) return [];
+          return [
+            {
+              ...f,
+              startLine: clamped.start,
+              endLine: clamped.end,
+            },
+          ];
         });
         droppedUnanchorable = highConfidence.length - anchorable.length;
       }

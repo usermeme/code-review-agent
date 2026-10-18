@@ -13,8 +13,38 @@ import { DeliveryRepository } from '../database/repositories/delivery.repository
 
 export interface PrEventsPushRoutesOptions {
   orchestrator: EventOrchestratorService;
-  /** Optional cross-instance delivery dedup (Pub/Sub messageId claims). */
+  /** Optional cross-instance delivery dedup (Pub/Sub messageId / commit claims). */
   deliveryRepository?: DeliveryRepository;
+}
+
+/**
+ * Resolves the deduplication claim key for a PR event delivery:
+ * - When `headSha` is present on an automatic PR event, claims by
+ *   `provider:owner:repo:prNumber@headSha` so simultaneous `opened` +
+ *   `review_requested` webhooks for the same commit are deduplicated alongside
+ *   Pub/Sub redeliveries.
+ * - Falls back to the Pub/Sub `messageId` for `manual_trigger` (`/review`
+ *   comments must be allowed to re-review the same commit) or when `headSha`
+ *   is omitted.
+ */
+function resolveClaimKey(
+  payload: PREventPayload,
+  messageId: string | undefined,
+): string | undefined {
+  const {
+    provider,
+    owner,
+    repo,
+    prNumber,
+    action,
+    headSha,
+    isIncrementalUpdate,
+  } = payload.prMeta;
+  if (headSha && action !== 'manual_trigger' && prNumber) {
+    const kind = action === 'closed' && isIncrementalUpdate ? '#merged' : '';
+    return `${provider || 'github'}:${owner}:${repo}:${prNumber}${kind}@${headSha}`;
+  }
+  return messageId;
 }
 
 export const prEventsPushRoutes: FastifyPluginAsync<
@@ -45,12 +75,14 @@ export const prEventsPushRoutes: FastifyPluginAsync<
     }
 
     // Dedup: Pub/Sub redelivers the same messageId when an ack deadline is
-    // exceeded — potentially while this or another instance is still working.
+    // exceeded, and GitHub often fires `opened` + `review_requested` for the
+    // same commit SHA simultaneously.
     const messageId = extractPushMessageId(request.body);
-    if (messageId && options.deliveryRepository) {
+    const claimKey = resolveClaimKey(payload, messageId);
+    if (claimKey && options.deliveryRepository) {
       let claimed: boolean;
       try {
-        claimed = await options.deliveryRepository.claim(messageId);
+        claimed = await options.deliveryRepository.claim(claimKey);
       } catch (err) {
         // A dedup outage must not block reviews — proceed without a claim.
         request.log.warn(
@@ -60,7 +92,7 @@ export const prEventsPushRoutes: FastifyPluginAsync<
       }
       if (!claimed) {
         request.log.info(
-          `[PrEventsPush] Skipping duplicate delivery ${messageId}`,
+          `[PrEventsPush] Skipping duplicate delivery ${claimKey}`,
         );
         return reply.status(200).send({
           success: false,
@@ -70,14 +102,14 @@ export const prEventsPushRoutes: FastifyPluginAsync<
     }
 
     const releaseClaim = async () => {
-      if (messageId && options.deliveryRepository) {
-        await options.deliveryRepository.release(messageId);
+      if (claimKey && options.deliveryRepository) {
+        await options.deliveryRepository.release(claimKey);
       }
     };
     const settleClaim = async () => {
-      if (messageId && options.deliveryRepository) {
+      if (claimKey && options.deliveryRepository) {
         await options.deliveryRepository
-          .markDone(messageId)
+          .markDone(claimKey)
           .catch(() => undefined);
       }
     };

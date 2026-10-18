@@ -12,6 +12,7 @@ import { ContextError } from '../constants/errors.constant.js';
 import { STATE } from '../constants/state-keys.constant.js';
 import { findingsReportSchema } from '../schemas/review.schema.js';
 import type { ReviewSkill } from '../skills/review.skill.js';
+import { annotateNewSideLines } from '../tools/diff-anchors.util.js';
 import {
   type LoadedRepoSkill,
   renderLoadedSkills,
@@ -20,7 +21,7 @@ import {
 const instruction =
   (skill: ReviewSkill) =>
   (ctx: ReadonlyContext): string => {
-    const diff = ctx.state.get<string>(STATE.diff) ?? '';
+    const diff = annotateNewSideLines(ctx.state.get<string>(STATE.diff) ?? '');
     const changedFiles = ctx.state.get<string>(STATE.changedFiles) ?? '';
     const architecture =
       ctx.state.get<string>(STATE.ctxArchitecture) ||

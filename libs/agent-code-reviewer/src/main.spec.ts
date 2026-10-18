@@ -251,6 +251,49 @@ describe('runReview', () => {
       expect(requestText(call) + systemInstruction(call)).not.toContain(
         LOCKFILE_MARKER,
       );
+      expect(requestText(call) + systemInstruction(call)).not.toContain(
+        'pnpm-lock.yaml',
+      );
     }
+  });
+
+  it('surfaces SubAgentFailedError even when the orchestrator exits without calling publishReviewResults', async () => {
+    const llm = new ScriptedLlm((request) => {
+      if (systemInstruction(request).includes('You hunt for real defects')) {
+        return { errorCode: '429', errorMessage: 'RESOURCE_EXHAUSTED' };
+      }
+      const history = requestText(request);
+      if (!history.includes('code_problems_agent')) {
+        return callTool('code_problems_agent', { focus: 'all' });
+      }
+      return text('Sub-agent failed, stopping without publishing');
+    });
+
+    await expect(runReview(input, { llm })).rejects.toThrow(
+      SubAgentFailedError,
+    );
+  });
+
+  it('does not poison a previously successful sub-agent when a redundant over-limit call is short-circuited', async () => {
+    let subAgentCalls = 0;
+    const llm = new ScriptedLlm((request) => {
+      if (systemInstruction(request).includes('You hunt for real defects')) {
+        return callTool('set_model_response', { findings: [] });
+      }
+      if (subAgentCalls < 3) {
+        subAgentCalls += 1;
+        return callTool('code_problems_agent', { focus: 'all' });
+      }
+      if (!requestText(request).includes('publishReviewResults')) {
+        return callTool('publishReviewResults', {
+          summary: 'Looks good after redundant calls',
+          findings: [],
+        });
+      }
+      return text('done');
+    });
+
+    const result = await runReview(input, { llm });
+    expect(result.summary).toBe('Looks good after redundant calls');
   });
 });

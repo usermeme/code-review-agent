@@ -269,4 +269,76 @@ describe('prEventsPushRoutes delivery dedup and poison handling', () => {
     expect(res.json().success).toBe(true);
     expect(mockOrchestrator.ingestPREvent).toHaveBeenCalled();
   });
+
+  it('deduplicates opened and review_requested events sharing the same headSha across distinct messageIds', async () => {
+    const withSha = (action: string, messageId: string) => ({
+      message: {
+        data: Buffer.from(
+          JSON.stringify({
+            ...validPayload,
+            prMeta: { ...validPayload.prMeta, action, headSha: 'abc1234' },
+          }),
+        ).toString('base64'),
+        messageId,
+      },
+      subscription: 'projects/test/subscriptions/pr-events-sub',
+    });
+
+    mockDeliveryRepo.claim
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/pr-events',
+      payload: withSha('opened', 'msg-opened'),
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/pr-events',
+      payload: withSha('review_requested', 'msg-review-requested'),
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(first.json().success).toBe(true);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().reason).toBe('Duplicate delivery');
+    expect(mockDeliveryRepo.claim).toHaveBeenNthCalledWith(
+      1,
+      'github:test-org:test-repo:101@abc1234',
+    );
+    expect(mockDeliveryRepo.claim).toHaveBeenNthCalledWith(
+      2,
+      'github:test-org:test-repo:101@abc1234',
+    );
+    expect(mockOrchestrator.ingestPREvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses messageId rather than headSha for manual_trigger so /review can re-run on the same commit', async () => {
+    const manualEnvelope = {
+      message: {
+        data: Buffer.from(
+          JSON.stringify({
+            ...validPayload,
+            prMeta: {
+              ...validPayload.prMeta,
+              action: 'manual_trigger',
+              headSha: 'abc1234',
+            },
+          }),
+        ).toString('base64'),
+        messageId: 'msg-manual-1',
+      },
+      subscription: 'projects/test/subscriptions/pr-events-sub',
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pr-events',
+      payload: manualEnvelope,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockDeliveryRepo.claim).toHaveBeenCalledWith('msg-manual-1');
+  });
 });
