@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { findingSchema, ticketReportSchema } from './review.schema.js';
+import { findingSchema, priorFindingSchema } from './review.schema.js';
 
 describe('findingSchema', () => {
   it('accepts a complete finding', () => {
@@ -55,25 +55,37 @@ describe('findingSchema', () => {
   });
 });
 
-describe('ticketReportSchema', () => {
-  it('validates a ticket coverage report', () => {
-    const result = ticketReportSchema.safeParse({
-      ticketFound: true,
-      tickets: [
-        {
-          id: 'JIRA-1',
-          url: 'https://example.com/JIRA-1',
-          requirements: [
-            {
-              requirement: 'Add endpoint',
-              status: 'implemented',
-              evidence: 'src/routes.ts hunk 2',
-            },
-          ],
-        },
-      ],
-      summary: 'Fully implemented.',
+describe('priorFindingSchema', () => {
+  it('accepts a valid prior finding', () => {
+    const result = priorFindingSchema.safeParse({
+      path: 'src/a.ts',
+      startLine: 1,
+      endLine: 5,
+      severity: 'critical',
+      title: 'SQL injection',
     });
     expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid fields or unknown severities', () => {
+    expect(
+      priorFindingSchema.safeParse({
+        path: 'src/a.ts',
+        startLine: 1.5,
+        endLine: 5,
+        severity: 'critical',
+        title: 'SQL injection',
+      }).success,
+    ).toBe(false);
+
+    expect(
+      priorFindingSchema.safeParse({
+        path: 'src/a.ts',
+        startLine: 1,
+        endLine: 5,
+        severity: 'unknown',
+        title: 'SQL injection',
+      }).success,
+    ).toBe(false);
   });
 });

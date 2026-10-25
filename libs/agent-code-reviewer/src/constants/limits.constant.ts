@@ -1,11 +1,14 @@
 /** Hard guardrail limits enforced in code (not just in prompts). */
 export const LIMITS = {
-  /** Maximum number of findings published per review. */
-  maxFindings: 15,
   /** Findings below this confidence are dropped before publishing. */
   confidenceThreshold: 0.75,
-  /** Diff tokens included in the orchestrator's own view (reviewers get the full diff via state). */
-  maxDiffTokensInOrchestratorPrompt: 2_500,
+  /**
+   * Runaway guard on findings published per review. Not an editorial cap —
+   * every valid finding should survive — but a runaway model output must not
+   * translate into hundreds of inline PR comments. The list is ranked by
+   * severity/confidence before the cap, so the most important survive.
+   */
+  maxFindingsPerReview: 50,
   /**
    * Upper bound on LLM calls for a single review, shared by the orchestrator
    * and every sub-agent (runaway guard). ADK's RunConfig.maxLlmCalls alone
@@ -21,12 +24,10 @@ export const LIMITS = {
   maxFileDiffChars: 20_000,
   /** Per-file cap (chars) on repository rule files (AGENTS.md, CLAUDE.md, ...). */
   maxRuleFileChars: 8_000,
-  /** Combined cap (chars) on rule text; it is returned into the orchestrator's history. */
+  /** Combined cap (chars) on rule text staged into state for reviewers. */
   maxTotalRuleChars: 20_000,
   /** Repository lookups (searchRepositoryCode / fetchRepositoryFile) per reviewer sub-agent. */
   maxSubAgentRepoToolCalls: 3,
-  /** Repository lookups per tool for the orchestrator itself. */
-  maxOrchestratorRepoToolCalls: 5,
   /** Calls per reviewer sub-agent (one retry for an unusable result). */
   maxSubAgentCalls: 2,
   /** Maximum number of repository skill bodies staged for reviewers. */

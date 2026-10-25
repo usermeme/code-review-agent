@@ -9,7 +9,7 @@ export const STATE = {
   diff: 'review:diff',
   changedFiles: 'review:changedFiles',
   prMeta: 'review:prMeta',
-  tickets: 'review:tickets',
+  priorFindings: 'review:priorFindings',
   ctxArchitecture: 'repoctx:architecture',
   ctxModules: 'repoctx:modules',
   ctxPatterns: 'repoctx:patterns',

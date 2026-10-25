@@ -30,7 +30,6 @@ function buildPostReviewOptions(payload: ReviewResultPayload) {
     repo: payload.repo,
     prNumber: payload.prNumber,
     summary: payload.summary || '',
-    ticketCoverage: payload.ticketCoverage,
     comments: payload.comments || [],
   };
 }

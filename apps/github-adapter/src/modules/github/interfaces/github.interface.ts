@@ -3,7 +3,6 @@ export interface PostReviewOptions {
   repo: string;
   prNumber: number;
   summary?: string;
-  ticketCoverage?: string;
   comments: {
     path: string;
     position?: number;

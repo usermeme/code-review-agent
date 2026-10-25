@@ -21,7 +21,6 @@ export interface RepoSkillSummary {
 }
 
 export interface GetRepoGuidelinesResult {
-  rules: string;
   ruleSources: string[];
   skills: RepoSkillSummary[];
   message?: string;
@@ -76,7 +75,6 @@ export function parseSkillFrontmatter(content: string): {
 
 function emptyGuidelinesResult(message: string): GetRepoGuidelinesResult {
   return {
-    rules: '',
     ruleSources: [],
     skills: [],
     message,
@@ -219,7 +217,7 @@ export function createGetRepoGuidelinesTool(
   return new FunctionTool({
     name: 'getRepoGuidelines',
     description:
-      'Fetches the repository agent rules (e.g. AGENTS.md, CLAUDE.md) and discovers available repository skills (e.g. in .agents/skills). Returns rules and a skills catalogue.',
+      'Stages repository agent rules (e.g. AGENTS.md, CLAUDE.md) into state for reviewer sub-agents and discovers available repository skills (e.g. in .agents/skills). Returns ruleSources and a skills catalogue.',
     parameters: z.object({}),
     execute: async (_input, ctx): Promise<GetRepoGuidelinesResult> => {
       const meta = ctx?.state?.get<PrMeta>(STATE.prMeta);
@@ -247,8 +245,7 @@ export function createGetRepoGuidelinesTool(
       // 2. Discover available repository skills
       const skills = await discoverRepoSkills(fetcher);
 
-      // Capped: the rules are returned to the orchestrator, whose history is
-      // re-sent on every later turn.
+      // Capped: rules are staged into state for sub-agents.
       const combinedRules = truncate(
         collectedRules.join('\n\n---\n\n'),
         LIMITS.maxTotalRuleChars,
@@ -258,7 +255,6 @@ export function createGetRepoGuidelinesTool(
       storeGuidelinesState(ctx, combinedRules, skills);
 
       return {
-        rules: combinedRules || '(no agent rules found in repository)',
         ruleSources,
         skills,
       };

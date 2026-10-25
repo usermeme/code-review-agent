@@ -64,7 +64,6 @@ describe('AgentService', () => {
         },
         diff: 'diff content',
         changedFiles: 'main.ts',
-        tickets: [],
       },
       {
         llm: mockLlm,

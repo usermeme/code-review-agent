@@ -1,3 +1,11 @@
+export interface PriorFinding {
+  path: string;
+  startLine: number;
+  endLine: number;
+  severity: 'critical' | 'major' | 'minor';
+  title: string;
+}
+
 export interface PRState {
   provider: string;
   owner: string;
@@ -9,6 +17,7 @@ export interface PRState {
   changedFiles?: string[];
   prMeta?: Partial<PRMeta> & Record<string, unknown>;
   summary?: string;
+  publishedFindings?: PriorFinding[];
   error?: string;
 }
 
@@ -63,7 +72,6 @@ export interface ReviewResultPayload {
   prNumber: number;
   comments: ReviewCommentPayload[];
   summary?: string;
-  ticketCoverage?: string;
 }
 
 export interface PRDiffResult {

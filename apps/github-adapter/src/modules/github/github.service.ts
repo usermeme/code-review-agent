@@ -61,13 +61,9 @@ function buildCommentsFooter(comments: ReviewComment[]): string {
 
 function buildReviewBody(
   summary: string | undefined,
-  ticketCoverage: string | undefined,
   comments: ReviewComment[] | undefined,
 ): string {
   let body = `## 🤖 AI Code Review Summary\n\n${summary ?? ''}`;
-  if (ticketCoverage) {
-    body += `\n\n### 🎯 Ticket & Requirements Coverage\n\n${ticketCoverage}`;
-  }
   if (comments && comments.length > 0) {
     body += buildCommentsFooter(comments);
   }
@@ -288,11 +284,10 @@ export class GithubService implements GitAdapterContract {
   }
 
   async postReview(options: PostReviewOptions): Promise<PostReviewResult> {
-    const { owner, repo, prNumber, summary, ticketCoverage, comments } =
-      options;
+    const { owner, repo, prNumber, summary, comments } = options;
 
     const octokit = await this.authService.getOctokit(owner, repo);
-    const body = buildReviewBody(summary, ticketCoverage, comments);
+    const body = buildReviewBody(summary, comments);
     const commitId = await this.resolveHeadCommitId(
       octokit,
       owner,

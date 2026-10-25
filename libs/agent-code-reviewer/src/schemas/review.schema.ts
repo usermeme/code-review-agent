@@ -1,3 +1,4 @@
+import type { PriorFinding as SharedPriorFinding } from '@code-review-agent/shared-types';
 import { z } from 'zod';
 
 export const reviewerFocusInputSchema = z.object({
@@ -28,20 +29,40 @@ export const findingsReportSchema = z.object({
   findings: z.array(findingSchema),
 });
 
-const ticketRequirementSchema = z.object({
-  requirement: z.string(),
-  status: z.enum(['implemented', 'partial', 'missing']),
-  evidence: z.string().describe('Where in the diff this is (not) addressed'),
+export const priorFindingSchema = z.object({
+  path: z.string(),
+  startLine: z.number().int(),
+  endLine: z.number().int(),
+  severity: z.enum(['critical', 'major', 'minor']),
+  title: z.string(),
 });
+export type PriorFinding = z.infer<typeof priorFindingSchema>;
 
-export const ticketReportSchema = z.object({
-  ticketFound: z.boolean(),
-  tickets: z.array(
-    z.object({
-      id: z.string(),
-      url: z.string(),
-      requirements: z.array(ticketRequirementSchema),
-    }),
-  ),
-  summary: z.string(),
+/**
+ * Compile-time drift guard: the zod shape above and the shared contract in
+ * `@code-review-agent/shared-types` (persisted as `PRState.publishedFindings`)
+ * must stay mutually assignable. If either side gains/loses a field, one of
+ * these assertions stops compiling.
+ */
+type AssertTrue<T extends true> = T;
+export type PriorFindingContractCheck = [
+  AssertTrue<SharedPriorFinding extends PriorFinding ? true : false>,
+  AssertTrue<PriorFinding extends SharedPriorFinding ? true : false>,
+];
+
+/**
+ * The orchestrator's final structured answer — the single delivery channel
+ * for a review. There is no publish tool: the runtime parses this report,
+ * applies the guardrails (see finalizeReview), and the host publishes the
+ * resulting payload exactly once.
+ */
+export const reviewReportSchema = z.object({
+  summary: z
+    .string()
+    .optional()
+    .describe('One-paragraph overall verdict of the code review'),
+  findings: z
+    .array(findingSchema)
+    .describe('Approved review findings to post inline'),
 });
+export type ReviewReport = z.infer<typeof reviewReportSchema>;

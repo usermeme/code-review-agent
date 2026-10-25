@@ -63,7 +63,6 @@ describe('reviewResultsPushRoutes', () => {
       repo: 'test-repo',
       prNumber: 42,
       summary: 'Looks great!',
-      ticketCoverage: undefined,
       comments: [
         {
           path: 'src/main.ts',

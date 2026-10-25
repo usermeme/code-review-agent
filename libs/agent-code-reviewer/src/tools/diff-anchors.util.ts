@@ -48,7 +48,7 @@ function recordHunkRange(
 /**
  * Parses a unified diff into the NEW-side line ranges each file's hunks
  * cover. GitHub only accepts inline review comments on lines inside these
- * ranges — anything else 422s — so publishReviewResults uses this to drop
+ * ranges — anything else 422s — so finalizeReview uses this to drop
  * un-anchorable findings before posting instead of after a failed API call.
  *
  * Handles `+++ b/<path>` targets, `/dev/null` (deleted files contribute no

@@ -11,7 +11,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { coreEnvSchema, CoreEnvService } from '../env.js';
 import { BaselineLockRepository } from '../modules/database/repositories/baseline-lock.repository.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
-import { DiscussionRepository } from '../modules/database/repositories/discussion.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import { AgentService } from './agent.service.js';
 import {
@@ -24,6 +23,7 @@ describe('EventOrchestratorService', () => {
   let mockPrRepo: {
     updatePRStatus: ReturnType<typeof vi.fn>;
     getPRStatus: ReturnType<typeof vi.fn>;
+    deletePRStatus: ReturnType<typeof vi.fn>;
   };
   let mockContextRepo: {
     getContext: ReturnType<typeof vi.fn>;
@@ -80,6 +80,7 @@ describe('EventOrchestratorService', () => {
     mockPrRepo = {
       updatePRStatus: vi.fn().mockResolvedValue(undefined),
       getPRStatus: vi.fn().mockResolvedValue(null),
+      deletePRStatus: vi.fn().mockResolvedValue(undefined),
     };
 
     mockContextRepo = {
@@ -272,6 +273,9 @@ describe('EventOrchestratorService', () => {
         summary: expect.stringContaining('In-process architecture'),
       }),
     );
+    expect(mockPrRepo.deletePRStatus).toHaveBeenCalledWith(
+      'github:test-org:test-repo:42',
+    );
     expect(mockRunReview).not.toHaveBeenCalled();
   });
 
@@ -298,7 +302,19 @@ describe('EventOrchestratorService', () => {
     );
   });
 
-  it('publishes review results to REVIEW_RESULTS_TOPIC when review results arrive', async () => {
+  it('publishes review results to REVIEW_RESULTS_TOPIC and accumulates published findings', async () => {
+    mockPrRepo.getPRStatus.mockResolvedValue({
+      publishedFindings: [
+        {
+          path: 'src/old.ts',
+          startLine: 1,
+          endLine: 2,
+          severity: 'minor',
+          title: 'Old finding',
+        },
+      ],
+    });
+
     const orchestrator = createTestOrchestrator();
 
     await orchestrator.handleReviewResults(
@@ -308,12 +324,11 @@ describe('EventOrchestratorService', () => {
         repo: 'test-repo',
         prNumber: 42,
         summary: 'Looks great!',
-        ticketCoverage: 'All acceptance criteria met.',
         comments: [
           {
             path: 'src/file.ts',
             position: 10,
-            body: 'Consider refactoring this helper',
+            body: '### [MAJOR] Consider refactoring this helper\n\nHelper is too long.',
           },
         ],
       },
@@ -329,19 +344,133 @@ describe('EventOrchestratorService', () => {
         repo: 'test-repo',
         prNumber: 42,
         summary: 'Looks great!',
-        ticketCoverage: 'All acceptance criteria met.',
         comments: expect.arrayContaining([
           expect.objectContaining({
             path: 'src/file.ts',
             position: 10,
-            body: 'Consider refactoring this helper',
+            body: '### [MAJOR] Consider refactoring this helper\n\nHelper is too long.',
           }),
         ]),
       }),
     );
     expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
       'github:test-org:test-repo:42',
+      expect.objectContaining({
+        status: 'completed',
+        publishedFindings: [
+          {
+            path: 'src/old.ts',
+            startLine: 1,
+            endLine: 2,
+            severity: 'minor',
+            title: 'Old finding',
+          },
+          {
+            path: 'src/file.ts',
+            startLine: 10,
+            endLine: 10,
+            severity: 'major',
+            title: 'Consider refactoring this helper',
+          },
+        ],
+      }),
+    );
+  });
+
+  it('omits publishedFindings when the stored PR read fails, so history is not wiped', async () => {
+    mockPrRepo.getPRStatus.mockRejectedValue(
+      new Error('firestore unavailable'),
+    );
+
+    const orchestrator = createTestOrchestrator();
+
+    await orchestrator.handleReviewResults(
+      {
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        prNumber: 42,
+        summary: 'Looks great!',
+        comments: [
+          {
+            path: 'src/file.ts',
+            position: 10,
+            body: '### [MAJOR] Consider refactoring this helper\n\nHelper is too long.',
+          },
+        ],
+      },
+      'github:test-org:test-repo:42',
+    );
+
+    // The review still completes and is published...
+    expect(publishedMessages).toHaveLength(1);
+    expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+      'github:test-org:test-repo:42',
       expect.objectContaining({ status: 'completed' }),
+    );
+    // ...but the update must NOT carry publishedFindings: an empty/partial
+    // list written after a failed read would erase the stored history.
+    const completedUpdate = mockPrRepo.updatePRStatus.mock.calls.find(
+      (call: unknown[]) =>
+        (call[1] as { status?: string }).status === 'completed',
+    );
+    expect(completedUpdate?.[1]).not.toHaveProperty('publishedFindings');
+  });
+
+  it('drops malformed stored findings instead of failing the review input', async () => {
+    mockPrRepo.getPRStatus.mockResolvedValue({
+      publishedFindings: [
+        {
+          path: 'src/ok.ts',
+          startLine: 1,
+          endLine: 2,
+          severity: 'major',
+          title: 'Valid finding',
+        },
+        {
+          path: 'src/bad.ts',
+          startLine: 1.5,
+          endLine: 2,
+          severity: 'blocker',
+          title: 'Poisoned record',
+        },
+      ],
+    });
+    mockContextRepo.getContext.mockResolvedValue({
+      summary: '{"architecture":"cached"}',
+    });
+
+    const orchestrator = createTestOrchestrator();
+
+    await orchestrator.ingestPREvent({
+      prMeta: {
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        prNumber: 42,
+        action: 'synchronize',
+        title: 'Feature X',
+        author: 'developer',
+        branch: 'feat/x',
+        htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+      },
+      diff: 'diff --git a/file.ts ...',
+      changedFiles: ['file.ts'],
+    } satisfies PREventPayload);
+
+    expect(mockRunReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        priorFindings: [
+          {
+            path: 'src/ok.ts',
+            startLine: 1,
+            endLine: 2,
+            severity: 'major',
+            title: 'Valid finding',
+          },
+        ],
+      }),
+      expect.anything(),
     );
   });
 
@@ -394,7 +523,7 @@ describe('EventOrchestratorService', () => {
     );
   });
 
-  describe('baseline lock and discussion wiring', () => {
+  describe('baseline lock and prior findings wiring', () => {
     function makeOpenedRequest(): PREventPayload {
       return {
         prMeta: {
@@ -417,48 +546,59 @@ describe('EventOrchestratorService', () => {
       } satisfies PREventPayload;
     }
 
-    it('backs the discussion tools with the repository when configured', async () => {
-      const mockDiscussionRepo = {
-        search: vi.fn().mockResolvedValue([]),
-        store: vi.fn().mockResolvedValue(true),
-      };
+    it('loads prior findings from stored PR and passes them into review input', async () => {
       mockContextRepo.getContext.mockResolvedValue({
-        summary: '{"architecture":"cached"}',
-      });
-      const orchestrator = createTestOrchestrator({
-        discussionRepository:
-          mockDiscussionRepo as unknown as DiscussionRepository,
+        prKey: 'github:test-org:test-repo:0',
+        summary: JSON.stringify({ architecture: 'microservices' }),
+        updatedAt: new Date(),
       });
 
-      await orchestrator.ingestPREvent(makeOpenedRequest());
+      const prior = [
+        {
+          path: 'src/db.ts',
+          startLine: 10,
+          endLine: 12,
+          severity: 'critical' as const,
+          title: 'SQL Injection',
+        },
+      ];
+
+      mockPrRepo.getPRStatus.mockResolvedValue({
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        prNumber: 42,
+        status: 'reviewing',
+        updatedAt: new Date(),
+        publishedFindings: prior,
+      });
+
+      const orchestrator = createTestOrchestrator();
+
+      const req: PREventPayload = {
+        prMeta: {
+          provider: 'github',
+          owner: 'test-org',
+          repo: 'test-repo',
+          prNumber: 42,
+          action: 'synchronize',
+          title: 'Feature X',
+          author: 'developer',
+          branch: 'feat/x',
+          htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+        },
+        diff: 'diff --git a/file.ts ...',
+        changedFiles: ['file.ts'],
+      };
+
+      await orchestrator.ingestPREvent(req);
 
       expect(mockRunReview).toHaveBeenCalledWith(
-        expect.anything(),
         expect.objectContaining({
-          searchDiscussions: expect.any(Function),
-          storeDiscussion: expect.any(Function),
+          priorFindings: prior,
         }),
+        expect.anything(),
       );
-
-      const options = mockRunReview.mock.calls[0][1] as {
-        searchDiscussions?: (
-          repo: string,
-          query: string,
-          limit: number,
-        ) => Promise<unknown>;
-        storeDiscussion?: (input: Record<string, unknown>) => Promise<unknown>;
-      };
-      await options.searchDiscussions?.('acme/app', 'sql injection', 5);
-      expect(mockDiscussionRepo.search).toHaveBeenCalledWith(
-        'acme/app',
-        'sql injection',
-        5,
-      );
-      await options.storeDiscussion?.({ repo: 'acme/app', body: 'note' });
-      expect(mockDiscussionRepo.store).toHaveBeenCalledWith({
-        repo: 'acme/app',
-        body: 'note',
-      });
     });
 
     describe('cross-instance baseline lock', () => {

@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import {
   createOrchestrator,
+  ORCHESTRATOR_AGENT_NAME,
   type OrchestratorTools,
   SubAgentFailedError,
 } from './agents/orchestrator.agent.js';
@@ -15,19 +16,15 @@ import { ContextError } from './constants/errors.constant.js';
 import { LIMITS } from './constants/limits.constant.js';
 import { STATE } from './constants/state-keys.constant.js';
 import { CoordinateGuardPlugin } from './plugins/coordinate-guard.plugin.js';
-import { createFetchRepositoryFileTool } from './tools/fetch-repository-file.tool.js';
 import {
-  createGetDiscussionTool,
-  type DiscussionSearchFunction,
-} from './tools/get-discussion.tool.js';
+  priorFindingSchema,
+  type ReviewReport,
+  reviewReportSchema,
+} from './schemas/review.schema.js';
+import { createFetchRepositoryFileTool } from './tools/fetch-repository-file.tool.js';
 import { createGetRepoGuidelinesTool } from './tools/get-repo-guidelines.tool.js';
 import { createLoadRepoSkillTool } from './tools/load-repo-skill.tool.js';
-import { createPublishReviewResultsTool } from './tools/publish-review-results.tool.js';
 import { createSearchRepositoryCodeTool } from './tools/search-repository-code.tool.js';
-import {
-  createStoreDiscussionTool,
-  type DiscussionStoreFunction,
-} from './tools/store-discussion.tool.js';
 import {
   createLlmCallBudget,
   type LlmCallBudget,
@@ -39,6 +36,10 @@ import {
   prepareDiff,
   stripUnreviewableOmissions,
 } from './utils/diff.util.js';
+import {
+  buildPublishTarget,
+  finalizeReview,
+} from './utils/finalize-review.util.js';
 
 /**
  * Validated review input. Parsing happens in code (fail-fast) — the payload
@@ -60,7 +61,7 @@ export const reviewInputSchema = z.object({
   }),
   diff: z.string(),
   changedFiles: z.string().optional().default(''),
-  tickets: z.array(z.unknown()).optional().default([]),
+  priorFindings: z.array(priorFindingSchema).optional().default([]),
 });
 
 export type ReviewExecutionInput = z.input<typeof reviewInputSchema>;
@@ -72,8 +73,11 @@ export interface RunReviewOptions {
   llm: BaseLlm;
   baselineContext?: string | Record<string, string>;
   gitAdapter?: GitAdapterContract;
-  searchDiscussions?: DiscussionSearchFunction;
-  storeDiscussion?: DiscussionStoreFunction;
+  /**
+   * Called exactly once with the finalized payload, right before runReview
+   * returns it. The library itself never publishes — delivering the review
+   * (e.g. to Pub/Sub) exactly once is the host's job.
+   */
   onPublishResult?: (payload: ReviewResultPayload) => Promise<void> | void;
   /** Overrides LIMITS.maxLlmCalls (orchestrator and sub-agents combined). */
   maxLlmCalls?: number;
@@ -135,21 +139,14 @@ interface BuildReviewToolsArgs {
   options: RunReviewOptions;
   meta: ParsedPrMeta;
   fileCache: Map<string, string>;
-  defaultRepo: string;
-  onPublishResult: (payload: ReviewResultPayload) => Promise<void>;
 }
 
 function buildReviewTools({
   options,
   meta,
   fileCache,
-  defaultRepo,
-  onPublishResult,
 }: BuildReviewToolsArgs): OrchestratorTools {
-  const tools: OrchestratorTools = {
-    publishReviewResults: createPublishReviewResultsTool({
-      onPublishResult,
-    }),
+  return {
     searchRepositoryCode: createSearchRepositoryCodeTool({
       gitAdapter: options.gitAdapter,
       defaultOwner: meta.owner,
@@ -174,31 +171,13 @@ function buildReviewTools({
       cache: fileCache,
     }),
   };
-
-  // Discussion tools are registered only when the host actually wired a
-  // store — otherwise the model would waste turns on permanent no-ops.
-  if (options.searchDiscussions) {
-    tools.getDiscussion = createGetDiscussionTool({
-      searchDiscussions: options.searchDiscussions,
-      defaultRepo,
-    });
-  }
-  if (options.storeDiscussion) {
-    tools.storeDiscussion = createStoreDiscussionTool({
-      storeDiscussion: options.storeDiscussion,
-      defaultRepo,
-      defaultPrNumber: meta.number,
-    });
-  }
-
-  return tools;
 }
 
 function buildRunTriggerMessage(meta: ParsedPrMeta): string {
   return (
     `Review pull request ${meta.provider || 'github'}:${meta.owner || ''}/` +
     `${meta.repo}#${meta.number} "${meta.title}". ` +
-    `The PR metadata, diff, changed-file paths, tickets, and repository baseline context are in session state.`
+    `The PR metadata, diff, changed-file paths, prior findings, and repository baseline context are in session state.`
   );
 }
 
@@ -220,6 +199,43 @@ function isAgentErrorEvent(event: Event): boolean {
 
 function describeAgentErrorEvent(event: Event): string {
   return `${event.errorCode ?? 'agent_error'}: ${event.errorMessage ?? 'unknown error'}`;
+}
+
+/** Collects candidate JSON substrings from a raw model text turn. */
+function collectReportCandidates(trimmed: string): string[] {
+  const candidates: string[] = [];
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  candidates.push(fenced ? fenced[1] : trimmed);
+  const first = trimmed.indexOf('{');
+  const last = trimmed.lastIndexOf('}');
+  if (first >= 0 && last > first) {
+    candidates.push(trimmed.slice(first, last + 1));
+  }
+  return candidates;
+}
+
+/** Parses a model text turn into the final report, tolerating code fences. */
+function parseReviewReportText(raw: string): ReviewReport | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  for (const candidate of collectReportCandidates(trimmed)) {
+    try {
+      const parsed = reviewReportSchema.safeParse(JSON.parse(candidate));
+      if (parsed.success) return parsed.data;
+    } catch {
+      // Not JSON — try the next candidate shape.
+    }
+  }
+  return null;
+}
+
+/** Extracts the orchestrator's final report from one of its text events. */
+function extractReviewReport(event: Event): ReviewReport | null {
+  if (event.author !== ORCHESTRATOR_AGENT_NAME) return null;
+  const text = (event.content?.parts ?? [])
+    .map((part) => (typeof part.text === 'string' ? part.text : ''))
+    .join('');
+  return parseReviewReportText(text);
 }
 
 function resolveRunFailure(args: {
@@ -245,16 +261,19 @@ function resolveRunFailure(args: {
     throw new Error(`Code review agent failed: ${args.errors.join('; ')}`);
   }
   throw new Error(
-    `Code review agent finished without publishing a result (publishReviewResults was never called) for ${args.defaultRepo}#${args.prNumber}.`,
+    `Code review agent finished without a parseable final report for ${args.defaultRepo}#${args.prNumber}.`,
   );
 }
 
 /**
  * Runs the full PR review.
  *
- * Failures are loud: agent error events or a run that ends without calling
- * publishReviewResults throw, instead of silently publishing a misleading
- * "no findings" review. All bulk data (diff, PR meta, baseline context
+ * Failures are loud: agent error events or a run that ends without a
+ * parseable final report throw, instead of silently publishing a misleading
+ * "no findings" review. The orchestrator delivers the review as its final
+ * structured answer (there is no publish tool); this function applies the
+ * code-enforced guardrails to it and returns the payload for the host to
+ * publish exactly once. All bulk data (diff, PR meta, baseline context
  * sections) is seeded through `stateDelta` — the user message is a short
  * trigger line and no dependency object is ever serialized into model input.
  */
@@ -267,21 +286,9 @@ export async function runReview(
   const sections = parseBaselineSections(options.baselineContext);
   const defaultRepo = buildDefaultRepo(meta);
 
-  let resultPayload: ReviewResultPayload | null = null;
   const fileCache = new Map<string, string>();
 
-  const tools = buildReviewTools({
-    options,
-    meta,
-    fileCache,
-    defaultRepo,
-    onPublishResult: async (res) => {
-      resultPayload = res;
-      if (options.onPublishResult) {
-        await options.onPublishResult(res);
-      }
-    },
-  });
+  const tools = buildReviewTools({ options, meta, fileCache });
 
   const maxLlmCalls = options.maxLlmCalls ?? LIMITS.maxLlmCalls;
   const timeoutMs = options.timeoutMs ?? LIMITS.reviewTimeoutMs;
@@ -297,7 +304,6 @@ export async function runReview(
   const agent = createOrchestrator({
     llm: options.llm,
     tools,
-    hasTickets: parsed.tickets.length > 0,
     budget,
     onSubAgentFailure: (agents) => {
       failedSubAgents = agents;
@@ -319,8 +325,17 @@ export async function runReview(
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !isIgnoredDiffPath(line))
     .join('\n');
+  const reviewDiff = stripUnreviewableOmissions(prepareDiff(parsed.diff).diff);
 
   const errors: string[] = [];
+  // The orchestrator's final report, locked in as soon as it is emitted while
+  // no sub-agent is failed — the same window in which the old publish tool
+  // call used to lock in the result. Failures recorded afterwards do not
+  // invalidate it; failures recorded before prevent it (the report stays null
+  // and resolveRunFailure raises SubAgentFailedError instead). Boxed in an
+  // object because TS narrows a closure-assigned `let` back to `null` at the
+  // read site below, which would type the report as `never`.
+  const locked: { report: ReviewReport | null } = { report: null };
   const consume = async () => {
     for await (const event of runner.runAsync({
       userId,
@@ -334,9 +349,9 @@ export async function runReview(
       },
       stateDelta: {
         [STATE.prMeta]: meta,
-        [STATE.diff]: stripUnreviewableOmissions(prepareDiff(parsed.diff).diff),
+        [STATE.diff]: reviewDiff,
         [STATE.changedFiles]: filteredChangedFiles,
-        [STATE.tickets]: parsed.tickets,
+        [STATE.priorFindings]: parsed.priorFindings,
         ...buildContextSectionsState(sections),
       },
       runConfig: { maxLlmCalls },
@@ -349,6 +364,9 @@ export async function runReview(
         // error event, which prevents LlmAgent.runAsyncImpl from exiting its
         // loop and would otherwise burn remaining maxLlmCalls.
         break;
+      }
+      if (!locked.report && !failedSubAgents) {
+        locked.report = extractReviewReport(event);
       }
     }
   };
@@ -369,8 +387,20 @@ export async function runReview(
     });
   }
 
-  // A result published before a late failure is still a complete review.
-  if (resultPayload) return resultPayload;
+  // A report locked in before a late failure is still a complete review.
+  if (locked.report) {
+    const finalized = finalizeReview({
+      summary: locked.report.summary,
+      findings: locked.report.findings,
+      diff: reviewDiff,
+      priorFindings: parsed.priorFindings,
+      target: buildPublishTarget(meta),
+    });
+    if (options.onPublishResult) {
+      await options.onPublishResult(finalized.payload);
+    }
+    return finalized.payload;
+  }
   resolveRunFailure({
     timedOut,
     timeoutMs,

@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  isDuplicateFinding,
+  isPriorDuplicate,
   parseBaselineSections,
   prepareDiff,
+  priorFindingSchema,
   type ReviewExecutionInput,
   type RunReviewOptions,
-  type StoreDiscussionInput,
 } from '@code-review-agent/agent-code-reviewer';
 import type {
   BuildContextOptions,
@@ -15,8 +17,10 @@ import {
   GitAdapterContract,
   NonRetryableTaskError,
   PREventPayload,
+  type PriorFinding,
   PRMeta,
   PRState,
+  type ReviewCommentPayload,
   ReviewResultPayload,
 } from '@code-review-agent/shared-types';
 import type { BaseLlm } from '@google/adk';
@@ -26,13 +30,19 @@ import { FastifyBaseLogger } from 'fastify';
 import type { CoreEnvService } from '../env.js';
 import { BaselineLockRepository } from '../modules/database/repositories/baseline-lock.repository.js';
 import { ContextRepository } from '../modules/database/repositories/context.repository.js';
-import { DiscussionRepository } from '../modules/database/repositories/discussion.repository.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
 import type { AgentService } from './agent.service.js';
 
 /** Poll interval and total wait while another instance holds the baseline lock. */
 const BASELINE_LOCK_POLL_MS = 5_000;
 const BASELINE_LOCK_WAIT_MS = 20 * 60 * 1000;
+
+/**
+ * Upper bound on findings accumulated across review runs for one PR. The list
+ * is injected into reviewer prompts on every run and stored on the PR doc, so
+ * it must not grow without bound on long-lived PRs; oldest entries are evicted.
+ */
+const MAX_STORED_PUBLISHED_FINDINGS = 200;
 
 interface BaselineBuildParams {
   baselineKey: string;
@@ -64,8 +74,6 @@ export interface EventOrchestratorDependencies {
   contextRepository: ContextRepository;
   /** Optional cross-instance lock for baseline builds (Firestore-backed). */
   baselineLockRepository?: BaselineLockRepository;
-  /** Optional review-discussion memory backing getDiscussion/storeDiscussion. */
-  discussionRepository?: DiscussionRepository;
   pubsub: PubSub;
   agentService: AgentService;
   gitAdapterClient: GitAdapterContract;
@@ -124,11 +132,6 @@ function backfillField(
   return value || stored || fallback;
 }
 
-/** True when the event already carries the metadata `/review` comments omit. */
-function hasCompletePrMeta(meta: PRMeta): boolean {
-  return Boolean(meta.branch && meta.title && meta.author);
-}
-
 /** Fills gaps in the event metadata from the stored PR record; event wins. */
 function mergeStoredPrMeta(meta: PRMeta, storedMeta: StoredPrMeta): PRMeta {
   return {
@@ -142,11 +145,81 @@ function mergeStoredPrMeta(meta: PRMeta, storedMeta: StoredPrMeta): PRMeta {
   };
 }
 
+/** True when the event already carries the metadata `/review` comments omit. */
+function hasCompletePrMeta(meta: PRMeta): boolean {
+  return Boolean(meta.branch && meta.title && meta.author);
+}
+
+/**
+ * Drops malformed stored findings instead of failing the whole review: the
+ * records come from a mutable datastore, and one poisoned row must not make
+ * every future review of that PR deterministically unparseable.
+ */
+function sanitizePriorFindings(
+  findings: PriorFinding[] | undefined,
+): PriorFinding[] {
+  return (findings ?? []).filter(
+    (f) => priorFindingSchema.safeParse(f).success,
+  );
+}
+
+function extractStoredPRInfo(
+  meta: PRMeta,
+  storedPR: PRState | null,
+): { resolvedMeta: PRMeta; priorFindings: PriorFinding[] } {
+  // Backfill only incomplete event metadata (e.g. `/review` issue_comment
+  // webhooks). Merging on complete events would resurrect fields the author
+  // deliberately cleared (an emptied PR body) from the stored record.
+  const resolvedMeta =
+    storedPR?.prMeta && !hasCompletePrMeta(meta)
+      ? mergeStoredPrMeta(meta, storedPR.prMeta)
+      : meta;
+  return {
+    resolvedMeta,
+    priorFindings: sanitizePriorFindings(storedPR?.publishedFindings),
+  };
+}
+
+const COMMENT_HEADER_REGEX =
+  /^###\s*\[(CRITICAL|MAJOR|MINOR)\]\s*(.+?)(?:\n|$)/i;
+
+function extractPublishedFinding(
+  comment: ReviewCommentPayload,
+): PriorFinding | null {
+  const match = COMMENT_HEADER_REGEX.exec(comment.body);
+  if (!match) return null;
+  const severity = match[1].toLowerCase() as 'critical' | 'major' | 'minor';
+  const title = match[2].trim();
+  const endLine = comment.position ?? comment.line ?? 1;
+  const startLine = comment.startPosition ?? endLine;
+  return {
+    path: comment.path,
+    startLine,
+    endLine,
+    severity,
+    title,
+  };
+}
+
+function extractPublishedFindings(
+  comments: ReviewCommentPayload[],
+): PriorFinding[] {
+  const findings: PriorFinding[] = [];
+  for (const comment of comments) {
+    const finding = extractPublishedFinding(comment);
+    if (finding) {
+      findings.push(finding);
+    }
+  }
+  return findings;
+}
+
 /** Review input for an in-process review of the event's own PR metadata. */
 function buildReviewInput(
   meta: PRMeta,
   diff: string,
   changedFiles: string[] | undefined,
+  priorFindings: PriorFinding[] = [],
 ): ReviewExecutionInput {
   return {
     prMeta: {
@@ -163,20 +236,58 @@ function buildReviewInput(
     },
     diff,
     changedFiles: toChangedFilesString(changedFiles),
-    tickets: [],
+    priorFindings,
   };
 }
 
-/** The prMeta payload for a PR status row: headSha only when known. */
+/** Firestore rejects `undefined` values, so stored text fields get defaults. */
+function storedText(value: string | undefined): string {
+  return value ?? '';
+}
+
+/** headSha is stored only when known. */
+function storedHeadSha(meta: PRMeta): { headSha?: string } {
+  return meta.headSha ? { headSha: meta.headSha } : {};
+}
+
+/** The prMeta payload for a PR status row. Every field must be defined —
+ * Firestore rejects `undefined` values — and headSha is stored only when known. */
 function buildStoredPrMeta(meta: PRMeta) {
   return {
-    title: meta.title,
-    author: meta.author,
-    branch: meta.branch,
-    body: meta.body,
-    baseRef: meta.baseRef,
-    ...(meta.headSha ? { headSha: meta.headSha } : {}),
+    title: storedText(meta.title),
+    author: storedText(meta.author),
+    branch: storedText(meta.branch),
+    body: storedText(meta.body),
+    baseRef: meta.baseRef ?? 'main',
+    ...storedHeadSha(meta),
   };
+}
+
+/**
+ * Appends this run's published comments to the stored finding history.
+ * Cross-run comparison ignores lines (commits shift them); findings from THIS
+ * batch share one diff, so they get the strict line-aware dedup — two distinct
+ * same-title findings in one run must not collapse into a single history entry.
+ */
+function mergeNewIntoStoredFindings(
+  stored: PriorFinding[],
+  comments: ReviewCommentPayload[],
+): PriorFinding[] {
+  const merged: PriorFinding[] = [...stored];
+  const fromThisRun: PriorFinding[] = [];
+  for (const candidate of extractPublishedFindings(comments)) {
+    const knownFromHistory = stored.some((prior) =>
+      isPriorDuplicate(candidate, prior),
+    );
+    const knownFromRun = fromThisRun.some((finding) =>
+      isDuplicateFinding(candidate, finding),
+    );
+    if (!knownFromHistory && !knownFromRun) {
+      fromThisRun.push(candidate);
+      merged.push(candidate);
+    }
+  }
+  return merged;
 }
 
 export class EventOrchestratorService {
@@ -184,7 +295,6 @@ export class EventOrchestratorService {
   private prRepository: PrRepository;
   private contextRepository: ContextRepository;
   private baselineLockRepository?: BaselineLockRepository;
-  private discussionRepository?: DiscussionRepository;
   private envService: CoreEnvService;
   private agentService: AgentService;
   private gitAdapterClient: GitAdapterContract;
@@ -205,7 +315,6 @@ export class EventOrchestratorService {
     this.prRepository = deps.prRepository;
     this.contextRepository = deps.contextRepository;
     this.baselineLockRepository = deps.baselineLockRepository;
-    this.discussionRepository = deps.discussionRepository;
     this.envService = deps.envService;
     this.agentService = deps.agentService;
     this.gitAdapterClient = deps.gitAdapterClient;
@@ -297,11 +406,45 @@ export class EventOrchestratorService {
 
     const summary = toSummaryString(sections);
     await this.saveBaselineSummaryIfValid(baselineKey, summary, logger);
+    await this.prRepository.deletePRStatus(prKey);
 
     return {
       success: true,
       status: 'queued',
       message: 'Incremental context build completed for merged PR',
+    };
+  }
+
+  private async loadStoredPRInfo(
+    meta: PRMeta,
+    prKey: string,
+  ): Promise<{ resolvedMeta: PRMeta; priorFindings: PriorFinding[] }> {
+    const storedPR = await this.prRepository
+      .getPRStatus(prKey)
+      .catch(() => null);
+    return extractStoredPRInfo(meta, storedPR);
+  }
+
+  private async ensureDiffAndFiles(
+    req: PREventPayload,
+    meta: PRMeta,
+    prKey: string,
+    logger?: FastifyBaseLogger,
+  ): Promise<{ diff: string; changedFiles: string[] }> {
+    let { diff, changedFiles } = readRequestedChanges(req);
+    if (needsDiffFetch(diff, changedFiles)) {
+      ({ diff, changedFiles } = await this.fetchDiffFromAdapter(
+        { diff, changedFiles },
+        meta.owner,
+        meta.repo,
+        meta.prNumber,
+        prKey,
+        logger,
+      ));
+    }
+    return {
+      diff: prepareDiff(diff).diff,
+      changedFiles,
     };
   }
 
@@ -317,28 +460,16 @@ export class EventOrchestratorService {
     baselineKey: string,
     logger?: FastifyBaseLogger,
   ): Promise<PREventResult> {
-    let { diff, changedFiles } = readRequestedChanges(req);
-
-    // Manual `/review` comments arrive from GitHub's `issue_comment` webhook,
-    // which omits `pull_request.head.ref` / `head.sha`; backfill any missing
-    // PR metadata from the stored PR record when available.
-    const resolvedMeta = await this.resolvePrMeta(meta, prKey);
-
-    if (needsDiffFetch(diff, changedFiles)) {
-      ({ diff, changedFiles } = await this.fetchDiffFromAdapter(
-        { diff, changedFiles },
-        resolvedMeta.owner,
-        resolvedMeta.repo,
-        resolvedMeta.prNumber,
-        prKey,
-        logger,
-      ));
-    }
-
-    // Filter and cap once, before the diff is stored or sent to any LLM:
-    // Firestore rejects documents over 1 MiB, and a failed write here would
-    // fail (and redeliver) the whole event.
-    diff = prepareDiff(diff).diff;
+    const { resolvedMeta, priorFindings } = await this.loadStoredPRInfo(
+      meta,
+      prKey,
+    );
+    const { diff, changedFiles } = await this.ensureDiffAndFiles(
+      req,
+      resolvedMeta,
+      prKey,
+      logger,
+    );
 
     const buildParams: BaselineBuildParams = {
       baselineKey,
@@ -350,16 +481,11 @@ export class EventOrchestratorService {
     };
 
     const baselineSummary = await this.resolveBaselineSummary(buildParams);
-
-    // Run review in-process
-    logger?.info(
-      `[Core] Baseline context ready. Running review for ${prKey} in-process.`,
-    );
     await this.recordPrBuildStatus(buildParams, 'reviewing');
 
     const reviewResult = await this.runReviewOrFail(
       prKey,
-      buildReviewInput(resolvedMeta, diff, changedFiles),
+      buildReviewInput(resolvedMeta, diff, changedFiles, priorFindings),
       this.createRunReviewOptions(baselineSummary),
     );
 
@@ -370,21 +496,6 @@ export class EventOrchestratorService {
       status: 'reviewing',
       message: 'Review completed and results published',
     };
-  }
-
-  /** Backfills missing PR metadata from the stored PR record, if any. */
-  private async resolvePrMeta(meta: PRMeta, prKey: string): Promise<PRMeta> {
-    if (hasCompletePrMeta(meta)) {
-      return meta;
-    }
-    const storedPR = await this.prRepository
-      .getPRStatus(prKey)
-      .catch(() => null);
-    const storedMeta = storedPR?.prMeta;
-    if (!storedMeta) {
-      return meta;
-    }
-    return mergeStoredPrMeta(meta, storedMeta);
   }
 
   /**
@@ -459,25 +570,11 @@ export class EventOrchestratorService {
     });
   }
 
-  /**
-   * runReview options. When a discussion repository is configured, the agent's
-   * getDiscussion/storeDiscussion tools are backed by it; otherwise they stay
-   * unregistered.
-   */
   private createRunReviewOptions(baselineContext: string): RunReviewOptions {
-    const discussionRepository = this.discussionRepository;
     return {
       llm: this.llm,
       baselineContext,
       gitAdapter: this.gitAdapterClient,
-      ...(discussionRepository
-        ? {
-            searchDiscussions: (repo: string, query: string, limit: number) =>
-              discussionRepository.search(repo, query, limit),
-            storeDiscussion: (input: StoreDiscussionInput) =>
-              discussionRepository.store(input),
-          }
-        : {}),
     };
   }
 
@@ -503,6 +600,46 @@ export class EventOrchestratorService {
     }
   }
 
+  private async assertMatchingCoordinates(
+    prKey: string,
+    expectedPrKey: string,
+  ): Promise<void> {
+    if (prKey === expectedPrKey) return;
+    const error = `Review result coordinates (${prKey}) do not match the originating PR event (${expectedPrKey}); refusing to publish.`;
+    await this.prRepository
+      .updatePRStatus(expectedPrKey, { status: 'failed', error })
+      .catch(() => {
+        // status bookkeeping must not mask the original failure
+      });
+    throw new NonRetryableTaskError(error);
+  }
+
+  /**
+   * Merges this run's published comments into the PR's stored finding
+   * history. Returns `null` when the stored record could not be read: the
+   * caller must then OMIT `publishedFindings` from the status write so the
+   * Firestore merge preserves the existing history — writing a list seeded
+   * from a failed read would wipe it.
+   */
+  private async mergeStoredAndNewFindings(
+    prKey: string,
+    comments: ReviewCommentPayload[],
+    logger?: FastifyBaseLogger,
+  ): Promise<PriorFinding[] | null> {
+    let storedPR: PRState | null;
+    try {
+      storedPR = await this.prRepository.getPRStatus(prKey);
+    } catch (error) {
+      logger?.warn(
+        `[Core] Could not read stored findings for ${prKey}; keeping existing history untouched: ${String(error)}`,
+      );
+      return null;
+    }
+    const stored = sanitizePriorFindings(storedPR?.publishedFindings);
+    const merged = mergeNewIntoStoredFindings(stored, comments);
+    return merged.slice(-MAX_STORED_PUBLISHED_FINDINGS);
+  }
+
   async handleReviewResults(
     payload: ReviewResultPayload,
     expectedPrKey: string,
@@ -510,25 +647,7 @@ export class EventOrchestratorService {
   ): Promise<void> {
     const { provider, owner, repo, prNumber, summary } = payload;
     const prKey = `${provider}:${owner}:${repo}:${prNumber}`;
-
-    // Correlation check at the trust boundary: the review must carry the
-    // coordinates of the event that triggered it. A payload redirected to
-    // another repo/PR (e.g. by prompt injection) is rejected before it is
-    // ever published to the results topic.
-    if (prKey !== expectedPrKey) {
-      // Deterministic, and it fires after a fully paid review: a redelivery
-      // would pay again and be rejected again.
-      const error = `Review result coordinates (${prKey}) do not match the originating PR event (${expectedPrKey}); refusing to publish.`;
-      // The route acks this non-retryable failure and marks the delivery
-      // done, so record it on the PR that triggered the review — otherwise
-      // that PR stays "reviewing" forever with the rejection only in logs.
-      await this.prRepository
-        .updatePRStatus(expectedPrKey, { status: 'failed', error })
-        .catch(() => {
-          // status bookkeeping must not mask the original failure
-        });
-      throw new NonRetryableTaskError(error);
-    }
+    await this.assertMatchingCoordinates(prKey, expectedPrKey);
 
     logger?.info(
       `[Core] Handling review results for ${prKey}. Publishing to Review Results topic.`,
@@ -536,10 +655,26 @@ export class EventOrchestratorService {
 
     try {
       await this.publishReviewResults(payload);
-      await this.prRepository.updatePRStatus(prKey, {
-        status: 'completed',
-        summary,
-      });
+      const publishedFindings = await this.mergeStoredAndNewFindings(
+        prKey,
+        payload.comments,
+        logger,
+      );
+      await this.prRepository
+        .updatePRStatus(prKey, {
+          status: 'completed',
+          summary,
+          // Omitted (not []) when the stored history could not be read, so
+          // the field-level merge preserves whatever is already in Firestore.
+          ...(publishedFindings ? { publishedFindings } : {}),
+        })
+        .catch((error) => {
+          // The review is already published; failing the delivery here would
+          // redeliver the PR event and post a duplicate review to the PR.
+          logger?.warn(
+            `[Core] Could not record completion for ${prKey}: ${String(error)}`,
+          );
+        });
     } catch (error) {
       logger?.error(
         `[Core] Failed to publish review results: ${String(error)}`,

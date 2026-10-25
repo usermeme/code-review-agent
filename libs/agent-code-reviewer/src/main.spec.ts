@@ -116,7 +116,7 @@ describe('runReview', () => {
     await expect(failure).rejects.not.toBeInstanceOf(NonRetryableTaskError);
   });
 
-  it('fails instead of publishing a clean review when a sub-agent fails', async () => {
+  it('fails instead of returning a clean review when a sub-agent fails', async () => {
     let published = false;
     const llm = new ScriptedLlm((request) => {
       if (systemInstruction(request).includes('You hunt for real defects')) {
@@ -126,13 +126,9 @@ describe('runReview', () => {
       if (!history.includes('code_problems_agent')) {
         return callTool('code_problems_agent', { focus: 'all' });
       }
-      if (!history.includes('publishReviewResults')) {
-        return callTool('publishReviewResults', {
-          summary: 'Looks good',
-          findings: [],
-        });
-      }
-      return text('done');
+      // The orchestrator ends with a perfectly valid final report — it must
+      // still be vetoed because a sub-agent failed.
+      return text(JSON.stringify({ summary: 'Looks good', findings: [] }));
     });
 
     await expect(
@@ -146,10 +142,10 @@ describe('runReview', () => {
     expect(published).toBe(false);
   });
 
-  it('keeps blocking publish when an over-limit sub-agent retry is short-circuited', async () => {
+  it('keeps vetoing the report when an over-limit sub-agent retry is short-circuited', async () => {
     // The tool-call limiter answers a third call to an already-failed
     // sub-agent with an {error} response without running it. That response
-    // must not be mistaken for a success and unblock publish.
+    // must not be mistaken for a success and unblock the final report.
     let published = false;
     let subAgentCalls = 0;
     const llm = new ScriptedLlm((request) => {
@@ -160,13 +156,7 @@ describe('runReview', () => {
         subAgentCalls += 1;
         return callTool('code_problems_agent', { focus: 'all' });
       }
-      if (!requestText(request).includes('publishReviewResults')) {
-        return callTool('publishReviewResults', {
-          summary: 'Looks good',
-          findings: [],
-        });
-      }
-      return text('done');
+      return text(JSON.stringify({ summary: 'Looks good', findings: [] }));
     });
 
     await expect(
@@ -180,7 +170,7 @@ describe('runReview', () => {
     expect(published).toBe(false);
   });
 
-  it('publishes when the sub-agents succeed', async () => {
+  it('returns the finalized report when the sub-agents succeed', async () => {
     const llm = new ScriptedLlm((request) => {
       if (systemInstruction(request).includes('You hunt for real defects')) {
         return callTool('set_model_response', { findings: [] });
@@ -189,13 +179,7 @@ describe('runReview', () => {
       if (!history.includes('code_problems_agent')) {
         return callTool('code_problems_agent', { focus: 'all' });
       }
-      if (!history.includes('publishReviewResults')) {
-        return callTool('publishReviewResults', {
-          summary: 'Looks good',
-          findings: [],
-        });
-      }
-      return text('done');
+      return text(JSON.stringify({ summary: 'Looks good', findings: [] }));
     });
 
     const result = await runReview(input, { llm });
@@ -236,18 +220,37 @@ describe('runReview', () => {
   });
 
   it('keeps the diff out of the conversation and filters lockfiles', async () => {
-    const llm = new ScriptedLlm((request) =>
-      requestText(request).includes('publishReviewResults')
-        ? text('done')
-        : callTool('publishReviewResults', { summary: 'ok', findings: [] }),
-    );
+    const llm = new ScriptedLlm((request) => {
+      if (systemInstruction(request).includes('You hunt for real defects')) {
+        return callTool('set_model_response', { findings: [] });
+      }
+      const history = requestText(request);
+      if (!history.includes('code_problems_agent')) {
+        return callTool('code_problems_agent', { focus: 'all' });
+      }
+      return text(JSON.stringify({ summary: 'ok', findings: [] }));
+    });
 
     await runReview(input, { llm });
 
-    const [first] = llm.calls;
-    expect(requestText(first)).not.toContain('SOURCE_MARKER');
-    expect(systemInstruction(first)).toContain('SOURCE_MARKER');
+    const orchestratorCall = llm.calls.find((c) =>
+      systemInstruction(c).includes(
+        'You orchestrate an autonomous code review',
+      ),
+    );
+    const subAgentCall = llm.calls.find((c) =>
+      systemInstruction(c).includes('You hunt for real defects'),
+    );
+
+    expect(orchestratorCall).toBeDefined();
+    expect(subAgentCall).toBeDefined();
+
+    expect(systemInstruction(orchestratorCall!)).toContain('src/app.ts');
+    expect(systemInstruction(orchestratorCall!)).not.toContain('SOURCE_MARKER');
+    expect(systemInstruction(subAgentCall!)).toContain('SOURCE_MARKER');
+
     for (const call of llm.calls) {
+      expect(requestText(call)).not.toContain('SOURCE_MARKER');
       expect(requestText(call) + systemInstruction(call)).not.toContain(
         LOCKFILE_MARKER,
       );
@@ -257,7 +260,7 @@ describe('runReview', () => {
     }
   });
 
-  it('surfaces SubAgentFailedError even when the orchestrator exits without calling publishReviewResults', async () => {
+  it('surfaces SubAgentFailedError even when the orchestrator exits without a parseable report', async () => {
     const llm = new ScriptedLlm((request) => {
       if (systemInstruction(request).includes('You hunt for real defects')) {
         return { errorCode: '429', errorMessage: 'RESOURCE_EXHAUSTED' };
@@ -266,12 +269,33 @@ describe('runReview', () => {
       if (!history.includes('code_problems_agent')) {
         return callTool('code_problems_agent', { focus: 'all' });
       }
-      return text('Sub-agent failed, stopping without publishing');
+      return text('Sub-agent failed, stopping without a final report');
     });
 
     await expect(runReview(input, { llm })).rejects.toThrow(
       SubAgentFailedError,
     );
+  });
+
+  it('fails retryably when the orchestrator never produces a parseable report', async () => {
+    const llm = new ScriptedLlm((request) => {
+      if (systemInstruction(request).includes('You hunt for real defects')) {
+        return callTool('set_model_response', { findings: [] });
+      }
+      const history = requestText(request);
+      if (!history.includes('code_problems_agent')) {
+        return callTool('code_problems_agent', { focus: 'all' });
+      }
+      // Prose instead of the JSON report: a real (if unlikely) failure mode
+      // that must never be laundered into a clean "no findings" review.
+      return text('The review is complete. Everything looks fine!');
+    });
+
+    const failure = runReview(input, { llm });
+    await expect(failure).rejects.toThrow(
+      'finished without a parseable final report',
+    );
+    await expect(failure).rejects.not.toBeInstanceOf(NonRetryableTaskError);
   });
 
   it('does not poison a previously successful sub-agent when a redundant over-limit call is short-circuited', async () => {
@@ -284,13 +308,12 @@ describe('runReview', () => {
         subAgentCalls += 1;
         return callTool('code_problems_agent', { focus: 'all' });
       }
-      if (!requestText(request).includes('publishReviewResults')) {
-        return callTool('publishReviewResults', {
+      return text(
+        JSON.stringify({
           summary: 'Looks good after redundant calls',
           findings: [],
-        });
-      }
-      return text('done');
+        }),
+      );
     });
 
     const result = await runReview(input, { llm });
