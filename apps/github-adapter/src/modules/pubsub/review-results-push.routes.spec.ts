@@ -162,4 +162,35 @@ describe('reviewResultsPushRoutes', () => {
       'GitHub App is not installed on test-org/test-repo',
     );
   });
+
+  it('posts a review-failure notice so an abandoned review is visible on the PR', async () => {
+    const failurePayload = {
+      provider: 'github',
+      owner: 'test-org',
+      repo: 'test-repo',
+      prNumber: 42,
+      comments: [],
+      summary:
+        '⚠️ Automated code review failed and was abandoned: Review exceeded its 480000ms time limit and was aborted.',
+      failure: {
+        reason: 'Review exceeded its 480000ms time limit and was aborted.',
+      },
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/review-results',
+      payload: failurePayload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().success).toBe(true);
+    expect(mockGithubService.postReview).toHaveBeenCalledWith({
+      owner: 'test-org',
+      repo: 'test-repo',
+      prNumber: 42,
+      summary: failurePayload.summary,
+      comments: [],
+    });
+  });
 });

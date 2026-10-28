@@ -452,6 +452,15 @@ export class EventOrchestratorService {
    * Review path for `opened`/`synchronize`/`reopened`/`review_requested`/
    * `manual_trigger` events: resolve metadata, ensure diff + baseline
    * context, then run the review in-process and publish its results.
+   *
+   * A non-retryable abandonment of the review run itself (timeout, budget
+   * exhausted, unusable model output) is acked by the push route, so
+   * {@link runReviewWithFailureNotice} publishes a review-FAILURE notice to
+   * the review-results topic before rethrowing: the adapter posts it to the PR
+   * and the abandonment becomes visible instead of disappearing. Failures
+   * that happen before the run starts (diff fetch, baseline build, GitHub App
+   * not installed) keep their existing handling and are not reported as a
+   * failed review.
    */
   private async reviewPullRequest(
     req: PREventPayload,
@@ -483,10 +492,12 @@ export class EventOrchestratorService {
     const baselineSummary = await this.resolveBaselineSummary(buildParams);
     await this.recordPrBuildStatus(buildParams, 'reviewing');
 
-    const reviewResult = await this.runReviewOrFail(
+    const reviewResult = await this.runReviewWithFailureNotice(
+      resolvedMeta,
       prKey,
       buildReviewInput(resolvedMeta, diff, changedFiles, priorFindings),
       this.createRunReviewOptions(baselineSummary),
+      logger,
     );
 
     await this.handleReviewResults(reviewResult, prKey, logger);
@@ -496,6 +507,28 @@ export class EventOrchestratorService {
       status: 'reviewing',
       message: 'Review completed and results published',
     };
+  }
+
+  /**
+   * Runs the review and, when it is abandoned non-retryably, publishes a
+   * failure notice for the PR before rethrowing. Scoped to the run itself:
+   * redeliverable errors stay retryable and pre-review failures are excluded.
+   */
+  private async runReviewWithFailureNotice(
+    meta: PRMeta,
+    prKey: string,
+    input: ReviewExecutionInput,
+    options: RunReviewOptions,
+    logger?: FastifyBaseLogger,
+  ): Promise<ReviewResultPayload> {
+    try {
+      return await this.runReviewOrFail(prKey, input, options);
+    } catch (error) {
+      if (error instanceof NonRetryableTaskError) {
+        await this.publishReviewFailure(meta, error.message, logger);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -571,10 +604,14 @@ export class EventOrchestratorService {
   }
 
   private createRunReviewOptions(baselineContext: string): RunReviewOptions {
+    // Host-level override of the library's 480s default; env-validated to
+    // stay under the 540s ceiling of the Pub/Sub ack-deadline budget chain.
+    const timeoutMs = this.envService.get('REVIEW_TIMEOUT_MS');
     return {
       llm: this.llm,
       baselineContext,
       gitAdapter: this.gitAdapterClient,
+      ...(timeoutMs ? { timeoutMs } : {}),
     };
   }
 
@@ -877,5 +914,40 @@ export class EventOrchestratorService {
     await this.pubsub.topic(topicName).publishMessage({
       json: payload,
     });
+  }
+
+  /**
+   * Best-effort "review failed / timed out" notice on the review-results
+   * topic. The adapter posts `summary` as a PR review comment, so an
+   * abandoned review is visible on GitHub instead of being silently acked.
+   * Never throws: surfacing the failure must not mask the original error,
+   * and a broken publish path must not turn an ack into a redelivery.
+   */
+  private async publishReviewFailure(
+    meta: PRMeta,
+    reason: string,
+    logger?: FastifyBaseLogger,
+  ): Promise<void> {
+    const payload: ReviewResultPayload = {
+      provider: meta.provider,
+      owner: meta.owner,
+      repo: meta.repo,
+      prNumber: meta.prNumber,
+      comments: [],
+      summary:
+        `⚠️ Automated code review failed and was abandoned: ${reason}\n\n` +
+        'No review results were produced for this commit. Push a new commit or comment `/review` to retry.',
+      failure: { reason },
+    };
+    try {
+      logger?.warn(
+        `[Core] Publishing review-failure notice for ${meta.owner}/${meta.repo}#${meta.prNumber}: ${reason}`,
+      );
+      await this.publishReviewResults(payload);
+    } catch (publishError) {
+      logger?.error(
+        `[Core] Failed to publish review-failure notice: ${String(publishError)}`,
+      );
+    }
   }
 }

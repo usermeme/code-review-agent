@@ -1,6 +1,5 @@
 import { NonRetryableTaskError } from '@code-review-agent/shared-types';
 import {
-  AgentTool,
   type BaseLlm,
   type BaseTool,
   LlmAgent,
@@ -19,6 +18,11 @@ import {
 } from '../utils/budget.util.js';
 import { createProblemsAgent } from './problems.agent.js';
 import { createQualityAgent } from './quality.agent.js';
+import {
+  createReviewersTool,
+  isSuccessfulReviewerOutcome,
+  REVIEWERS_TOOL_NAME,
+} from './reviewers.tool.js';
 
 /** Agent name of the orchestrator; runReview keys its report capture off it. */
 export const ORCHESTRATOR_AGENT_NAME = 'core_review_agent';
@@ -73,8 +77,11 @@ ${priorFindingsSection}
 Workflow:
 1. Call getRepoGuidelines once to stage repository rules and discover the skills catalogue.
 2. If any discovered skills match the changed files, stage them with loadRepoSkill.
-3. Call code_problems_agent and code_quality_agent with a short "focus" hint tailored to this PR.
+3. Call ${REVIEWERS_TOOL_NAME} ONCE with a short "focus" hint tailored to this PR. The tool dispatches
+   code_problems_agent and code_quality_agent CONCURRENTLY and returns both findings reports keyed by agent name.
    (Reviewers already receive the full diff, baseline context, rules, staged skills, and prior findings via shared state.)
+   If a returned entry contains "error" (e.g. a rate limit), you may call ${REVIEWERS_TOOL_NAME} once more to retry —
+   only the failed reviewers re-run, and successful reports are returned again unchanged.
 4. Merge their findings: drop any whose confidence is below ${LIMITS.confidenceThreshold} or whose body lacks a concrete failure scenario, and deduplicate overlapping findings.
 5. Finish by replying with your final report as JSON matching your output schema — a one-paragraph "summary" (verdict plus the criticals — no per-finding recaps) and the surviving "findings". This report is the ONLY way to deliver the review; there is no publish tool, and a run that ends without it is a failure.
 
@@ -104,8 +111,7 @@ const SUB_AGENT_NAMES = new Set(['code_problems_agent', 'code_quality_agent']);
 const ORCHESTRATOR_TOOL_LIMITS: Record<string, number> = {
   getRepoGuidelines: 1,
   loadRepoSkill: 2,
-  code_problems_agent: LIMITS.maxSubAgentCalls,
-  code_quality_agent: LIMITS.maxSubAgentCalls,
+  [REVIEWERS_TOOL_NAME]: LIMITS.maxSubAgentCalls,
 };
 
 /** Per-sub-agent limit on repository lookups (the prompt asks for at most 3). */
@@ -121,16 +127,6 @@ export class SubAgentFailedError extends NonRetryableTaskError {
     );
     this.name = 'SubAgentFailedError';
   }
-}
-
-/** A sub-agent run counts as success only when it returned a non-empty, error-free result. */
-function isSuccessfulSubAgentResponse(response: unknown): boolean {
-  return (
-    typeof response === 'object' &&
-    response !== null &&
-    Object.keys(response).length > 0 &&
-    !('error' in response)
-  );
 }
 
 function recordSubAgentOutcome(
@@ -149,18 +145,20 @@ function reportSubAgentFailures(
 }
 
 /**
- * A failed sub-agent run (model error, budget, unparseable output) reaches
- * the orchestrator as an empty tool result, which it would otherwise fold
- * into a clean "no findings" final report. Track each sub-agent's latest
- * outcome and report it to the host; runReview vetoes the final report while
- * any sub-agent is failed (a successful retry clears it).
+ * Failed reviewer runs reach the orchestrator as `{ error }` entries in the
+ * merged run_code_reviewers response, which it would otherwise fold into a
+ * clean "no findings" final report. Track each reviewer's latest outcome and
+ * report it to the host; runReview vetoes the final report while any reviewer
+ * is failed (a successful retry clears it).
  *
- * Note: the tool-call limiter short-circuits an over-limit sub-agent call
- * with an {error} response without running it; that must not count as (or
- * clear) a success, or a failed sub-agent could be laundered into an
- * acceptable review by one more blocked retry. Conversely, once a sub-agent
+ * Note: the tool-call limiter short-circuits an over-limit dispatch with an
+ * {error} response without running the reviewers; that must not count as (or
+ * clear) a success, or a failed reviewer could be laundered into an acceptable
+ * review by one more blocked dispatch — such a response carries no per-agent
+ * entries, so `isSuccessfulReviewerOutcome(undefined)` keeps prior outcomes
+ * unchanged (false stays false, true stays true). Conversely, once a reviewer
  * has succeeded and returned findings into the orchestrator's history, a
- * redundant over-limit call must not mark it failed.
+ * redundant over-limit dispatch must not mark it failed.
  */
 function createSubAgentFailureRecorder(
   onFailure?: (agents: string[] | undefined) => void,
@@ -169,14 +167,17 @@ function createSubAgentFailureRecorder(
   const getFailed = () =>
     [...succeeded].filter(([, ok]) => !ok).map(([n]) => n);
   return ({ tool, response }) => {
-    if (SUB_AGENT_NAMES.has(tool.name)) {
+    if (tool.name !== REVIEWERS_TOOL_NAME) {
+      return undefined;
+    }
+    for (const name of SUB_AGENT_NAMES) {
       recordSubAgentOutcome(
         succeeded,
-        tool.name,
-        isSuccessfulSubAgentResponse(response),
+        name,
+        isSuccessfulReviewerOutcome(response[name]),
       );
-      reportSubAgentFailures(onFailure, getFailed());
     }
+    reportSubAgentFailures(onFailure, getFailed());
     return undefined;
   };
 }
@@ -197,25 +198,24 @@ export function createOrchestrator({
   const orchestratorTools: BaseTool[] = [
     tools.getRepoGuidelines,
     tools.loadRepoSkill,
-    new AgentTool({
-      agent: createProblemsAgent({
-        skill: REVIEW_SKILL,
-        llm,
-        tools: repoTools,
-        beforeModelCallback: budget.beforeModel,
-        beforeToolCallback: createToolCallLimiter(SUB_AGENT_REPO_TOOL_LIMITS),
-      }),
-      skipSummarization: true,
-    }),
-    new AgentTool({
-      agent: createQualityAgent({
-        skill: REVIEW_SKILL,
-        llm,
-        tools: repoTools,
-        beforeModelCallback: budget.beforeModel,
-        beforeToolCallback: createToolCallLimiter(SUB_AGENT_REPO_TOOL_LIMITS),
-      }),
-      skipSummarization: true,
+    createReviewersTool({
+      agents: [
+        createProblemsAgent({
+          skill: REVIEW_SKILL,
+          llm,
+          tools: repoTools,
+          beforeModelCallback: budget.beforeModel,
+          beforeToolCallback: createToolCallLimiter(SUB_AGENT_REPO_TOOL_LIMITS),
+        }),
+        createQualityAgent({
+          skill: REVIEW_SKILL,
+          llm,
+          tools: repoTools,
+          beforeModelCallback: budget.beforeModel,
+          beforeToolCallback: createToolCallLimiter(SUB_AGENT_REPO_TOOL_LIMITS),
+        }),
+      ],
+      concurrency: LIMITS.maxLlmConcurrency,
     }),
   ];
 

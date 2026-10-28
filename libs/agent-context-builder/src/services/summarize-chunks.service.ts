@@ -6,7 +6,15 @@ import { type Chunk, renderChunk } from './chunker.service.js';
 import { generateText } from './generate.service.js';
 import type { PipelineState } from './pipeline-state.js';
 
-export const DEFAULT_SUMMARY_CONCURRENCY = 10;
+/**
+ * Concurrency cap for the per-chunk map step. Kept in the 4–6 range (same cap
+ * as the reviewer dispatch in agent-code-reviewer): parallel enough to cut
+ * wall-time well below the Pub/Sub ack deadline, low enough to avoid 429
+ * storms. Rate-limit backoff + jitter lives in the RetryingLlm wrapper
+ * (@code-review-agent/llm), so a throttled chunk summary is retried instead
+ * of silently skipped.
+ */
+export const DEFAULT_SUMMARY_CONCURRENCY = 5;
 
 /**
  * Pipeline step 2: summarize every chunk with one independent LLM call each

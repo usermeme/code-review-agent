@@ -1,6 +1,7 @@
 export * from './agents/orchestrator.agent.js';
 export * from './agents/problems.agent.js';
 export * from './agents/quality.agent.js';
+export * from './agents/reviewers.tool.js';
 export * from './constants/errors.constant.js';
 export * from './constants/limits.constant.js';
 export * from './constants/state-keys.constant.js';

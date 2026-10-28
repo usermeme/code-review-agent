@@ -2,11 +2,12 @@ import { Gemini } from '@google/adk';
 import { describe, expect, it } from 'vitest';
 
 import { MockLlm } from '../providers/mock.llm.js';
+import { RetryingLlm } from '../providers/retrying.llm.js';
 import { llmConfigSchema } from '../schemas/llm-config.schema.js';
 import { LlmFactory } from './llm.factory.js';
 
 describe('LlmFactory', () => {
-  it('creates a Gemini LLM instance when provider is gemini', () => {
+  it('creates a rate-limit-retrying Gemini LLM instance when provider is gemini', () => {
     const config = llmConfigSchema.parse({
       LLM_PROVIDER: 'gemini',
       REVIEW_MODEL: 'gemini-2.5-flash',
@@ -16,7 +17,8 @@ describe('LlmFactory', () => {
     const factory = new LlmFactory(config);
     const llm = factory.createLlm();
 
-    expect(llm).toBeInstanceOf(Gemini);
+    expect(llm).toBeInstanceOf(RetryingLlm);
+    expect((llm as RetryingLlm).inner).toBeInstanceOf(Gemini);
     expect(llm.model).toBe('gemini-2.5-flash');
   });
 
@@ -28,7 +30,8 @@ describe('LlmFactory', () => {
 
     expect(config.LLM_PROVIDER).toBe('gemini');
     const llm = new LlmFactory(config).createLlm();
-    expect(llm).toBeInstanceOf(Gemini);
+    expect(llm).toBeInstanceOf(RetryingLlm);
+    expect((llm as RetryingLlm).inner).toBeInstanceOf(Gemini);
     expect(llm.model).toBe('gemini-3.8-flash');
   });
 
