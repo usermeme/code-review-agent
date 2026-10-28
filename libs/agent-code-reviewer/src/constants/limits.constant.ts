@@ -16,7 +16,15 @@ export const LIMITS = {
    * with the default of 500.
    */
   maxLlmCalls: 40,
-  /** Hard wall-clock limit per review; kept below the Pub/Sub ack deadline (600s). */
+  /**
+   * Hard wall-clock limit per review. Timeout budget chain: the Pub/Sub push
+   * ack deadline is 600s and the Cloud Run request timeout is 900s, so the
+   * TOTAL request wall-time (diff fetch + baseline resolution + review) must
+   * stay safely under the ack deadline — target <= 540s — or the event is
+   * redelivered mid-review and the whole review (and its LLM spend) runs
+   * twice. 480s leaves that headroom; hosts may lower it via the
+   * REVIEW_TIMEOUT_MS env (validated <= 540_000).
+   */
   reviewTimeoutMs: 8 * 60_000,
   /** Total diff size (chars) after filtering — the diff is re-sent on every reviewer turn. */
   maxDiffChars: 120_000,
@@ -28,8 +36,17 @@ export const LIMITS = {
   maxTotalRuleChars: 20_000,
   /** Repository lookups (searchRepositoryCode / fetchRepositoryFile) per reviewer sub-agent. */
   maxSubAgentRepoToolCalls: 3,
-  /** Calls per reviewer sub-agent (one retry for an unusable result). */
+  /** Dispatches of the reviewer tool per review (one retry for failed reviewers). */
   maxSubAgentCalls: 2,
+  /**
+   * Concurrency cap for LLM-backed work dispatched in parallel (reviewer
+   * sub-agent runs here; per-chunk context summaries use the matching cap in
+   * agent-context-builder). Kept in the 4–6 range: enough to cut wall-time
+   * well below the Pub/Sub ack deadline without provoking Gemini 429 storms.
+   * Rate-limit retries with exponential backoff + jitter live in the LLM
+   * wrapper (see @code-review-agent/llm RetryingLlm).
+   */
+  maxLlmConcurrency: 5,
   /** Maximum number of repository skill bodies staged for reviewers. */
   maxLoadedSkills: 5,
   /** Per-skill body cap (chars) when staging SKILL.md bodies for reviewers. */

@@ -90,9 +90,18 @@ export const reviewResultsPushRoutes: FastifyPluginAsync<
     }
 
     try {
-      request.log.info(
-        `[ReviewResultsPush] Posting review results for ${payload.owner}/${payload.repo} #${payload.prNumber}`,
-      );
+      if (payload.failure) {
+        // A review-failure notice (timeout / non-retryable abandonment) from
+        // core: posted like a normal review so the failure is visible on the
+        // PR instead of being silently acked.
+        request.log.warn(
+          `[ReviewResultsPush] Posting review-failure notice for ${payload.owner}/${payload.repo} #${payload.prNumber}: ${payload.failure.reason}`,
+        );
+      } else {
+        request.log.info(
+          `[ReviewResultsPush] Posting review results for ${payload.owner}/${payload.repo} #${payload.prNumber}`,
+        );
+      }
       const res = await options.githubService.postReview(
         buildPostReviewOptions(payload),
       );

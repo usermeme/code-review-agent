@@ -227,7 +227,7 @@ jobs:
             --no-cpu-throttling \
             --timeout 900 \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},REVIEW_TIMEOUT_MS=${{ vars.REVIEW_TIMEOUT_MS || '480000' }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
       # 2. Deploy GitHub Adapter (Private Provider Adapter)
       - name: Deploy GitHub Adapter
@@ -267,12 +267,13 @@ jobs:
           # max-delivery-attempts + dead-letter-topic stop poison messages from
           # redelivering forever (each redelivery of a review costs real LLM spend).
           # Core runs the review inside the push request. The review aborts
-          # itself after 8 minutes — under the 600s ack deadline and the 900s
-          # Cloud Run --timeout — but a cold baseline build can push the total
-          # past the ack deadline. Pub/Sub then redelivers while the first
-          # attempt is still running; the messageId dedup acks the redelivery,
-          # so if Cloud Run kills the original at 900s the event is lost until
-          # the next webhook for that PR (known gap for cold-repo events).
+          # itself after REVIEW_TIMEOUT_MS (default 8 minutes, validated to stay
+          # at or below 540s) — under the 600s ack deadline and the 900s Cloud Run
+          # --timeout — but a cold baseline build can still push the total past
+          # the ack deadline. Pub/Sub then redelivers while the first attempt is
+          # still running; the messageId dedup acks the redelivery, so if Cloud
+          # Run kills the original at 900s the event is lost until the next
+          # webhook for that PR (known gap for cold-repo events).
           gcloud pubsub subscriptions create pr-events-sub \
             --topic=pr-events \
             --push-endpoint="${CORE_URL}/api/v1/pubsub/pr-events" \
@@ -529,6 +530,7 @@ services:
       - HOST=0.0.0.0
       - REVIEW_RESULTS_TOPIC=review-results
       - REVIEW_MODEL=gemini-3.8-flash
+      - REVIEW_TIMEOUT_MS=${REVIEW_TIMEOUT_MS:-480000}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GIT_ADAPTER_URL=http://adapter:8080
       - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
@@ -607,6 +609,7 @@ Each service strictly validates required variables and fails fast at startup if 
 | `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                          |
 | `REVIEW_RESULTS_TOPIC`    |   Yes    | Google Cloud Pub/Sub topic to publish review result events to                       |
 | `REVIEW_MODEL`            |   Yes    | Gemini model identifier (e.g. `gemini-3.8-flash`)                                   |
+| `REVIEW_TIMEOUT_MS`       | Optional | Wall-clock cap per review in ms (default `480000`, valid `30000`–`540000`)          |
 | `GIT_ADAPTER_URL`         |   Yes    | URL of Git Provider Adapter for on-demand code queries (e.g. `http://adapter:8080`) |
 | `GEMINI_API_KEY`          | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)          |
 | `GOOGLE_CLOUD_PROJECT`    | Optional | GCP Project ID (auto-detected when running in GCP)                                  |

@@ -43,6 +43,7 @@ services:
       - PUBSUB_PROJECT_ID=local-project
       - REVIEW_RESULTS_TOPIC=review-results
       - REVIEW_MODEL=gemini-3.8-flash
+      - REVIEW_TIMEOUT_MS=${REVIEW_TIMEOUT_MS:-480000}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
       - GIT_ADAPTER_URL=http://adapter:8080
     depends_on:

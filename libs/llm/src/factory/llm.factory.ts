@@ -1,6 +1,7 @@
 import { type BaseLlm, Gemini } from '@google/adk';
 
 import { MockLlm } from '../providers/mock.llm.js';
+import { withLlmRetry } from '../providers/retrying.llm.js';
 import type { LlmConfig } from '../schemas/llm-config.schema.js';
 
 export interface CreateLlmOptions {
@@ -15,11 +16,17 @@ export class LlmFactory {
 
     switch (this.config.LLM_PROVIDER) {
       case 'gemini': {
-        return new Gemini({
-          model,
-          apiKey: this.config.GEMINI_API_KEY,
-          project: this.config.GOOGLE_CLOUD_PROJECT,
-        });
+        // Wrapped so every caller (review agent, context-builder chunk
+        // summaries) absorbs rate limits and transient 5xx/network failures
+        // with exponential backoff + jitter instead of failing the whole run —
+        // required now that LLM calls are dispatched concurrently.
+        return withLlmRetry(
+          new Gemini({
+            model,
+            apiKey: this.config.GEMINI_API_KEY,
+            project: this.config.GOOGLE_CLOUD_PROJECT,
+          }),
+        );
       }
       case 'mock': {
         return new MockLlm({ model });

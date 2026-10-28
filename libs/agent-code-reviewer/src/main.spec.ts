@@ -85,6 +85,31 @@ function systemInstruction(request: LlmRequest): string {
   return JSON.stringify(request.config?.systemInstruction ?? '');
 }
 
+const isProblemsAgent = (request: LlmRequest): boolean =>
+  systemInstruction(request).includes('You hunt for real defects');
+
+const isQualityAgent = (request: LlmRequest): boolean =>
+  systemInstruction(request).includes(
+    'You review a pull request for code quality',
+  );
+
+const isReviewerAgent = (request: LlmRequest): boolean =>
+  isProblemsAgent(request) || isQualityAgent(request);
+
+/** A reviewer finishing with a valid (empty) findings report. */
+const reviewerOk = (): LlmResponse =>
+  callTool('set_model_response', { findings: [] });
+
+/** Orchestrator dispatch of the concurrent reviewers tool, or its final report. */
+function orchestratorReply(
+  request: LlmRequest,
+  finalReport: LlmResponse,
+): LlmResponse {
+  return requestText(request).includes('run_code_reviewers')
+    ? finalReport
+    : callTool('run_code_reviewers', { focus: 'all' });
+}
+
 describe('runReview', () => {
   it('stops a model that never stops calling tools at the LLM call budget', async () => {
     const llm = new ScriptedLlm(() => callTool('getRepoGuidelines', {}));
@@ -119,16 +144,18 @@ describe('runReview', () => {
   it('fails instead of returning a clean review when a sub-agent fails', async () => {
     let published = false;
     const llm = new ScriptedLlm((request) => {
-      if (systemInstruction(request).includes('You hunt for real defects')) {
+      if (isProblemsAgent(request)) {
         return { errorCode: '429', errorMessage: 'RESOURCE_EXHAUSTED' };
       }
-      const history = requestText(request);
-      if (!history.includes('code_problems_agent')) {
-        return callTool('code_problems_agent', { focus: 'all' });
+      if (isQualityAgent(request)) {
+        return reviewerOk();
       }
       // The orchestrator ends with a perfectly valid final report — it must
       // still be vetoed because a sub-agent failed.
-      return text(JSON.stringify({ summary: 'Looks good', findings: [] }));
+      return orchestratorReply(
+        request,
+        text(JSON.stringify({ summary: 'Looks good', findings: [] })),
+      );
     });
 
     await expect(
@@ -142,19 +169,22 @@ describe('runReview', () => {
     expect(published).toBe(false);
   });
 
-  it('keeps vetoing the report when an over-limit sub-agent retry is short-circuited', async () => {
-    // The tool-call limiter answers a third call to an already-failed
-    // sub-agent with an {error} response without running it. That response
+  it('keeps vetoing the report when an over-limit reviewer retry is short-circuited', async () => {
+    // The tool-call limiter answers a third dispatch of the already-failed
+    // reviewers with an {error} response without running them. That response
     // must not be mistaken for a success and unblock the final report.
     let published = false;
-    let subAgentCalls = 0;
+    let dispatches = 0;
     const llm = new ScriptedLlm((request) => {
-      if (systemInstruction(request).includes('You hunt for real defects')) {
+      if (isProblemsAgent(request)) {
         return { errorCode: '429', errorMessage: 'RESOURCE_EXHAUSTED' };
       }
-      if (subAgentCalls < 3) {
-        subAgentCalls += 1;
-        return callTool('code_problems_agent', { focus: 'all' });
+      if (isQualityAgent(request)) {
+        return reviewerOk();
+      }
+      if (dispatches < 3) {
+        dispatches += 1;
+        return callTool('run_code_reviewers', { focus: 'all' });
       }
       return text(JSON.stringify({ summary: 'Looks good', findings: [] }));
     });
@@ -172,14 +202,13 @@ describe('runReview', () => {
 
   it('returns the finalized report when the sub-agents succeed', async () => {
     const llm = new ScriptedLlm((request) => {
-      if (systemInstruction(request).includes('You hunt for real defects')) {
-        return callTool('set_model_response', { findings: [] });
+      if (isReviewerAgent(request)) {
+        return reviewerOk();
       }
-      const history = requestText(request);
-      if (!history.includes('code_problems_agent')) {
-        return callTool('code_problems_agent', { focus: 'all' });
-      }
-      return text(JSON.stringify({ summary: 'Looks good', findings: [] }));
+      return orchestratorReply(
+        request,
+        text(JSON.stringify({ summary: 'Looks good', findings: [] })),
+      );
     });
 
     const result = await runReview(input, { llm });
@@ -188,14 +217,18 @@ describe('runReview', () => {
   });
 
   it('counts sub-agent LLM calls against the same budget', async () => {
-    // The orchestrator keeps invoking a sub-agent, which itself loops on a
-    // repo tool. Without a shared budget each sub-agent run would get ADK's
-    // default of 500 calls.
-    const llm = new ScriptedLlm((request) =>
-      systemInstruction(request).includes('You hunt for real defects')
-        ? callTool('searchRepositoryCode', { query: 'x' })
-        : callTool('code_problems_agent', { focus: 'all' }),
-    );
+    // The orchestrator keeps dispatching the reviewers, and the problems
+    // agent itself loops on a repo tool. Without a shared budget each
+    // sub-agent run would get ADK's default of 500 calls.
+    const llm = new ScriptedLlm((request) => {
+      if (isProblemsAgent(request)) {
+        return callTool('searchRepositoryCode', { query: 'x' });
+      }
+      if (isQualityAgent(request)) {
+        return reviewerOk();
+      }
+      return callTool('run_code_reviewers', { focus: 'all' });
+    });
 
     await expect(runReview(input, { llm, maxLlmCalls: 20 })).rejects.toThrow(
       ReviewBudgetExceededError,
@@ -221,14 +254,13 @@ describe('runReview', () => {
 
   it('keeps the diff out of the conversation and filters lockfiles', async () => {
     const llm = new ScriptedLlm((request) => {
-      if (systemInstruction(request).includes('You hunt for real defects')) {
-        return callTool('set_model_response', { findings: [] });
+      if (isReviewerAgent(request)) {
+        return reviewerOk();
       }
-      const history = requestText(request);
-      if (!history.includes('code_problems_agent')) {
-        return callTool('code_problems_agent', { focus: 'all' });
-      }
-      return text(JSON.stringify({ summary: 'ok', findings: [] }));
+      return orchestratorReply(
+        request,
+        text(JSON.stringify({ summary: 'ok', findings: [] })),
+      );
     });
 
     await runReview(input, { llm });
@@ -238,9 +270,7 @@ describe('runReview', () => {
         'You orchestrate an autonomous code review',
       ),
     );
-    const subAgentCall = llm.calls.find((c) =>
-      systemInstruction(c).includes('You hunt for real defects'),
-    );
+    const subAgentCall = llm.calls.find((c) => isProblemsAgent(c));
 
     expect(orchestratorCall).toBeDefined();
     expect(subAgentCall).toBeDefined();
@@ -262,14 +292,16 @@ describe('runReview', () => {
 
   it('surfaces SubAgentFailedError even when the orchestrator exits without a parseable report', async () => {
     const llm = new ScriptedLlm((request) => {
-      if (systemInstruction(request).includes('You hunt for real defects')) {
+      if (isProblemsAgent(request)) {
         return { errorCode: '429', errorMessage: 'RESOURCE_EXHAUSTED' };
       }
-      const history = requestText(request);
-      if (!history.includes('code_problems_agent')) {
-        return callTool('code_problems_agent', { focus: 'all' });
+      if (isQualityAgent(request)) {
+        return reviewerOk();
       }
-      return text('Sub-agent failed, stopping without a final report');
+      return orchestratorReply(
+        request,
+        text('Sub-agent failed, stopping without a final report'),
+      );
     });
 
     await expect(runReview(input, { llm })).rejects.toThrow(
@@ -279,16 +311,15 @@ describe('runReview', () => {
 
   it('fails retryably when the orchestrator never produces a parseable report', async () => {
     const llm = new ScriptedLlm((request) => {
-      if (systemInstruction(request).includes('You hunt for real defects')) {
-        return callTool('set_model_response', { findings: [] });
-      }
-      const history = requestText(request);
-      if (!history.includes('code_problems_agent')) {
-        return callTool('code_problems_agent', { focus: 'all' });
+      if (isReviewerAgent(request)) {
+        return reviewerOk();
       }
       // Prose instead of the JSON report: a real (if unlikely) failure mode
       // that must never be laundered into a clean "no findings" review.
-      return text('The review is complete. Everything looks fine!');
+      return orchestratorReply(
+        request,
+        text('The review is complete. Everything looks fine!'),
+      );
     });
 
     const failure = runReview(input, { llm });
@@ -298,15 +329,15 @@ describe('runReview', () => {
     await expect(failure).rejects.not.toBeInstanceOf(NonRetryableTaskError);
   });
 
-  it('does not poison a previously successful sub-agent when a redundant over-limit call is short-circuited', async () => {
-    let subAgentCalls = 0;
+  it('does not poison a previously successful sub-agent when a redundant over-limit dispatch is short-circuited', async () => {
+    let dispatches = 0;
     const llm = new ScriptedLlm((request) => {
-      if (systemInstruction(request).includes('You hunt for real defects')) {
-        return callTool('set_model_response', { findings: [] });
+      if (isReviewerAgent(request)) {
+        return reviewerOk();
       }
-      if (subAgentCalls < 3) {
-        subAgentCalls += 1;
-        return callTool('code_problems_agent', { focus: 'all' });
+      if (dispatches < 3) {
+        dispatches += 1;
+        return callTool('run_code_reviewers', { focus: 'all' });
       }
       return text(
         JSON.stringify({
@@ -318,5 +349,54 @@ describe('runReview', () => {
 
     const result = await runReview(input, { llm });
     expect(result.summary).toBe('Looks good after redundant calls');
+  });
+
+  it('runs the reviewer sub-agents concurrently, not back-to-back', async () => {
+    // The problems agent's model call only resolves AFTER the quality agent's
+    // call has started. Under the old serial AgentTool dispatch the quality
+    // agent could never start first, so this would deadlock and the watchdog
+    // below fails the test; with concurrent dispatch both overlap and the
+    // review completes.
+    let releaseProblems: ((response: LlmResponse) => void) | undefined;
+    const problemsInFlight = new Promise<LlmResponse>((resolve) => {
+      releaseProblems = resolve;
+    });
+    let resolveQualityStarted: (() => void) | undefined;
+    const qualityStarted = new Promise<void>((resolve) => {
+      resolveQualityStarted = resolve;
+    });
+
+    const llm = new ScriptedLlm((request) => {
+      if (isProblemsAgent(request)) {
+        return problemsInFlight;
+      }
+      if (isQualityAgent(request)) {
+        resolveQualityStarted!();
+        return reviewerOk();
+      }
+      return orchestratorReply(
+        request,
+        text(JSON.stringify({ summary: 'Concurrent review', findings: [] })),
+      );
+    });
+
+    const watchdog = new Promise<never>((_resolve, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              'reviewer runs did not overlap (serial dispatch detected)',
+            ),
+          ),
+        5_000,
+      ),
+    );
+    const review = runReview(input, { llm });
+
+    await Promise.race([qualityStarted, watchdog]);
+    releaseProblems!(reviewerOk());
+
+    const result = await Promise.race([review, watchdog]);
+    expect(result.summary).toBe('Concurrent review');
   });
 });

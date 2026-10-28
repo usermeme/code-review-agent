@@ -728,5 +728,184 @@ describe('EventOrchestratorService', () => {
       );
       expect(mockRunReview).not.toHaveBeenCalled();
     });
+
+    describe('review-failure surfacing', () => {
+      it('does not publish a failure notice when the diff fetch fails before the review', async () => {
+        const failingAdapter: GitAdapterContract = {
+          getPRDiff: vi
+            .fn()
+            .mockRejectedValue(
+              new NonRetryableTaskError(
+                'GitHub App is not installed on test-org/test-repo',
+              ),
+            ),
+          getPRFiles: vi.fn(),
+          searchCode: vi.fn(),
+          getFileContent: vi.fn(),
+          getRepoTarball: vi.fn(),
+        };
+        const orchestrator = createTestOrchestrator({
+          gitAdapterClient: failingAdapter,
+        });
+
+        await expect(
+          orchestrator.ingestPREvent({
+            prMeta: {
+              provider: 'github',
+              owner: 'test-org',
+              repo: 'test-repo',
+              prNumber: 42,
+              action: 'opened',
+              title: 'Feature X',
+              author: 'developer',
+              branch: 'feat/x',
+              htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+            },
+            diff: '',
+            changedFiles: [],
+          }),
+        ).rejects.toThrow(NonRetryableTaskError);
+
+        // The review never ran: the adapter failure keeps its own handling and
+        // must not be reported as an abandoned review.
+        expect(publishedMessages).toHaveLength(0);
+        expect(mockRunReview).not.toHaveBeenCalled();
+      });
+
+      it('does not publish a failure notice when the baseline build fails before the review', async () => {
+        mockContextRepo.getContext.mockResolvedValue(null);
+        mockBuildContext.mockRejectedValueOnce(
+          new NonRetryableTaskError('No summarizable files found'),
+        );
+        const orchestrator = createTestOrchestrator();
+
+        await expect(
+          orchestrator.ingestPREvent(makeOpenedRequest()),
+        ).rejects.toThrow('No summarizable files found');
+
+        expect(publishedMessages).toHaveLength(0);
+        expect(mockRunReview).not.toHaveBeenCalled();
+      });
+
+      it('publishes a review-failure notice when the review fails non-retryably (e.g. timeout)', async () => {
+        mockContextRepo.getContext.mockResolvedValue({
+          prKey: 'github:test-org:test-repo:0',
+          summary: JSON.stringify({ architecture: 'microservices' }),
+          updatedAt: new Date(),
+        });
+        mockRunReview.mockRejectedValueOnce(
+          new NonRetryableTaskError(
+            'Review exceeded its 480000ms time limit and was aborted.',
+          ),
+        );
+        const orchestrator = createTestOrchestrator();
+
+        await expect(
+          orchestrator.ingestPREvent(makeOpenedRequest()),
+        ).rejects.toThrow(NonRetryableTaskError);
+
+        // The failure must be visible on the review-results topic (the
+        // adapter posts it to the PR) instead of being silently acked.
+        expect(publishedMessages).toHaveLength(1);
+        expect(publishedMessages[0].topic).toBe('test-review-results-topic');
+        expect(publishedMessages[0].data).toEqual(
+          expect.objectContaining({
+            provider: 'github',
+            owner: 'test-org',
+            repo: 'test-repo',
+            prNumber: 42,
+            comments: [],
+            summary: expect.stringContaining(
+              'Automated code review failed and was abandoned',
+            ),
+            failure: {
+              reason:
+                'Review exceeded its 480000ms time limit and was aborted.',
+            },
+          }),
+        );
+        expect(mockPrRepo.updatePRStatus).toHaveBeenLastCalledWith(
+          'github:test-org:test-repo:42',
+          expect.objectContaining({ status: 'failed' }),
+        );
+      });
+
+      it('does not publish a failure notice for retryable review errors (redelivery retries instead)', async () => {
+        mockContextRepo.getContext.mockResolvedValue({
+          prKey: 'github:test-org:test-repo:0',
+          summary: JSON.stringify({ architecture: 'microservices' }),
+          updatedAt: new Date(),
+        });
+        mockRunReview.mockRejectedValueOnce(new Error('RESOURCE_EXHAUSTED'));
+        const orchestrator = createTestOrchestrator();
+
+        await expect(
+          orchestrator.ingestPREvent(makeOpenedRequest()),
+        ).rejects.toThrow('RESOURCE_EXHAUSTED');
+
+        expect(publishedMessages).toHaveLength(0);
+      });
+
+      it('never lets a failure-notice publish error mask the original failure', async () => {
+        mockContextRepo.getContext.mockResolvedValue({
+          prKey: 'github:test-org:test-repo:0',
+          summary: JSON.stringify({ architecture: 'microservices' }),
+          updatedAt: new Date(),
+        });
+        mockRunReview.mockRejectedValueOnce(
+          new NonRetryableTaskError('Review timed out'),
+        );
+        mockPubSub.topic = vi.fn().mockImplementation(() => ({
+          publishMessage: vi.fn().mockRejectedValue(new Error('topic down')),
+        }));
+        const orchestrator = createTestOrchestrator();
+
+        await expect(
+          orchestrator.ingestPREvent(makeOpenedRequest()),
+        ).rejects.toThrow('Review timed out');
+      });
+    });
+
+    it('passes REVIEW_TIMEOUT_MS through to runReview as timeoutMs', async () => {
+      const envWithTimeout = new EnvService(coreEnvSchema, {
+        HOST: '0.0.0.0',
+        PORT: '8080',
+        REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
+        GIT_ADAPTER_URL: 'http://adapter:8080',
+        LLM_PROVIDER: 'mock',
+        REVIEW_MODEL: 'test-model',
+        REVIEW_TIMEOUT_MS: '300000',
+      });
+      mockContextRepo.getContext.mockResolvedValue({
+        prKey: 'github:test-org:test-repo:0',
+        summary: JSON.stringify({ architecture: 'microservices' }),
+        updatedAt: new Date(),
+      });
+      const orchestrator = createTestOrchestrator({
+        envService: envWithTimeout,
+      });
+
+      await orchestrator.ingestPREvent(makeOpenedRequest());
+
+      expect(mockRunReview).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ timeoutMs: 300_000 }),
+      );
+    });
+
+    it('rejects a REVIEW_TIMEOUT_MS above the 540s ack-deadline ceiling', () => {
+      expect(
+        () =>
+          new EnvService(coreEnvSchema, {
+            HOST: '0.0.0.0',
+            PORT: '8080',
+            REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
+            GIT_ADAPTER_URL: 'http://adapter:8080',
+            LLM_PROVIDER: 'mock',
+            REVIEW_MODEL: 'test-model',
+            REVIEW_TIMEOUT_MS: '599000',
+          }),
+      ).toThrow(/Environment validation failed/);
+    });
   });
 });

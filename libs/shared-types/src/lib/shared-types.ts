@@ -72,6 +72,15 @@ export interface ReviewResultPayload {
   prNumber: number;
   comments: ReviewCommentPayload[];
   summary?: string;
+  /**
+   * Present when this payload reports a FAILED/abandoned review (timeout,
+   * budget exhausted, non-retryable error) instead of findings. Published so
+   * the failure is visible on the PR (the adapter posts `summary`) rather
+   * than silently acked — `comments` is empty in that case.
+   */
+  failure?: {
+    reason: string;
+  };
 }
 
 export interface PRDiffResult {
