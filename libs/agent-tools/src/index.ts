@@ -19,11 +19,19 @@ export {
   readFileParamsSchema,
 } from './tools/read-file.tool.js';
 export {
+  type AnnotatedDiff,
+  annotateUnifiedDiff,
+  type DiffCommentAnchor,
+  extractDiffHeaderPath,
+  resolveDiffAnchor,
+} from './workspace/diff-annotator.util.js';
+export {
   createPathMatcher,
   isBinaryBuffer,
   isIndexableFilePath,
   normalizeTarEntryPath,
 } from './workspace/file-filter.util.js';
+export { extractRepoGuidelines } from './workspace/repo-guidelines.util.js';
 export {
   type FindFilesOptions,
   type FindFilesResult,

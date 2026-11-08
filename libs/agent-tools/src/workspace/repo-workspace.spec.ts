@@ -6,7 +6,7 @@ const SAMPLE_DIFF = [
   'diff --git a/src/auth/auth.service.ts b/src/auth/auth.service.ts',
   '--- a/src/auth/auth.service.ts',
   '+++ b/src/auth/auth.service.ts',
-  '@@ -1,3 +1,4 @@',
+  '@@ -1,2 +1,3 @@',
   ' export class AuthService {',
   '+  validateToken(token: string) { return Boolean(token); }',
   ' }',
@@ -23,6 +23,7 @@ describe('RepoWorkspace', () => {
 
   beforeEach(() => {
     const files = new Map<string, string[]>([
+      ['AGENTS.md', ['Always validate tokens carefully.']],
       [
         'src/auth/auth.service.ts',
         [
@@ -61,9 +62,10 @@ describe('RepoWorkspace', () => {
     it('lists all files sorted alphabetically when no pattern is given', () => {
       const res = workspace.findFiles();
       expect(res).toEqual({
-        totalMatched: 3,
+        totalMatched: 4,
         truncated: false,
         files: [
+          'AGENTS.md',
           'src/auth/auth.service.spec.ts',
           'src/auth/auth.service.ts',
           'src/index.ts',
@@ -155,22 +157,40 @@ describe('RepoWorkspace', () => {
     });
   });
 
-  describe('getPrDiff', () => {
-    it('returns full diff and changedFiles when path is omitted', () => {
+  describe('getPrDiff, getRepoGuidelines, and resolveCommentAnchor', () => {
+    it('returns line-annotated diff and changedFiles when path is omitted', () => {
       const res = workspace.getPrDiff();
       expect(res.changedFiles).toEqual([
         'src/auth/auth.service.ts',
         'src/index.ts',
       ]);
-      expect(res.diff).toBe(SAMPLE_DIFF);
+      expect(res.diff).toContain(
+        'L2 | +  validateToken(token: string) { return Boolean(token); }',
+      );
+      expect(res.diff).toContain('L2 | +export const VERSION = "1.0.0";');
       expect(res.truncated).toBe(false);
     });
 
-    it('returns only the single-file diff when path is provided', () => {
+    it('returns only the single-file annotated diff when path is provided', () => {
       const res = workspace.getPrDiff({ path: 'src/index.ts' });
       expect(res.path).toBe('src/index.ts');
-      expect(res.diff).toContain('export const VERSION = "1.0.0";');
+      expect(res.diff).toContain('L2 | +export const VERSION = "1.0.0";');
       expect(res.diff).not.toContain('validateToken');
+    });
+
+    it('extracts repo guidelines and resolves valid diff comment anchors', () => {
+      expect(workspace.getRepoGuidelines()).toBe(
+        '### AGENTS.md\nAlways validate tokens carefully.',
+      );
+      expect(
+        workspace.resolveCommentAnchor('src/auth/auth.service.ts', 2, 1),
+      ).toEqual({
+        line: 2,
+        startLine: 1,
+      });
+      expect(
+        workspace.resolveCommentAnchor('src/auth/auth.service.ts', 99),
+      ).toBeNull();
     });
   });
 });

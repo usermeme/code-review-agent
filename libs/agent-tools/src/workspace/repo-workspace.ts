@@ -1,4 +1,11 @@
-import { createPathMatcher } from './file-filter.util.js';
+import {
+  type AnnotatedDiff,
+  annotateUnifiedDiff,
+  type DiffCommentAnchor,
+  resolveDiffAnchor,
+} from './diff-annotator.util.js';
+import { createPathMatcher, isIndexableFilePath } from './file-filter.util.js';
+import { extractRepoGuidelines } from './repo-guidelines.util.js';
 
 export interface GrepCodeOptions {
   pattern: string;
@@ -123,44 +130,21 @@ function formatSnippet(
   return formatted.join('\n');
 }
 
-function extractDiffHeaderPath(headerLine: string): string {
-  const bMatch = /\sb\/([^\s]+)$/.exec(headerLine.trim());
-  if (bMatch?.[1]) {
-    return bMatch[1];
-  }
-  const parts = headerLine.trim().split(/\s+/);
-  const last = parts[parts.length - 1] ?? '';
-  return last.replace(/^b\//, '');
-}
-
-function extractFirstLine(chunk: string): string {
-  const firstNewline = chunk.indexOf('\n');
-  return firstNewline >= 0 ? chunk.slice(0, firstNewline) : chunk;
-}
-
-function addDiffChunkToMap(chunk: string, byFile: Map<string, string>): void {
-  const firstLine = extractFirstLine(chunk);
-  if (!firstLine.startsWith('diff --git ')) {
-    return;
-  }
-  const filePath = extractDiffHeaderPath(firstLine);
-  if (filePath) {
-    byFile.set(filePath, chunk.trimEnd());
-  }
-}
-
 /**
- * Splits a unified git diff into per-file sections keyed by normalized file path.
+ * Splits a unified git diff into per-file annotated sections keyed by normalized file path.
  */
 export function parseDiffByFile(rawDiff: string): Map<string, string> {
-  const byFile = new Map<string, string>();
-  if (!rawDiff.trim()) {
-    return byFile;
+  return annotateUnifiedDiff(rawDiff).byFile;
+}
+
+function resolveReviewableChangedFiles(
+  changedFiles: string[] | undefined,
+  diffByFile: Map<string, string>,
+): string[] {
+  if (changedFiles && changedFiles.length > 0) {
+    return changedFiles.filter(isIndexableFilePath);
   }
-  for (const chunk of rawDiff.split(/(?=^diff --git )/m)) {
-    addDiffChunkToMap(chunk, byFile);
-  }
-  return byFile;
+  return Array.from(diffByFile.keys());
 }
 
 export interface RepoWorkspaceInit {
@@ -172,19 +156,17 @@ export interface RepoWorkspaceInit {
 export class RepoWorkspace {
   private readonly files: Map<string, string[]>;
   private readonly sortedPaths: string[];
-  private readonly rawDiff: string;
-  private readonly diffByFile: Map<string, string>;
+  private readonly annotated: AnnotatedDiff;
   private readonly changedFiles: string[];
 
   constructor(init: RepoWorkspaceInit) {
     this.files = init.files;
     this.sortedPaths = Array.from(init.files.keys()).sort();
-    this.rawDiff = init.rawDiff ?? '';
-    this.diffByFile = parseDiffByFile(this.rawDiff);
-    this.changedFiles =
-      init.changedFiles && init.changedFiles.length > 0
-        ? [...init.changedFiles]
-        : Array.from(this.diffByFile.keys());
+    this.annotated = annotateUnifiedDiff(init.rawDiff ?? '');
+    this.changedFiles = resolveReviewableChangedFiles(
+      init.changedFiles,
+      this.annotated.byFile,
+    );
   }
 
   get fileCount(): number {
@@ -393,14 +375,32 @@ export class RepoWorkspace {
     };
   }
 
+  getRepoGuidelines(maxChars?: number): string {
+    return extractRepoGuidelines(this.files, maxChars);
+  }
+
+  resolveCommentAnchor(
+    path: string,
+    endLine: number,
+    startLine?: number,
+  ): DiffCommentAnchor | null {
+    const normalized = normalizeLookupPath(path);
+    return resolveDiffAnchor(
+      this.annotated.validLinesByFile,
+      normalized,
+      endLine,
+      startLine,
+    );
+  }
+
   private normalizeOptionalPath(path: string | undefined): string | undefined {
     return path ? normalizeLookupPath(path) : undefined;
   }
 
   private resolveDiffText(requestedPath: string | undefined): string {
     if (!requestedPath) {
-      return this.rawDiff;
+      return this.annotated.annotatedDiff;
     }
-    return this.diffByFile.get(requestedPath) ?? '';
+    return this.annotated.byFile.get(requestedPath) ?? '';
   }
 }
