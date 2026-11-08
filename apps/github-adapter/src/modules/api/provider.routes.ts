@@ -75,55 +75,7 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
     }
   });
 
-  // 2. Fetch PR Files with Content
-  fastify.get<{
-    Params: NonNullable<
-      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/pulls/:prNumber/files']['Params']
-    >;
-  }>('/repos/:owner/:repo/pulls/:number/files', async (request, reply) => {
-    const { owner, repo, number } = request.params;
-    const prNumber = parseInt(number, 10);
-    if (isNaN(prNumber)) {
-      return reply.code(400).send({ error: 'Invalid PR number' });
-    }
-
-    try {
-      const result = await githubService.getPRFiles(owner, repo, prNumber);
-      return result;
-    } catch (error) {
-      return sendProviderError(
-        fastify,
-        reply,
-        'Failed to fetch PR files',
-        error,
-      );
-    }
-  });
-
-  // 3. Search Code in Repository
-  fastify.get<{
-    Params: NonNullable<
-      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/search']['Params']
-    >;
-    Querystring: NonNullable<
-      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/search']['Query']
-    >;
-  }>('/repos/:owner/:repo/search', async (request, reply) => {
-    const { owner, repo } = request.params;
-    const query = request.query.q;
-    if (!query) {
-      return reply.code(400).send({ error: 'Query parameter "q" is required' });
-    }
-
-    try {
-      const result = await githubService.searchCode(owner, repo, query);
-      return result;
-    } catch (error) {
-      return sendProviderError(fastify, reply, 'Failed to search code', error);
-    }
-  });
-
-  // 4. Download Repository Tarball Archive
+  // 2. Download Repository Tarball Archive
   fastify.get<{
     Params: NonNullable<
       EndpointPayloadRecord['/api/v1/repos/:owner/:repo/tarball']['Params']
@@ -150,36 +102,6 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
         fastify,
         reply,
         'Failed to fetch repo tarball',
-        error,
-      );
-    }
-  });
-
-  // 5. Get File Content
-  fastify.get<{
-    Params: NonNullable<
-      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/files/:path']['Params']
-    >;
-    Querystring: NonNullable<
-      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/files/:path']['Query']
-    >;
-  }>('/repos/:owner/:repo/files/*', async (request, reply) => {
-    const { owner, repo } = request.params;
-    const path = request.params['*'];
-    const ref = request.query.ref;
-
-    if (!path) {
-      return reply.code(400).send({ error: 'File path is required' });
-    }
-
-    try {
-      const result = await githubService.getFileContent(owner, repo, path, ref);
-      return result;
-    } catch (error) {
-      return sendProviderError(
-        fastify,
-        reply,
-        'Failed to get file content',
         error,
       );
     }

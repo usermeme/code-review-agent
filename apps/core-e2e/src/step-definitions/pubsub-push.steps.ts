@@ -64,43 +64,6 @@ When(
   },
 );
 
-When(
-  'PubSub delivers message {string} for {string} PR #{int} with action {string} {int} times',
-  async function (
-    this: CoreWorld,
-    messageId: string,
-    repoFullName: string,
-    prNumber: number,
-    action: string,
-    times: number,
-  ) {
-    for (let i = 0; i < times; i++) {
-      this.lastResponse = await this.app.inject({
-        method: 'POST',
-        url: '/api/v1/pubsub/pr-events',
-        payload: buildEnvelope(repoFullName, prNumber, action, messageId),
-      });
-    }
-  },
-);
-
-When(
-  'PubSub pushes a merged event for {string} PR #{int}',
-  async function (this: CoreWorld, repoFullName: string, prNumber: number) {
-    this.lastResponse = await this.app.inject({
-      method: 'POST',
-      url: '/api/v1/pubsub/pr-events',
-      payload: buildEnvelope(
-        repoFullName,
-        prNumber,
-        'closed',
-        `msg-${Date.now()}`,
-        { isIncrementalUpdate: true },
-      ),
-    });
-  },
-);
-
 Then(
   'the push response reports status {string}',
   function (this: CoreWorld, status: string) {
@@ -110,10 +73,6 @@ Then(
     assert.equal(body.data?.status, status);
   },
 );
-
-Then('the review ran {int} time(s)', function (this: CoreWorld, times: number) {
-  assert.equal(this.reviewRuns, times);
-});
 
 Then('the push request responds with HTTP 200', function (this: CoreWorld) {
   assert(this.lastResponse, 'Expected a response from push request');

@@ -10,9 +10,8 @@ export class PrRepository {
   /**
    * Writes ONLY the given fields; Firestore `set(..., { merge: true })`
    * preserves every omitted field. Never write a full object assembled from
-   * an in-memory copy here: this service runs multi-instance (see
-   * BaselineLockRepository), and a stale local copy would clobber newer
-   * field values written by other instances.
+   * an in-memory copy here: this service runs multi-instance, and a stale
+   * local copy would clobber newer field values written by other instances.
    */
   async updatePRStatus(prKey: string, state: Partial<PRState>): Promise<void> {
     await this.db.setDocument<PRState>(this.collection, prKey, {

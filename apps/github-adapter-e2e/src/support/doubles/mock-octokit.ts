@@ -95,42 +95,6 @@ export class MockOctokit {
         return { data: { id: this.postedReviews.length } };
       },
     },
-    search: {
-      code: async (params: { q: string }) => {
-        return {
-          data: {
-            total_count: 1,
-            items: [
-              {
-                name: 'index.ts',
-                path: 'src/index.ts',
-                sha: this.headSha,
-                html_url: `https://github.com/mock-org/mock-repo/blob/main/src/index.ts?query=${encodeURIComponent(params.q)}`,
-              },
-            ],
-          },
-        };
-      },
-    },
-    repos: {
-      getContent: async (params: {
-        owner: string;
-        repo: string;
-        path: string;
-        ref?: string;
-      }) => {
-        return {
-          data: {
-            path: params.path,
-            content: Buffer.from('export const answer = 42;').toString(
-              'base64',
-            ),
-            encoding: 'base64',
-            sha: this.headSha,
-          },
-        };
-      },
-    },
     issues: {
       createComment: async (params: PostedIssueComment) => {
         this.postedIssueComments.push(params);

@@ -12,46 +12,6 @@ export interface EndpointPayloadRecord {
       number: string;
     };
   };
-  '/api/v1/repos/:owner/:repo/pulls/:prNumber/files': {
-    Path: {
-      owner: string;
-      repo: string;
-      prNumber: number | string;
-    };
-    Params?: {
-      owner: string;
-      repo: string;
-      number: string;
-    };
-  };
-  '/api/v1/repos/:owner/:repo/search': {
-    Path: {
-      owner: string;
-      repo: string;
-    };
-    Params?: {
-      owner: string;
-      repo: string;
-    };
-    Query?: {
-      q?: string;
-    };
-  };
-  '/api/v1/repos/:owner/:repo/files/:path': {
-    Path: {
-      owner: string;
-      repo: string;
-      path: string;
-    };
-    Params?: {
-      owner: string;
-      repo: string;
-      '*': string;
-    };
-    Query?: {
-      ref?: string;
-    };
-  };
   '/api/v1/repos/:owner/:repo/tarball': {
     Path: {
       owner: string;
@@ -63,16 +23,6 @@ export interface EndpointPayloadRecord {
     };
     Query?: {
       ref?: string;
-    };
-  };
-
-  // Core context lookup endpoint
-  '/api/v1/context/:prKey': {
-    Path: {
-      prKey: string;
-    };
-    Params?: {
-      prKey: string;
     };
   };
 
@@ -97,11 +47,7 @@ export type Endpoint = keyof EndpointPayloadRecord;
 
 export const ENDPOINTS = {
   PR_DIFF: '/api/v1/repos/:owner/:repo/pulls/:prNumber/diff',
-  PR_FILES: '/api/v1/repos/:owner/:repo/pulls/:prNumber/files',
-  SEARCH_CODE: '/api/v1/repos/:owner/:repo/search',
-  FILE_CONTENT: '/api/v1/repos/:owner/:repo/files/:path',
   TARBALL: '/api/v1/repos/:owner/:repo/tarball',
-  CONTEXT: '/api/v1/context/:prKey',
   PUBSUB_PR_EVENTS: '/api/v1/pubsub/pr-events',
   PUBSUB_REVIEW_RESULTS: '/api/v1/pubsub/review-results',
   WEBHOOKS: '/api/v1/webhooks',
