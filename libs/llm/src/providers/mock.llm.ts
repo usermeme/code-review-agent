@@ -25,17 +25,48 @@ export class MockLlm extends BaseLlm {
     this.generateResponseFn = options.generateResponse;
   }
 
+  private shouldSubmitReview(llmRequest: LlmRequest): boolean {
+    if (this.generateResponseFn) {
+      return false;
+    }
+    return Boolean(
+      llmRequest.toolsDict && 'submit_review' in llmRequest.toolsDict,
+    );
+  }
+
+  private resolveTextResponse(llmRequest: LlmRequest): string {
+    if (!this.generateResponseFn) {
+      return this.defaultResponse;
+    }
+    const res = this.generateResponseFn(llmRequest);
+    return typeof res === 'string' ? res : JSON.stringify(res);
+  }
+
   override async *generateContentAsync(
     llmRequest: LlmRequest,
   ): AsyncGenerator<LlmResponse, void> {
     this.calls.push(llmRequest);
 
-    let text = this.defaultResponse;
-    if (this.generateResponseFn) {
-      const res = this.generateResponseFn(llmRequest);
-      text = typeof res === 'string' ? res : JSON.stringify(res);
+    if (this.shouldSubmitReview(llmRequest)) {
+      yield {
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                id: 'mock_submit_review_1',
+                name: 'submit_review',
+                args: { summary: this.defaultResponse, findings: [] },
+              },
+            },
+          ],
+        },
+        turnComplete: true,
+      };
+      return;
     }
 
+    const text = this.resolveTextResponse(llmRequest);
     yield {
       content: {
         role: 'model',

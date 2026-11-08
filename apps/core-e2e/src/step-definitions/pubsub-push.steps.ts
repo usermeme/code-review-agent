@@ -4,6 +4,15 @@ import { Then, When } from '@cucumber/cucumber';
 
 import { CoreWorld } from '../support/world.js';
 
+const sampleDiff = `diff --git a/src/index.ts b/src/index.ts
+new file mode 100644
+--- /dev/null
++++ b/src/index.ts
+@@ -0,0 +1,2 @@
++export const a = 1;
++export const b = 2;
+`;
+
 function buildEnvelope(
   repoFullName: string,
   prNumber: number,
@@ -13,7 +22,7 @@ function buildEnvelope(
 ) {
   const [owner, repo] = repoFullName.split('/');
   const payload = {
-    diff: 'const x = 1;',
+    diff: sampleDiff,
     changedFiles: ['src/index.ts'],
     prMeta: {
       provider: 'github',
@@ -78,3 +87,29 @@ Then('the push request responds with HTTP 200', function (this: CoreWorld) {
   assert(this.lastResponse, 'Expected a response from push request');
   assert.equal(this.lastResponse.statusCode, 200);
 });
+
+Then(
+  'a review result message was published for {string} PR #{int}',
+  function (this: CoreWorld, repoFullName: string, prNumber: number) {
+    const [owner, repo] = repoFullName.split('/');
+    const messages = this.pubsub.getMessagesByTopic(
+      'test-review-results-topic',
+    );
+    assert(
+      messages.length > 0,
+      'Expected at least one message published to test-review-results-topic',
+    );
+    const match = messages.find((m) => {
+      const json = m.json;
+      return (
+        json['owner'] === owner &&
+        json['repo'] === repo &&
+        json['prNumber'] === prNumber
+      );
+    });
+    assert(
+      match,
+      `Expected a published review result for ${owner}/${repo} #${prNumber}`,
+    );
+  },
+);

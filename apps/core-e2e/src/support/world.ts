@@ -6,11 +6,11 @@ import { FastifyInstance, LightMyRequestResponse } from 'fastify';
 
 import { buildCoreServer } from '../../../core/src/app.js';
 import { coreEnvSchema, CoreEnvService } from '../../../core/src/env.js';
-import { GitAdapterClient } from '../../../core/src/modules/adapter/git-adapter.client.js';
 import { DeliveryRepository } from '../../../core/src/modules/database/repositories/delivery.repository.js';
 import { PrRepository } from '../../../core/src/modules/database/repositories/pr.repository.js';
 import { InMemoryDatabaseService } from '../../../core/src/modules/database/testing/in-memory-database.service.js';
 import { EventOrchestratorService } from '../../../core/src/services/event-orchestrator.service.js';
+import { InMemoryGitAdapterClient } from './doubles/in-memory-git-adapter.js';
 import { MockPubSub } from './doubles/mock-pubsub.js';
 
 export class CoreWorld extends World {
@@ -39,9 +39,7 @@ export class CoreWorld extends World {
       GIT_ADAPTER_URL: 'http://adapter:8080',
     });
 
-    const gitAdapterClient = new GitAdapterClient(
-      this.envService.get('GIT_ADAPTER_URL'),
-    );
+    const gitAdapterClient = new InMemoryGitAdapterClient();
     const llm = new LlmFactory(this.envService.data).createLlm();
 
     this.orchestrator = new EventOrchestratorService({
