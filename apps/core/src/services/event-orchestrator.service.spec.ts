@@ -166,8 +166,6 @@ describe('EventOrchestratorService', () => {
         htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
         action: 'opened',
       },
-      diff: sampleDiff,
-      changedFiles: ['src/index.ts'],
     });
 
     expect(res).toEqual({
@@ -175,6 +173,11 @@ describe('EventOrchestratorService', () => {
       status: 'completed',
       message: 'PR review completed',
     });
+    expect(mockGitAdapter.getPRDiff).toHaveBeenCalledWith(
+      'test-org',
+      'test-repo',
+      42,
+    );
 
     // Marked reviewing initially
     expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
@@ -203,30 +206,6 @@ describe('EventOrchestratorService', () => {
         summary: 'Code looks great!',
         publishedFindings: [],
       }),
-    );
-  });
-
-  it('fetches diff from gitAdapterClient when req.diff is omitted', async () => {
-    const res = await service.ingestPREvent({
-      prMeta: {
-        provider: 'github',
-        owner: 'test-org',
-        repo: 'test-repo',
-        prNumber: 42,
-        title: 'Test PR',
-        author: 'octocat',
-        branch: 'feat',
-        headSha: 'sha1',
-        htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
-        action: 'synchronize',
-      },
-    });
-
-    expect(res.status).toBe('completed');
-    expect(mockGitAdapter.getPRDiff).toHaveBeenCalledWith(
-      'test-org',
-      'test-repo',
-      42,
     );
   });
 
@@ -261,8 +240,6 @@ describe('EventOrchestratorService', () => {
         htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
         action: 'synchronize',
       },
-      diff: sampleDiff,
-      changedFiles: ['src/index.ts'],
     });
 
     expect(res.status).toBe('completed');
@@ -302,7 +279,6 @@ describe('EventOrchestratorService', () => {
         htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
         action: 'opened',
       },
-      diff: sampleDiff,
     });
 
     expect(res.success).toBe(false);
@@ -344,7 +320,6 @@ describe('EventOrchestratorService', () => {
           htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
           action: 'opened',
         },
-        diff: sampleDiff,
       }),
     ).rejects.toThrow(NonRetryableTaskError);
 
@@ -381,7 +356,6 @@ describe('EventOrchestratorService', () => {
           htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
           action: 'opened',
         },
-        diff: sampleDiff,
       }),
     ).rejects.toThrow('Temporary network connection reset');
 

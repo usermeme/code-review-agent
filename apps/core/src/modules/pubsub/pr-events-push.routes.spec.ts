@@ -35,8 +35,6 @@ describe('prEventsPushRoutes', () => {
       title: 'Fix issue',
       action: 'opened',
     },
-    diff: 'diff text',
-    changedFiles: ['src/app.ts'],
   };
 
   it('processes a valid GCP Pub/Sub push message envelope', async () => {
@@ -157,8 +155,6 @@ describe('prEventsPushRoutes delivery dedup and poison handling', () => {
       prNumber: 101,
       action: 'opened',
     },
-    diff: 'diff text',
-    changedFiles: ['src/app.ts'],
   };
 
   const envelope = (messageId: string) => ({

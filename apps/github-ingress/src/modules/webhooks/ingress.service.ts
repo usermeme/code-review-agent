@@ -31,10 +31,6 @@ const TRACKED_PR_ACTIONS = [
   'review_requested',
 ];
 
-function buildFallbackCloneUrl(owner: string, repo: string): string {
-  return `https://github.com/${owner}/${repo}.git`;
-}
-
 function readRepositoryRef(payload: GithubWebhookPayload): {
   owner: string;
   repo: string;
@@ -84,15 +80,9 @@ function readPrHeadRefs(pullRequest: Partial<PullRequestPayload>) {
   };
 }
 
-function readPrBaseRefs(
-  pullRequest: Partial<PullRequestPayload>,
-  owner: string,
-  repo: string,
-) {
+function readPrBaseRefs(pullRequest: Partial<PullRequestPayload>) {
   const base: Partial<PrBasePayload> = pullRequest.base ?? {};
-  const baseRepo: Partial<NonNullable<PrBasePayload['repo']>> = base.repo ?? {};
   return {
-    cloneUrl: baseRepo.clone_url || buildFallbackCloneUrl(owner, repo),
     baseRef: base.ref || 'main',
   };
 }
@@ -112,7 +102,7 @@ function buildPrMeta(
     ...readPrHeadRefs(pullRequest),
     htmlUrl: pullRequest.html_url || '',
     action,
-    ...readPrBaseRefs(pullRequest, ref.owner, ref.repo),
+    ...readPrBaseRefs(pullRequest),
     isIncrementalUpdate,
   };
 }
@@ -139,7 +129,6 @@ function readIssueDescription(issue: IssuePayload) {
 
 function buildManualTriggerPrMeta(payload: PrCommentPayload): PRMeta {
   const { owner, repo } = readRepositoryRef(payload);
-  const repository: Partial<RepositoryPayload> = payload.repository ?? {};
   return {
     provider: 'github',
     owner,
@@ -149,7 +138,6 @@ function buildManualTriggerPrMeta(payload: PrCommentPayload): PRMeta {
     branch: '',
     htmlUrl: payload.issue.html_url,
     action: 'manual_trigger',
-    cloneUrl: repository.clone_url || buildFallbackCloneUrl(owner, repo),
     baseRef: 'main',
     isIncrementalUpdate: false,
   };
