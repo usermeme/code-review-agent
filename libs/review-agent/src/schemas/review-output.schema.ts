@@ -158,10 +158,9 @@ export function toReviewCommentPayload(
 ): ReviewCommentPayload {
   return {
     path: finding.path.trim(),
-    position: resolvedAnchor.line,
     line: resolvedAnchor.line,
     ...(resolvedAnchor.startLine !== undefined
-      ? { startPosition: resolvedAnchor.startLine }
+      ? { startLine: resolvedAnchor.startLine }
       : {}),
     body: formatFindingComment(finding),
   };

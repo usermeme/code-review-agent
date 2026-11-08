@@ -106,9 +106,8 @@ describe('review-output.schema', () => {
       });
       expect(commentPayload).toEqual({
         path: 'src/auth.ts',
-        position: 42,
         line: 42,
-        startPosition: 40,
+        startLine: 40,
         body: formatFindingComment(sampleFinding),
       });
 

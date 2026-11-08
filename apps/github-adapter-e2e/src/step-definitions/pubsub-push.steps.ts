@@ -24,7 +24,7 @@ When(
     const rows = dataTable.hashes();
     const comments = rows.map((r) => ({
       path: r.path,
-      position: parseInt(r.position, 10),
+      line: parseInt(r.line ?? r.position, 10),
       body: r.body,
     }));
 

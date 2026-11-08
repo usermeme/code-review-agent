@@ -13,9 +13,6 @@ export interface PRState {
   prNumber: number;
   status: 'queued' | 'reviewing' | 'completed' | 'failed';
   updatedAt: Date;
-  diff?: string;
-  changedFiles?: string[];
-  prMeta?: Partial<PRMeta> & Record<string, unknown>;
   summary?: string;
   publishedFindings?: PriorFinding[];
   error?: string;
@@ -32,7 +29,6 @@ export interface PRMeta {
   body?: string;
   htmlUrl: string;
   action: string;
-  cloneUrl?: string;
   baseRef?: string;
   isIncrementalUpdate?: boolean;
   /** Head commit of the PR at the time of the event. */
@@ -41,21 +37,12 @@ export interface PRMeta {
 
 export interface PREventPayload {
   prMeta: PRMeta;
-  diff?: string;
-  changedFiles?: string[];
 }
 
 export interface ReviewCommentPayload {
   path: string;
-  /**
-   * NEW-side line number the comment anchors to (mapped to GitHub's `line`).
-   * Named `position` for historical reasons — it is a file line number, not
-   * a diff-hunk position.
-   */
-  position?: number;
-  /** NEW-side start line for multi-line comments (mapped to GitHub's `start_line`). */
-  startPosition?: number;
-  line?: number;
+  line: number;
+  startLine?: number;
   body: string;
 }
 

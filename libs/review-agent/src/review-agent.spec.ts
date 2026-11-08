@@ -185,9 +185,8 @@ describe('review-agent', () => {
     expect(result.reviewResult.comments).toHaveLength(1);
     expect(result.reviewResult.comments[0]).toMatchObject({
       path: 'src/charge.ts',
-      position: 3,
       line: 3,
-      startPosition: 2,
+      startLine: 2,
     });
     expect(result.reviewResult.comments[0]?.body).toContain(
       '### [CRITICAL] Division by taxRate instead of multiplication',

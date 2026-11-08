@@ -4,15 +4,6 @@ import { Then, When } from '@cucumber/cucumber';
 
 import { CoreWorld } from '../support/world.js';
 
-const sampleDiff = `diff --git a/src/index.ts b/src/index.ts
-new file mode 100644
---- /dev/null
-+++ b/src/index.ts
-@@ -0,0 +1,2 @@
-+export const a = 1;
-+export const b = 2;
-`;
-
 function buildEnvelope(
   repoFullName: string,
   prNumber: number,
@@ -22,8 +13,6 @@ function buildEnvelope(
 ) {
   const [owner, repo] = repoFullName.split('/');
   const payload = {
-    diff: sampleDiff,
-    changedFiles: ['src/index.ts'],
     prMeta: {
       provider: 'github',
       owner,
@@ -35,7 +24,6 @@ function buildEnvelope(
       body: 'PR test body',
       htmlUrl: `https://github.com/${owner}/${repo}/pull/${prNumber}`,
       action,
-      cloneUrl: `https://github.com/${owner}/${repo}.git`,
       baseRef: 'main',
       isIncrementalUpdate: false,
       ...prMetaOverrides,

@@ -53,14 +53,6 @@ const INACTIVE_CLAIM: DeliveryClaim = {
   settle: async () => undefined,
 };
 
-/** Suffix distinguishing merged-PR claims from regular commit claims. */
-function mergedClaimSuffix(
-  action: string,
-  isIncrementalUpdate: boolean | undefined,
-): string {
-  return action === 'closed' && isIncrementalUpdate ? '#merged' : '';
-}
-
 /**
  * Resolves the deduplication claim key for a PR event delivery:
  * - When `headSha` is present on an automatic PR event, claims by
@@ -75,18 +67,9 @@ function resolveClaimKey(
   payload: PREventPayload,
   messageId: string | undefined,
 ): string | undefined {
-  const {
-    provider,
-    owner,
-    repo,
-    prNumber,
-    action,
-    headSha,
-    isIncrementalUpdate,
-  } = payload.prMeta;
+  const { provider, owner, repo, prNumber, action, headSha } = payload.prMeta;
   if (headSha && action !== 'manual_trigger' && prNumber) {
-    const kind = mergedClaimSuffix(action, isIncrementalUpdate);
-    return `${provider || 'github'}:${owner}:${repo}:${prNumber}${kind}@${headSha}`;
+    return `${provider || 'github'}:${owner}:${repo}:${prNumber}@${headSha}`;
   }
   return messageId;
 }

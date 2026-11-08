@@ -59,25 +59,6 @@ function resolveTarballRef(meta: PRMeta): string {
   return meta.headSha || meta.branch;
 }
 
-interface ResolvedDiff {
-  rawDiff: string;
-  changedFiles?: string[];
-}
-
-async function resolveDiff(
-  req: PREventPayload,
-  client: GitAdapterContract,
-  owner: string,
-  repo: string,
-  prNumber: number,
-): Promise<ResolvedDiff> {
-  if (req.diff) {
-    return { rawDiff: req.diff, changedFiles: req.changedFiles };
-  }
-  const result = await client.getPRDiff(owner, repo, prNumber);
-  return { rawDiff: result.diff, changedFiles: result.changedFiles };
-}
-
 export class EventOrchestratorService {
   private readonly pubsub: PubSub;
   private readonly prRepository: PrRepository;
@@ -121,7 +102,7 @@ export class EventOrchestratorService {
       };
     }
 
-    return this.processReview(req, meta, prKey);
+    return this.processReview(meta, prKey);
   }
 
   async publishReviewResults(payload: ReviewResultPayload): Promise<void> {
@@ -131,23 +112,14 @@ export class EventOrchestratorService {
     });
   }
 
-  private async loadWorkspace(
-    req: PREventPayload,
-    meta: PRMeta,
-  ): Promise<RepoWorkspace> {
+  private async loadWorkspace(meta: PRMeta): Promise<RepoWorkspace> {
     const ref = resolveTarballRef(meta);
     const [diffData, tarball] = await Promise.all([
-      resolveDiff(
-        req,
-        this.gitAdapterClient,
-        meta.owner,
-        meta.repo,
-        meta.prNumber,
-      ),
+      this.gitAdapterClient.getPRDiff(meta.owner, meta.repo, meta.prNumber),
       this.gitAdapterClient.getRepoTarball(meta.owner, meta.repo, ref),
     ]);
     return loadRepoWorkspaceFromTarball(tarball, {
-      rawDiff: diffData.rawDiff,
+      rawDiff: diffData.diff,
       changedFiles: diffData.changedFiles,
     });
   }
@@ -176,12 +148,11 @@ export class EventOrchestratorService {
   }
 
   private async loadWorkspaceOrHandleError(
-    req: PREventPayload,
     meta: PRMeta,
     prKey: string,
   ): Promise<RepoWorkspace> {
     try {
-      return await this.loadWorkspace(req, meta);
+      return await this.loadWorkspace(meta);
     } catch (error) {
       if (error instanceof NonRetryableTaskError) {
         return this.handleNonRetryableError(meta, prKey, error);
@@ -233,7 +204,6 @@ export class EventOrchestratorService {
   }
 
   private async processReview(
-    req: PREventPayload,
     meta: PRMeta,
     prKey: string,
   ): Promise<PREventResult> {
@@ -248,7 +218,7 @@ export class EventOrchestratorService {
       status: 'reviewing',
     });
 
-    const workspace = await this.loadWorkspaceOrHandleError(req, meta, prKey);
+    const workspace = await this.loadWorkspaceOrHandleError(meta, prKey);
     const result = await this.executeReview(meta, workspace, priorFindings);
     await this.publishReviewResults(result.reviewResult);
     return this.persistReviewResult(prKey, result);

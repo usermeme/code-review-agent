@@ -5,9 +5,8 @@ export interface PostReviewOptions {
   summary?: string;
   comments: {
     path: string;
-    position?: number;
-    startPosition?: number;
-    line?: number;
+    line: number;
+    startLine?: number;
     body: string;
   }[];
 }

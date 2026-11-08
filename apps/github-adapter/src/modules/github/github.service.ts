@@ -52,25 +52,21 @@ function buildReviewBody(
   return body;
 }
 
-function resolveStartLine(
-  comment: ReviewComment,
-  line: number | undefined,
-): number | undefined {
+function resolveStartLine(comment: ReviewComment): number | undefined {
   // Multi-line findings anchor to their full range; GitHub requires
   // start_line < line (side defaults to RIGHT, the NEW side).
-  return comment.startPosition && line && comment.startPosition < line
-    ? comment.startPosition
+  return comment.startLine && comment.startLine < comment.line
+    ? comment.startLine
     : undefined;
 }
 
 function toReviewCommentParams(comment: ReviewComment): ReviewCommentParams {
-  const line = comment.line ?? comment.position;
-  const startLine = resolveStartLine(comment, line);
+  const startLine = resolveStartLine(comment);
   return {
     path: comment.path,
     body: comment.body,
+    line: comment.line,
     ...(startLine ? { start_line: startLine } : {}),
-    ...(line ? { line: line } : {}),
   };
 }
 
@@ -398,7 +394,7 @@ export class GithubService implements GitAdapterContract {
       } catch (error) {
         failedComments += 1;
         console.error(
-          `Failed to post comment to ${comment.path}:${comment.line ?? comment.position}`,
+          `Failed to post comment to ${comment.path}:${comment.line}`,
           error,
         );
       }
