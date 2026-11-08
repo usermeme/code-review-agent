@@ -27,21 +27,6 @@ Then(
 );
 
 Then(
-  'the returned context contains summary with architecture {string}',
-  function (this: CoreWorld, architecture: string) {
-    assert(this.lastResponse, 'No HTTP response received');
-    const json = this.lastResponse.json();
-    assert(json?.summary, 'Response JSON does not contain summary');
-
-    const summaryObj =
-      typeof json.summary === 'string'
-        ? JSON.parse(json.summary)
-        : json.summary;
-    assert.equal(summaryObj.architecture, architecture);
-  },
-);
-
-Then(
   'the response service name is {string}',
   function (this: CoreWorld, expectedService: string) {
     assert(this.lastResponse, 'No HTTP response received');

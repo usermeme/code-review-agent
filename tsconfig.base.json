@@ -17,15 +17,11 @@
     "paths": {
       "@code-review-agent/env": ["./libs/env/src/index.ts"],
       "@code-review-agent/shared-types": ["./libs/shared-types/src/index.ts"],
-      "@code-review-agent/agent-context-builder": [
-        "./libs/agent-context-builder/src/index.ts"
-      ],
-      "@code-review-agent/agent-code-reviewer": [
-        "./libs/agent-code-reviewer/src/index.ts"
-      ],
       "@code-review-agent/pubsub": ["./libs/pubsub/src/index.ts"],
       "@code-review-agent/llm": ["./libs/llm/src/index.ts"],
-      "@code-review-agent/endpoints": ["./libs/endpoints/src/index.ts"]
+      "@code-review-agent/endpoints": ["./libs/endpoints/src/index.ts"],
+      "@code-review-agent/agent-tools": ["./libs/agent-tools/src/index.ts"],
+      "@code-review-agent/review-agent": ["./libs/review-agent/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

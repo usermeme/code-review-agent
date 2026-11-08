@@ -32,7 +32,7 @@ describe('endpoints library', () => {
     });
 
     it('preserves slashes in file paths while encoding segments', () => {
-      const result = interpolatePath(ENDPOINTS.FILE_CONTENT, {
+      const result = interpolatePath('/api/v1/repos/:owner/:repo/files/:path', {
         Path: {
           owner: 'octocat',
           repo: 'hello-world',
@@ -46,17 +46,19 @@ describe('endpoints library', () => {
     });
 
     it('appends serialized query parameters from payload.Query', () => {
-      const result = interpolatePath(ENDPOINTS.SEARCH_CODE, {
+      const result = interpolatePath(ENDPOINTS.TARBALL, {
         Path: {
           owner: 'owner',
           repo: 'repo',
         },
         Query: {
-          q: 'export class',
+          ref: 'feature branch',
         },
       });
 
-      expect(result).toBe('/api/v1/repos/owner/repo/search?q=export%20class');
+      expect(result).toBe(
+        '/api/v1/repos/owner/repo/tarball?ref=feature%20branch',
+      );
     });
 
     it('interpolates numeric path parameters', () => {
@@ -69,18 +71,6 @@ describe('endpoints library', () => {
       });
 
       expect(result).toBe('/api/v1/repos/octocat/repo/pulls/42/diff');
-    });
-
-    it('interpolates PR files endpoint with prNumber parameter', () => {
-      const result = interpolatePath(ENDPOINTS.PR_FILES, {
-        Path: {
-          owner: 'octocat',
-          repo: 'repo',
-          prNumber: 123,
-        },
-      });
-
-      expect(result).toBe('/api/v1/repos/octocat/repo/pulls/123/files');
     });
 
     it('falls back to payload.Params if payload.Path is not present', () => {
@@ -126,15 +116,7 @@ describe('endpoints library', () => {
       expect(ENDPOINTS.PR_DIFF).toBe(
         '/api/v1/repos/:owner/:repo/pulls/:prNumber/diff',
       );
-      expect(ENDPOINTS.PR_FILES).toBe(
-        '/api/v1/repos/:owner/:repo/pulls/:prNumber/files',
-      );
-      expect(ENDPOINTS.SEARCH_CODE).toBe('/api/v1/repos/:owner/:repo/search');
-      expect(ENDPOINTS.FILE_CONTENT).toBe(
-        '/api/v1/repos/:owner/:repo/files/:path',
-      );
       expect(ENDPOINTS.TARBALL).toBe('/api/v1/repos/:owner/:repo/tarball');
-      expect(ENDPOINTS.CONTEXT).toBe('/api/v1/context/:prKey');
       expect(ENDPOINTS.PUBSUB_PR_EVENTS).toBe('/api/v1/pubsub/pr-events');
       expect(ENDPOINTS.PUBSUB_REVIEW_RESULTS).toBe(
         '/api/v1/pubsub/review-results',

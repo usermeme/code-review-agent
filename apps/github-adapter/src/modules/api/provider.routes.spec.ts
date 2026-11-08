@@ -14,8 +14,6 @@ describe('providerRoutes', () => {
   beforeEach(async () => {
     mockGithubService = {
       getPRDiff: vi.fn(),
-      searchCode: vi.fn(),
-      getFileContent: vi.fn(),
     };
 
     app = Fastify();
@@ -43,75 +41,6 @@ describe('providerRoutes', () => {
       'test-owner',
       'test-repo',
       123,
-    );
-  });
-
-  it('GET /repos/:owner/:repo/search returns search results', async () => {
-    mockGithubService.searchCode.mockResolvedValue({
-      totalCount: 1,
-      items: [{ name: 'file.ts', path: 'src/file.ts' }],
-    });
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/repos/test-owner/test-repo/search?q=AuthService',
-    });
-
-    expect(res.statusCode).toBe(200);
-    const json = res.json();
-    expect(json.totalCount).toBe(1);
-    expect(mockGithubService.searchCode).toHaveBeenCalledWith(
-      'test-owner',
-      'test-repo',
-      'AuthService',
-    );
-  });
-
-  it('GET /repos/:owner/:repo/files/* returns file contents', async () => {
-    mockGithubService.getFileContent.mockResolvedValue({
-      path: 'src/utils.ts',
-      content: 'export const a = 1;',
-      encoding: 'utf-8',
-    });
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/repos/test-owner/test-repo/files/src/utils.ts?ref=main',
-    });
-
-    expect(res.statusCode).toBe(200);
-    const json = res.json();
-    expect(json.content).toBe('export const a = 1;');
-    expect(mockGithubService.getFileContent).toHaveBeenCalledWith(
-      'test-owner',
-      'test-repo',
-      'src/utils.ts',
-      'main',
-    );
-  });
-
-  it('GET /repos/:owner/:repo/pulls/:number/files returns PR files', async () => {
-    mockGithubService.getPRFiles = vi.fn().mockResolvedValue([
-      {
-        filename: 'index.ts',
-        status: 'modified',
-        content: 'console.log(1);',
-      },
-    ]);
-
-    const res = await app.inject({
-      method: 'GET',
-      url: '/repos/test-owner/test-repo/pulls/42/files',
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual([
-      { filename: 'index.ts', status: 'modified', content: 'console.log(1);' },
-    ]);
-    expect(mockGithubService.getPRFiles).toHaveBeenCalledWith(
-      'test-owner',
-      'test-repo',
-      42,
     );
   });
 

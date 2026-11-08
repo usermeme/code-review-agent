@@ -1,0 +1,3 @@
+[submodule "infra-example"]
+	path = infra-example
+	url = https://github.com/usermeme/code-review-agent-infra-example.git

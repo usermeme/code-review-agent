@@ -1,12 +1,8 @@
 import type {
-  CodeSearchResult,
-  FileContentResult,
   GitAdapterContract,
   PRDiffResult,
-  PRFile,
 } from '@code-review-agent/shared-types';
 import { Octokit } from 'octokit';
-import PQueue from 'p-queue';
 
 import { GithubAuthProvider } from './github-auth.service.js';
 import {
@@ -34,24 +30,10 @@ interface InlineCommentCounts {
 
 type ReviewSubmission = { reviewId: string } | { failure: PostReviewResult };
 
-const PR_FILES_CONCURRENCY = 5;
-
 export function formatError(error: unknown): string {
   return error instanceof Error
     ? `${error.name}: ${error.message}`
     : JSON.stringify(error);
-}
-
-function decodeFileContent(data: {
-  encoding: string;
-  content: string;
-}): string {
-  if (!data.content) {
-    return '';
-  }
-  return data.encoding === 'base64'
-    ? Buffer.from(data.content, 'base64').toString('utf8')
-    : data.content;
 }
 
 function buildCommentsFooter(comments: ReviewComment[]): string {
@@ -88,7 +70,7 @@ function toReviewCommentParams(comment: ReviewComment): ReviewCommentParams {
     path: comment.path,
     body: comment.body,
     ...(startLine ? { start_line: startLine } : {}),
-    ...(line ? { line } : {}),
+    ...(line ? { line: line } : {}),
   };
 }
 
@@ -151,54 +133,6 @@ export class GithubService implements GitAdapterContract {
     };
   }
 
-  async getPRFiles(
-    owner: string,
-    repo: string,
-    prNumber: number,
-  ): Promise<PRFile[]> {
-    const octokit = await this.authService.getOctokit(owner, repo);
-    const filesResponse = await octokit.rest.pulls.listFiles({
-      owner,
-      repo,
-      pull_number: prNumber,
-    });
-
-    const queue = new PQueue({ concurrency: PR_FILES_CONCURRENCY });
-    return Promise.all(
-      filesResponse.data.map((file) =>
-        queue.add(() => this.resolvePRFile(owner, repo, file)),
-      ),
-    );
-  }
-
-  private async resolvePRFile(
-    owner: string,
-    repo: string,
-    file: { filename: string; status: string; patch?: string },
-  ): Promise<PRFile> {
-    if (file.status === 'removed') {
-      return {
-        filename: file.filename,
-        status: file.status,
-      };
-    }
-
-    let content: string | undefined;
-    try {
-      const fileContent = await this.getFileContent(owner, repo, file.filename);
-      content = fileContent.content;
-    } catch {
-      content = file.patch;
-    }
-
-    return {
-      filename: file.filename,
-      status: file.status,
-      content,
-      patch: file.patch,
-    };
-  }
-
   async getRepoTarball(
     owner: string,
     repo: string,
@@ -232,55 +166,6 @@ export class GithubService implements GitAdapterContract {
         headers,
       },
     );
-  }
-
-  async searchCode(
-    owner: string,
-    repo: string,
-    query: string,
-  ): Promise<CodeSearchResult> {
-    const octokit = await this.authService.getOctokit(owner, repo);
-    const q = `${query} repo:${owner}/${repo}`;
-    const response = await octokit.rest.search.code({
-      q,
-    });
-
-    return {
-      totalCount: response.data.total_count,
-      items: response.data.items.map((item) => ({
-        name: item.name,
-        path: item.path,
-        sha: item.sha,
-        htmlUrl: item.html_url,
-      })),
-    };
-  }
-
-  async getFileContent(
-    owner: string,
-    repo: string,
-    path: string,
-    ref?: string,
-  ): Promise<FileContentResult> {
-    const octokit = await this.authService.getOctokit(owner, repo);
-    const response = await octokit.rest.repos.getContent({
-      owner,
-      repo,
-      path,
-      ...(ref ? { ref } : {}),
-    });
-
-    const data = response.data;
-    if (Array.isArray(data) || !('content' in data)) {
-      throw new Error(`Path ${path} is a directory or submodule, not a file`);
-    }
-
-    return {
-      path: data.path,
-      content: decodeFileContent(data),
-      encoding: 'utf-8',
-      sha: data.sha,
-    };
   }
 
   async postReview(options: PostReviewOptions): Promise<PostReviewResult> {
@@ -522,6 +407,24 @@ export class GithubService implements GitAdapterContract {
   }
 
   private async postInlineComment(
+    octokit: Octokit,
+    owner: string,
+    repo: string,
+    prNumber: number,
+    comment: ReviewComment,
+    commitId: string,
+  ): Promise<void> {
+    await this.postInlineCommentRequest(
+      octokit,
+      owner,
+      repo,
+      prNumber,
+      comment,
+      commitId,
+    );
+  }
+
+  private async postInlineCommentRequest(
     octokit: Octokit,
     owner: string,
     repo: string,

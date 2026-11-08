@@ -34,22 +34,3 @@ Then(
     );
   },
 );
-
-Then(
-  'the response contains search results with totalCount {int}',
-  function (this: GithubAdapterWorld, count: number) {
-    assert(this.lastResponse, 'No HTTP response received');
-    const json = this.lastResponse.json();
-    assert.equal(json.totalCount, count);
-    assert(Array.isArray(json.items) && json.items.length === count);
-  },
-);
-
-Then(
-  'the response file content is {string}',
-  function (this: GithubAdapterWorld, expectedContent: string) {
-    assert(this.lastResponse, 'No HTTP response received');
-    const json = this.lastResponse.json();
-    assert.equal(json.content, expectedContent);
-  },
-);

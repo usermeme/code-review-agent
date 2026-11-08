@@ -2,17 +2,22 @@
 
 A fully autonomous, context-aware AI Code Review system powered by [`@google/adk`](https://github.com/google/adk) and Google Gemini.
 
-`code-review-agent` follows a decoupled, secure event-driven 3-service microservices architecture featuring a public webhook ingress (**`github-ingress`**), a private provider adapter (**`github-adapter`**), a centralized domain & persistence microservice (**`core`**), and in-process specialized AI agent domain libraries (**`agent-context-builder`** and **`agent-code-reviewer`**). Ingress is completely isolated with zero write credentials, communicating with Core asynchronously over Google Cloud Pub/Sub push subscriptions. Core queries the Adapter on-demand via internal REST tools (`search`, `diff`, `files`) and publishes review findings to Pub/Sub.
+`code-review-agent` follows a decoupled, secure event-driven 3-service microservices architecture featuring a public webhook ingress (**`github-ingress`**), a private provider adapter (**`github-adapter`**), a centralized domain & persistence microservice (**`core`**), and in-process specialized AI agent domain libraries (**`agent-tools`** and **`review-agent`**). Ingress is completely isolated with zero write credentials, communicating with Core asynchronously over Google Cloud Pub/Sub push subscriptions. Core fetches the PR diff and a compressed repo tarball from the Adapter, indexes text files in-memory without disk I/O, runs a lean single-pass ADK review agent with strict call budgets, and publishes review findings to Pub/Sub.
+
+---
+
+## 🏗️ GitOps Infrastructure Example
+
+Production-ready, secretless Infrastructure as Code (IaC) using **Pulumi (TypeScript)** and **Google Cloud Platform** (Cloud Run, Pub/Sub, Firestore, Secret Manager, Workload Identity Federation) is included as a Git submodule in [`infra-example/`](./infra-example) (or visit the standalone repo at [`usermeme/code-review-agent-infra-example`](https://github.com/usermeme/code-review-agent-infra-example)).
 
 ---
 
 ## 🌟 Key Features
 
 - **Strict Security Boundaries**: `github-ingress` is public with **zero GitHub write tokens** and zero database credentials. Both `core` and `github-adapter` are completely private (`--ingress=internal`).
-- **Pluggable Multi-Provider Architecture**: Easily swap or add provider adapters (GitHub, GitLab, Bitbucket) implementing common internal REST contracts and Pub/Sub event schemas.
-- **On-Demand Code Search**: Agent tools query the provider adapter on-demand for repo searches and file contents without downloading heavy repo archives.
-- **Context-Aware Reviews**: Automatically generates and continuously updates a full baseline architectural context of your codebase to eliminate hallucinations.
-- **Agentic Multi-Role Swarm**: Spawns parallel specialized reviewers (Code Quality, Bug Detection, Ticket Alignment) using `@google/adk`.
+- **Zero-Disk In-Memory Code Indexing**: Stream-extracts and indexes repo files into memory (`@code-review-agent/agent-tools`) directly from tarballs, avoiding disk overhead and heavy Git clone processes.
+- **Fast, High-Signal Review Agent**: Single-pass ADK review agent (`@code-review-agent/review-agent`) with surgical search tools (`grep_code`, `read_file`, `find_files`, `get_pr_diff`), deterministic diff-line validation with self-correction, and 0-LLM-call short-circuiting for empty/lockfile changes.
+- **Zero-Cost Guideline Extraction**: Ingests repo rules (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`) automatically from memory with 0 LLM calls.
 - **Top-Level Summaries & Inline Comments**: Submits formal pull request reviews alongside actionable inline review comments directly to the Git provider.
 - **Fail-Fast Environment Configuration**: Strict validation with zero silent default fallbacks on required environment variables.
 - **Container-First CI/CD**: Multi-arch container images are automatically built and published to GHCR.
@@ -75,11 +80,14 @@ code-review-agent/
 │   ├── core/                   # Domain logic, Firestore persistence & in-process ADK orchestration
 │   └── core-e2e/               # Cucumber/Gherkin BDD integration tests for Core
 ├── libs/
-│   ├── agent-context-builder/  # ADK agent library for repo indexing & baseline context
-│   ├── agent-code-reviewer/    # ADK agent library for diff review & inline findings
+│   ├── agent-tools/            # In-memory tarball streaming, diff annotator & ADK repo tools
+│   ├── review-agent/           # Lean single-pass ADK review agent with anchor validation
 │   ├── pubsub/                 # Abstract Pub/Sub consumer & push envelope parsing utilities
+│   ├── llm/                    # Resilient LLM factory, retrying wrapper & test doubles
 │   ├── env/                    # Type-safe environment manager with eager Zod schema validation
-│   └── shared-types/           # Common domain TypeScript interfaces & schemas
+│   ├── shared-types/           # Common domain TypeScript interfaces & schemas
+│   └── endpoints/              # Shared REST endpoint constants
+├── infra-example/              # Git submodule: GitOps Pulumi infrastructure for GCP
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml              # Lint, typecheck, unit tests, E2E tests, build dry-runs
