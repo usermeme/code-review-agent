@@ -1,19 +1,23 @@
 import {
   loadRepoWorkspaceFromTarball,
-  type RepoWorkspace,
+  RepoWorkspace,
 } from '@code-review-agent/agent-tools';
 import type { AgentModels } from '@code-review-agent/llm';
 import {
+  DEFAULT_REVIEW_TIMEOUT_MS,
   type ReviewAgentResult,
-  runCodeReview,
+  type ReviewPipelineResult,
+  runReviewPipeline,
 } from '@code-review-agent/review-agent';
 import {
   type GitAdapterContract,
   NonRetryableTaskError,
+  type PRDiffResult,
   type PREventPayload,
   type PriorFinding,
   type PRMeta,
   type PRState,
+  type ReviewMetrics,
   type ReviewResultPayload,
 } from '@code-review-agent/shared-types';
 import { PubSub } from '@google-cloud/pubsub';
@@ -41,6 +45,7 @@ const REVIEW_ACTIONS = new Set([
   'synchronize',
   'reopened',
   'review_requested',
+  'ready_for_review',
   'manual_trigger',
 ]);
 
@@ -102,7 +107,7 @@ export class EventOrchestratorService {
       };
     }
 
-    return this.processReview(meta, prKey);
+    return this.processReview(meta, prKey, logger);
   }
 
   async publishReviewResults(payload: ReviewResultPayload): Promise<void> {
@@ -112,12 +117,23 @@ export class EventOrchestratorService {
     });
   }
 
-  private async loadWorkspace(meta: PRMeta): Promise<RepoWorkspace> {
-    const ref = resolveTarballRef(meta);
-    const [diffData, tarball] = await Promise.all([
-      this.gitAdapterClient.getPRDiff(meta.owner, meta.repo, meta.prNumber),
-      this.gitAdapterClient.getRepoTarball(meta.owner, meta.repo, ref),
-    ]);
+  private async fetchDiff(meta: PRMeta): Promise<PRDiffResult> {
+    return this.gitAdapterClient.getPRDiff(
+      meta.owner,
+      meta.repo,
+      meta.prNumber,
+    );
+  }
+
+  private async loadWorkspace(
+    meta: PRMeta,
+    diffData: PRDiffResult,
+  ): Promise<RepoWorkspace> {
+    const tarball = await this.gitAdapterClient.getRepoTarball(
+      meta.owner,
+      meta.repo,
+      resolveTarballRef(meta),
+    );
     return loadRepoWorkspaceFromTarball(tarball, {
       rawDiff: diffData.diff,
       changedFiles: diffData.changedFiles,
@@ -147,12 +163,14 @@ export class EventOrchestratorService {
     throw error;
   }
 
-  private async loadWorkspaceOrHandleError(
+  /** Runs a git-adapter call; a non-retryable failure is published to the PR. */
+  private async callAdapter<T>(
     meta: PRMeta,
     prKey: string,
-  ): Promise<RepoWorkspace> {
+    call: () => Promise<T>,
+  ): Promise<T> {
     try {
-      return await this.loadWorkspace(meta);
+      return await call();
     } catch (error) {
       if (error instanceof NonRetryableTaskError) {
         return this.handleNonRetryableError(meta, prKey, error);
@@ -163,19 +181,56 @@ export class EventOrchestratorService {
 
   private async executeReview(
     meta: PRMeta,
-    workspace: RepoWorkspace,
+    prKey: string,
     priorFindings: PriorFinding[],
-  ): Promise<ReviewAgentResult> {
-    const timeoutMs = this.envService.get('REVIEW_TIMEOUT_MS');
-    return runCodeReview(
-      { prMeta: meta, workspace, priorFindings },
-      { model: this.models.reviewer, timeoutMs },
+  ): Promise<ReviewPipelineResult> {
+    const diffData = await this.callAdapter(meta, prKey, () =>
+      this.fetchDiff(meta),
     );
+    const diffWorkspace = new RepoWorkspace({
+      files: new Map(),
+      rawDiff: diffData.diff,
+      changedFiles: diffData.changedFiles,
+    });
+    return runReviewPipeline(
+      {
+        prMeta: meta,
+        diffWorkspace,
+        loadWorkspace: () =>
+          this.callAdapter(meta, prKey, () =>
+            this.loadWorkspace(meta, diffData),
+          ),
+        priorFindings,
+      },
+      {
+        models: this.models,
+        timeoutMs:
+          this.envService.get('REVIEW_TIMEOUT_MS') ?? DEFAULT_REVIEW_TIMEOUT_MS,
+        deepReviewPaths: this.envService.get('DEEP_REVIEW_PATHS'),
+      },
+    );
+  }
+
+  private async persistSkip(
+    prKey: string,
+    metrics: ReviewMetrics,
+  ): Promise<PREventResult> {
+    await this.prRepository.updatePRStatus(prKey, {
+      status: 'skipped',
+      summary: metrics.route.reason,
+      lastReview: metrics,
+    });
+    return {
+      success: true,
+      status: 'ignored',
+      message: `Review skipped: ${metrics.route.reason}`,
+    };
   }
 
   private async persistReviewResult(
     prKey: string,
     result: ReviewAgentResult,
+    metrics: ReviewMetrics,
   ): Promise<PREventResult> {
     const failureReason = result.reviewResult.failure?.reason;
     if (failureReason) {
@@ -183,6 +238,7 @@ export class EventOrchestratorService {
         status: 'failed',
         error: failureReason,
         summary: result.reviewResult.summary,
+        lastReview: metrics,
       });
       return {
         success: false,
@@ -195,6 +251,7 @@ export class EventOrchestratorService {
       status: 'completed',
       summary: result.reviewResult.summary,
       publishedFindings: result.publishedFindings,
+      lastReview: metrics,
     });
     return {
       success: true,
@@ -206,6 +263,7 @@ export class EventOrchestratorService {
   private async processReview(
     meta: PRMeta,
     prKey: string,
+    logger?: FastifyBaseLogger,
   ): Promise<PREventResult> {
     const existing = await this.prRepository.getPRStatus(prKey);
     const priorFindings = extractPriorFindings(existing);
@@ -218,9 +276,19 @@ export class EventOrchestratorService {
       status: 'reviewing',
     });
 
-    const workspace = await this.loadWorkspaceOrHandleError(meta, prKey);
-    const result = await this.executeReview(meta, workspace, priorFindings);
-    await this.publishReviewResults(result.reviewResult);
-    return this.persistReviewResult(prKey, result);
+    const { publish, metrics } = await this.executeReview(
+      meta,
+      prKey,
+      priorFindings,
+    );
+    logger?.info(
+      { route: metrics.route, usage: metrics.usage },
+      `[Core] Review route for ${prKey}: ${metrics.route.tier} (${metrics.route.source})`,
+    );
+    if (!publish) {
+      return this.persistSkip(prKey, metrics);
+    }
+    await this.publishReviewResults(publish.reviewResult);
+    return this.persistReviewResult(prKey, publish, metrics);
   }
 }

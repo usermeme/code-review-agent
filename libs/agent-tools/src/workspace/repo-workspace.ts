@@ -62,6 +62,12 @@ export interface GetPrDiffOptions {
   maxChars?: number;
 }
 
+export interface FileDiffStat {
+  path: string;
+  added: number;
+  deleted: number;
+}
+
 export interface GetPrDiffResult {
   changedFiles: string[];
   path?: string;
@@ -135,6 +141,16 @@ function formatSnippet(
  */
 export function parseDiffByFile(rawDiff: string): Map<string, string> {
   return annotateUnifiedDiff(rawDiff).byFile;
+}
+
+function countDiffLines(path: string, annotatedFileDiff: string): FileDiffStat {
+  let added = 0;
+  let deleted = 0;
+  for (const line of annotatedFileDiff.split('\n')) {
+    if (/^L\d+ \| \+/.test(line)) added += 1;
+    else if (line.startsWith('DEL | -')) deleted += 1;
+  }
+  return { path, added, deleted };
 }
 
 function resolveReviewableChangedFiles(
@@ -373,6 +389,13 @@ export class RepoWorkspace {
       truncated: sourceDiff.length > maxChars,
       diff: sourceDiff.slice(0, maxChars),
     };
+  }
+
+  /** Added/deleted line counts for each reviewable changed file. */
+  getDiffStats(): FileDiffStat[] {
+    return this.changedFiles.map((path) =>
+      countDiffLines(path, this.annotated.byFile.get(path) ?? ''),
+    );
   }
 
   getRepoGuidelines(maxChars?: number): string {

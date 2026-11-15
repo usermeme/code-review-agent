@@ -33,6 +33,7 @@ export {
 } from './workspace/file-filter.util.js';
 export { extractRepoGuidelines } from './workspace/repo-guidelines.util.js';
 export {
+  type FileDiffStat,
   type FindFilesOptions,
   type FindFilesResult,
   type GetPrDiffOptions,

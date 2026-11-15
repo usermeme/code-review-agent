@@ -193,4 +193,25 @@ describe('RepoWorkspace', () => {
       ).toBeNull();
     });
   });
+
+  describe('getDiffStats', () => {
+    it('counts added and deleted lines per changed file', () => {
+      const stats = new RepoWorkspace({
+        files: new Map(),
+        rawDiff: [
+          'diff --git a/src/a.ts b/src/a.ts',
+          '--- a/src/a.ts',
+          '+++ b/src/a.ts',
+          '@@ -1,3 +1,3 @@',
+          ' keep',
+          '-old one',
+          '-old two',
+          '+new one',
+        ].join('\n'),
+        changedFiles: ['src/a.ts', 'pnpm-lock.yaml'],
+      }).getDiffStats();
+
+      expect(stats).toEqual([{ path: 'src/a.ts', added: 1, deleted: 2 }]);
+    });
+  });
 });

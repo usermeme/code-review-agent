@@ -85,6 +85,63 @@ describe('GithubIngressService', () => {
     });
   });
 
+  it('publishes ready_for_review events and carries the draft flag', async () => {
+    const payload = {
+      action: 'ready_for_review',
+      repository: { name: 'my-repo', owner: { login: 'my-org' } },
+      pull_request: {
+        number: 43,
+        title: 'Was a draft',
+        html_url: 'https://github.com/my-org/my-repo/pull/43',
+        user: { login: 'octocat' },
+        head: { ref: 'feat/draft' },
+        base: { ref: 'main' },
+        draft: false,
+      },
+    };
+
+    const result = await service.processWebhook(
+      { 'x-github-event': 'pull_request' },
+      payload,
+      mockLogger as unknown as FastifyBaseLogger,
+    );
+
+    expect(result.ignored).toBe(false);
+    expect(mockTopic.publishMessage).toHaveBeenCalledWith({
+      json: expect.objectContaining({
+        prMeta: expect.objectContaining({
+          action: 'ready_for_review',
+          isDraft: false,
+        }),
+      }),
+    });
+  });
+
+  it('marks PRs opened as drafts', async () => {
+    await service.processWebhook(
+      { 'x-github-event': 'pull_request' },
+      {
+        action: 'opened',
+        repository: { name: 'my-repo', owner: { login: 'my-org' } },
+        pull_request: {
+          number: 44,
+          title: 'WIP',
+          html_url: 'https://github.com/my-org/my-repo/pull/44',
+          user: { login: 'octocat' },
+          head: { ref: 'feat/wip' },
+          draft: true,
+        },
+      },
+      mockLogger as unknown as FastifyBaseLogger,
+    );
+
+    expect(mockTopic.publishMessage).toHaveBeenCalledWith({
+      json: expect.objectContaining({
+        prMeta: expect.objectContaining({ isDraft: true }),
+      }),
+    });
+  });
+
   it('ignores unsupported events gracefully', async () => {
     const result = await service.processWebhook(
       { 'x-github-event': 'fork' },

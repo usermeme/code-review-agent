@@ -2,12 +2,15 @@ import {
   createRepoTools,
   type RepoWorkspace,
 } from '@code-review-agent/agent-tools';
+import { addUsageMetadata, emptyTokenUsage } from '@code-review-agent/llm';
 import type {
   PriorFinding,
   PRMeta,
   ReviewResultPayload,
+  TokenUsage,
 } from '@code-review-agent/shared-types';
 import { type BaseLlm, InMemoryRunner, LlmAgent } from '@google/adk';
+import type { ThinkingLevel } from '@google/genai';
 
 import {
   createSubmitReviewTool,
@@ -24,6 +27,8 @@ export interface ReviewAgentInput {
   prMeta: PRMeta;
   workspace: RepoWorkspace;
   priorFindings?: PriorFinding[];
+  /** Files triage flagged as the riskiest; the reviewer looks at them first. */
+  focusFiles?: string[];
 }
 
 export interface ReviewAgentOptions {
@@ -43,11 +48,18 @@ export interface ReviewAgentOptions {
    * Defaults to 80_000.
    */
   maxInlineDiffChars?: number;
+  /**
+   * Reasoning effort per model call (Gemini 3+ `thinkingLevel`). Omitted
+   * means the model's own default, which is HIGH on Gemini 4 Hydrogen.
+   */
+  thinkingLevel?: ThinkingLevel;
 }
 
 export interface ReviewAgentResult {
   reviewResult: ReviewResultPayload;
   publishedFindings: PriorFinding[];
+  /** Token usage summed over every model call of this review. */
+  usage: TokenUsage;
 }
 
 interface ResolvedReviewOptions {
@@ -55,6 +67,7 @@ interface ResolvedReviewOptions {
   maxLlmCalls: number;
   timeoutMs: number;
   maxInlineDiffChars: number;
+  thinkingLevel?: ThinkingLevel;
 }
 
 const SYSTEM_ROLE_INSTRUCTION = `You are a Principal Software Engineer performing a high-signal code review on a Pull Request.
@@ -89,16 +102,27 @@ function formatPriorFindingsSection(priorFindings: PriorFinding[]): string {
         `- \`${f.path}\` (lines ${f.startLine}-${f.endLine}) [${f.severity.toUpperCase()}]: ${f.title}`,
     )
     .join('\n');
-  return `\n\n## Already Published Findings (Do Not Repeat)\nThe following findings were already posted on earlier commits of this PR. Do NOT report them again:\n${items}`;
+  return `\n\n### Already Published Findings (Do Not Repeat)\nThe following findings were already posted on earlier commits of this PR. Do NOT report them again:\n${items}`;
 }
 
 /**
- * Builds the system instruction for the single-pass review agent.
+ * Builds the system instruction for the review agent. It holds only content
+ * that is identical for every PR of a repository (role + guidelines), so
+ * Gemini's implicit prompt cache can reuse it across reviews; per-PR content
+ * goes into {@link buildReviewUserPrompt}.
  */
-export function buildReviewInstruction(input: ReviewAgentInput): string {
-  const guidelinesSection = formatGuidelinesSection(input.workspace);
-  const priorSection = formatPriorFindingsSection(input.priorFindings ?? []);
-  return `${SYSTEM_ROLE_INSTRUCTION}${guidelinesSection}${priorSection}`;
+export function buildReviewInstruction(
+  input: Pick<ReviewAgentInput, 'workspace'>,
+): string {
+  return `${SYSTEM_ROLE_INSTRUCTION}${formatGuidelinesSection(input.workspace)}`;
+}
+
+function formatFocusSection(focusFiles: string[]): string {
+  if (focusFiles.length === 0) {
+    return '';
+  }
+  const items = focusFiles.map((file) => `- \`${file}\``).join('\n');
+  return `\n\n### Focus Files\nTriage flagged these files as the riskiest in this PR. Review them first:\n${items}`;
 }
 
 function formatDiffSection(
@@ -116,6 +140,12 @@ function formatDiffSection(
   return `### Changed Files (${changedFiles.length})\n${filesList}\n\n*Note: The full annotated diff exceeds the inline threshold (${maxInlineDiffChars} chars). Use \`get_pr_diff({ path: "<file>" })\` to inspect the annotated diff for each changed file.*`;
 }
 
+/** Per-PR sections that sit between the description and the diff. */
+function formatPrContextSections(input: ReviewAgentInput): string {
+  const priorSection = formatPriorFindingsSection(input.priorFindings ?? []);
+  return `${priorSection}${formatFocusSection(input.focusFiles ?? [])}`;
+}
+
 /**
  * Builds the user message containing PR metadata and the annotated diff.
  */
@@ -126,6 +156,7 @@ export function buildReviewUserPrompt(
   const { prMeta, workspace } = input;
   const description = prMeta.body?.trim() || '_No description provided._';
   const diffSection = formatDiffSection(workspace, maxInlineDiffChars);
+  const contextSections = formatPrContextSections(input);
 
   return `## Pull Request #${prMeta.prNumber}: ${prMeta.title}
 - **Repository**: \`${prMeta.owner}/${prMeta.repo}\`
@@ -133,7 +164,7 @@ export function buildReviewUserPrompt(
 - **Branch**: \`${prMeta.branch}\`
 
 ### Description
-${description}
+${description}${contextSections}
 
 ${diffSection}
 
@@ -158,6 +189,7 @@ function resolveReviewOptions(
 ): ResolvedReviewOptions {
   return {
     model: options.model,
+    thinkingLevel: options.thinkingLevel,
     ...resolveNumericOptions(options),
   };
 }
@@ -166,6 +198,7 @@ function buildSuccessResult(
   prMeta: PRMeta,
   submission: ValidatedReviewSubmission,
   priorFindings: PriorFinding[],
+  usage: TokenUsage = emptyTokenUsage(),
 ): ReviewAgentResult {
   return {
     reviewResult: {
@@ -177,13 +210,30 @@ function buildSuccessResult(
       comments: submission.comments,
     },
     publishedFindings: [...priorFindings, ...submission.publishedFindings],
+    usage,
   };
+}
+
+/** A review result that posts only `summary`, with no inline comments. */
+export function buildSummaryOnlyResult(
+  prMeta: PRMeta,
+  summary: string,
+  priorFindings: PriorFinding[],
+  usage: TokenUsage = emptyTokenUsage(),
+): ReviewAgentResult {
+  return buildSuccessResult(
+    prMeta,
+    { summary, comments: [], publishedFindings: [] },
+    priorFindings,
+    usage,
+  );
 }
 
 function buildFailureResult(
   prMeta: PRMeta,
   reason: string,
   priorFindings: PriorFinding[],
+  usage: TokenUsage,
 ): ReviewAgentResult {
   return {
     reviewResult: {
@@ -196,6 +246,7 @@ function buildFailureResult(
       failure: { reason },
     },
     publishedFindings: priorFindings,
+    usage,
   };
 }
 
@@ -209,29 +260,38 @@ function resolveFinalSubmission(
   prMeta: PRMeta,
   state: SubmitReviewState,
   priorFindings: PriorFinding[],
+  usage: TokenUsage,
 ): ReviewAgentResult {
   const submission = getBestSubmission(state);
   if (submission) {
-    return buildSuccessResult(prMeta, submission, priorFindings);
+    return buildSuccessResult(prMeta, submission, priorFindings, usage);
   }
   return buildFailureResult(
     prMeta,
     'Review agent finished without calling submit_review within the LLM call budget.',
     priorFindings,
+    usage,
   );
 }
 
 function createReviewRunner(
   input: ReviewAgentInput,
-  model: BaseLlm,
+  resolved: ResolvedReviewOptions,
   submitBundle: SubmitReviewToolBundle,
 ): InMemoryRunner {
   const repoTools = createRepoTools(input.workspace);
   const instructionText = buildReviewInstruction(input);
   const agent = new LlmAgent({
     name: 'code_review_agent',
-    model,
+    model: resolved.model,
     instruction: () => instructionText,
+    ...(resolved.thinkingLevel
+      ? {
+          generateContentConfig: {
+            thinkingConfig: { thinkingLevel: resolved.thinkingLevel },
+          },
+        }
+      : {}),
     disallowTransferToParent: true,
     disallowTransferToPeers: true,
     tools: [...repoTools.all, submitBundle.tool],
@@ -249,6 +309,7 @@ async function driveRunnerLoop(
   maxLlmCalls: number,
   abortSignal: AbortSignal,
   state: SubmitReviewState,
+  usage: TokenUsage,
 ): Promise<void> {
   const session = await runner.sessionService.createSession({
     appName: runner.appName,
@@ -264,6 +325,7 @@ async function driveRunnerLoop(
   });
 
   for await (const event of events) {
+    addUsageMetadata(usage, event?.usageMetadata);
     if (event && state.getAcceptedSubmission()) {
       break;
     }
@@ -284,17 +346,18 @@ function handleRunnerError(
   prMeta: PRMeta,
   state: SubmitReviewState,
   priorFindings: PriorFinding[],
-  error: unknown,
-  timedOut: boolean,
+  failure: { error: unknown; timedOut: boolean },
+  usage: TokenUsage,
 ): ReviewAgentResult {
   const fallback = getBestSubmission(state);
   if (fallback) {
-    return buildSuccessResult(prMeta, fallback, priorFindings);
+    return buildSuccessResult(prMeta, fallback, priorFindings, usage);
   }
   return buildFailureResult(
     prMeta,
-    extractErrorReason(error, timedOut),
+    extractErrorReason(failure.error, failure.timedOut),
     priorFindings,
+    usage,
   );
 }
 
@@ -304,8 +367,9 @@ async function executeAgentSession(
   resolved: ResolvedReviewOptions,
 ): Promise<ReviewAgentResult> {
   const submitBundle = createSubmitReviewTool(input.workspace, priorFindings);
-  const runner = createReviewRunner(input, resolved.model, submitBundle);
+  const runner = createReviewRunner(input, resolved, submitBundle);
   const userPrompt = buildReviewUserPrompt(input, resolved.maxInlineDiffChars);
+  const usage = emptyTokenUsage();
 
   const abortController = new AbortController();
   let timedOut = false;
@@ -321,19 +385,21 @@ async function executeAgentSession(
       resolved.maxLlmCalls,
       abortController.signal,
       submitBundle.state,
+      usage,
     );
     return resolveFinalSubmission(
       input.prMeta,
       submitBundle.state,
       priorFindings,
+      usage,
     );
   } catch (error: unknown) {
     return handleRunnerError(
       input.prMeta,
       submitBundle.state,
       priorFindings,
-      error,
-      timedOut,
+      { error, timedOut },
+      usage,
     );
   } finally {
     clearTimeout(timer);
@@ -352,13 +418,9 @@ export async function runCodeReview(
   const { changedFiles } = input.workspace.getPrDiff();
 
   if (changedFiles.length === 0) {
-    return buildSuccessResult(
+    return buildSummaryOnlyResult(
       input.prMeta,
-      {
-        summary: 'No reviewable code changes in this pull request.',
-        comments: [],
-        publishedFindings: [],
-      },
+      'No reviewable code changes in this pull request.',
       priorFindings,
     );
   }
