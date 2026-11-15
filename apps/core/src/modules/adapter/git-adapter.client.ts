@@ -1,5 +1,6 @@
 import { ENDPOINTS, interpolatePath } from '@code-review-agent/endpoints';
 import {
+  type CompareDiffResult,
   type GitAdapterContract,
   NonRetryableTaskError,
   type PRDiffResult,
@@ -51,6 +52,19 @@ export class GitAdapterClient implements GitAdapterContract {
       Path: { owner, repo, prNumber },
     });
     return this.fetchJson<PRDiffResult>(path, 'fetch PR diff');
+  }
+
+  async getCompareDiff(
+    owner: string,
+    repo: string,
+    base: string,
+    head: string,
+  ): Promise<CompareDiffResult> {
+    const path = interpolatePath(ENDPOINTS.COMPARE, {
+      Path: { owner, repo },
+      Query: { base, head },
+    });
+    return this.fetchJson<CompareDiffResult>(path, 'compare commits');
   }
 
   async getReviewThreads(

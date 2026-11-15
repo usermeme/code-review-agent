@@ -1,4 +1,5 @@
 import type {
+  CompareDiffResult,
   GitAdapterContract,
   PRDiffResult,
   ReviewThread,
@@ -128,6 +129,30 @@ export class GithubService implements GitAdapterContract {
     return {
       diff,
       changedFiles,
+    };
+  }
+
+  async getCompareDiff(
+    owner: string,
+    repo: string,
+    base: string,
+    head: string,
+  ): Promise<CompareDiffResult> {
+    const octokit = await this.authService.getOctokit(owner, repo);
+    const basehead = `${base}...${head}`;
+    const [diffResponse, summaryResponse] = await Promise.all([
+      octokit.rest.repos.compareCommitsWithBasehead({
+        owner,
+        repo,
+        basehead,
+        mediaType: { format: 'diff' },
+      }),
+      octokit.rest.repos.compareCommitsWithBasehead({ owner, repo, basehead }),
+    ]);
+    return {
+      diff: diffResponse.data as unknown as string,
+      changedFiles: (summaryResponse.data.files ?? []).map((f) => f.filename),
+      status: summaryResponse.data.status,
     };
   }
 

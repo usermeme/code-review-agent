@@ -71,6 +71,34 @@ describe('providerRoutes', () => {
     );
   });
 
+  it('GET /repos/:owner/:repo/compare returns the compare diff', async () => {
+    const compare = { diff: 'd', changedFiles: ['a.ts'], status: 'ahead' };
+    mockGithubService.getCompareDiff = vi.fn().mockResolvedValue(compare);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/compare?base=aaa&head=bbb',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(compare);
+    expect(mockGithubService.getCompareDiff).toHaveBeenCalledWith(
+      'test-owner',
+      'test-repo',
+      'aaa',
+      'bbb',
+    );
+  });
+
+  it('GET /repos/:owner/:repo/compare rejects a missing head', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/compare?base=aaa',
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
   it('GET /repos/:owner/:repo/tarball returns tarball stream', async () => {
     const mockStream = Readable.from([Buffer.from('fake-tar-bytes')]);
     mockGithubService.getRepoTarball = vi.fn().mockResolvedValue({

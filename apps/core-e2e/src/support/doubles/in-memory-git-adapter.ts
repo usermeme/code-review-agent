@@ -1,4 +1,5 @@
 import type {
+  CompareDiffResult,
   GitAdapterContract,
   PRDiffResult,
   ReviewThread,
@@ -54,6 +55,23 @@ export class InMemoryGitAdapterClient implements GitAdapterContract {
     return {
       diff: defaultDiff,
       changedFiles: ['src/index.ts'],
+    };
+  }
+
+  async getCompareDiff(
+    owner: string,
+    repo: string,
+    base: string,
+    head: string,
+  ): Promise<CompareDiffResult> {
+    void owner;
+    void repo;
+    void base;
+    void head;
+    return {
+      diff: defaultDiff,
+      changedFiles: ['src/index.ts'],
+      status: 'ahead',
     };
   }
 

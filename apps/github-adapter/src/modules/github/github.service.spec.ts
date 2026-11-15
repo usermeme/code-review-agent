@@ -21,6 +21,7 @@ describe('GithubService (Adapter)', () => {
       };
       repos: {
         downloadTarballArchive: ReturnType<typeof vi.fn>;
+        compareCommitsWithBasehead: ReturnType<typeof vi.fn>;
       };
       issues: {
         createComment: ReturnType<typeof vi.fn>;
@@ -39,6 +40,7 @@ describe('GithubService (Adapter)', () => {
         },
         repos: {
           downloadTarballArchive: vi.fn(),
+          compareCommitsWithBasehead: vi.fn(),
         },
         issues: {
           createComment: vi.fn(),
@@ -76,6 +78,26 @@ describe('GithubService (Adapter)', () => {
       pull_number: 1,
       mediaType: { format: 'diff' },
     });
+  });
+
+  it('compares two commits, returning the diff, changed files and status', async () => {
+    // The diff request is issued first, then the JSON summary.
+    mockOctokit.rest.repos.compareCommitsWithBasehead
+      .mockResolvedValueOnce({ data: 'diff --git a/foo.ts b/foo.ts' })
+      .mockResolvedValueOnce({
+        data: { status: 'ahead', files: [{ filename: 'foo.ts' }] },
+      });
+
+    const result = await service.getCompareDiff('owner', 'repo', 'aaa', 'bbb');
+
+    expect(result).toEqual({
+      diff: 'diff --git a/foo.ts b/foo.ts',
+      changedFiles: ['foo.ts'],
+      status: 'ahead',
+    });
+    expect(
+      mockOctokit.rest.repos.compareCommitsWithBasehead,
+    ).toHaveBeenCalledWith(expect.objectContaining({ basehead: 'aaa...bbb' }));
   });
 
   it('downloads repo tarball archive', async () => {

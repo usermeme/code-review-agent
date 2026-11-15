@@ -57,6 +57,21 @@ describe('GitAdapterClient', () => {
     expect(result).toEqual(threads);
   });
 
+  it('compares two commits', async () => {
+    const compare = { diff: 'd', changedFiles: ['a.ts'], status: 'ahead' };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue(compare),
+    });
+
+    const result = await client.getCompareDiff('owner', 'repo', 'aaa', 'bbb');
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://adapter:8080/api/v1/repos/owner/repo/compare?base=aaa&head=bbb',
+    );
+    expect(result).toEqual(compare);
+  });
+
   it('fetches repo tarball successfully', async () => {
     const mockResponse = {
       ok: true,
