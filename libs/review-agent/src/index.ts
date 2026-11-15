@@ -1,6 +1,26 @@
 export {
+  type ReviewPipelineInput,
+  type ReviewPipelineOptions,
+  type ReviewPipelineResult,
+  runReviewPipeline,
+} from './pipeline/review-pipeline.js';
+export {
+  DEFAULT_DEEP_REVIEW_PATHS,
+  evaluateDeepReviewPaths,
+  evaluateSkipRules,
+} from './pipeline/review-rules.js';
+export { TIER_PROFILES, type TierProfile } from './pipeline/tier-profiles.js';
+export {
+  buildTriagePrompt,
+  runTriage,
+  type TriageDecision,
+  triageDecisionSchema,
+  type TriageResult,
+} from './pipeline/triage.js';
+export {
   buildReviewInstruction,
   buildReviewUserPrompt,
+  buildSummaryOnlyResult,
   DEFAULT_MAX_INLINE_DIFF_CHARS,
   DEFAULT_MAX_LLM_CALLS,
   DEFAULT_REVIEW_TIMEOUT_MS,

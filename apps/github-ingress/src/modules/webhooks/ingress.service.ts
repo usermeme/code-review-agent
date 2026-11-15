@@ -29,6 +29,7 @@ const TRACKED_PR_ACTIONS = [
   'synchronize',
   'reopened',
   'review_requested',
+  'ready_for_review',
 ];
 
 function readRepositoryRef(payload: GithubWebhookPayload): {
@@ -104,6 +105,7 @@ function buildPrMeta(
     action,
     ...readPrBaseRefs(pullRequest),
     isIncrementalUpdate,
+    isDraft: Boolean(pullRequest.draft),
   };
 }
 

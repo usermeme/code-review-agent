@@ -18,6 +18,19 @@ const coreBaseEnvSchema = z.object({
     .min(30_000)
     .max(540_000)
     .optional(),
+  /**
+   * Comma-separated globs of paths that always get a deep review (e.g.
+   * `**\/auth/**,**\/migrations/**`). Unset uses the review-agent defaults.
+   */
+  DEEP_REVIEW_PATHS: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value
+        ?.split(',')
+        .map((pattern) => pattern.trim())
+        .filter(Boolean),
+    ),
 });
 
 export const coreEnvSchema = coreBaseEnvSchema.merge(modelConfigSchema);

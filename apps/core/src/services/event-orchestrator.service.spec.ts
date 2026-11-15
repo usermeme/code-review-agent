@@ -193,19 +193,72 @@ describe('EventOrchestratorService', () => {
         owner: 'test-org',
         repo: 'test-repo',
         prNumber: 42,
-        summary: 'Code looks great!',
+        summary: expect.stringContaining('Code looks great!'),
       }),
     });
 
-    // Marked completed with summary and publishedFindings
+    // Marked completed with summary, publishedFindings and the route taken
     expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
       'github:test-org:test-repo:42',
       expect.objectContaining({
         status: 'completed',
-        summary: 'Code looks great!',
+        summary: expect.stringContaining('Code looks great!'),
         publishedFindings: [],
+        lastReview: expect.objectContaining({
+          route: expect.objectContaining({ tier: 'deep' }),
+        }),
       }),
     );
+  });
+
+  it('skips a draft PR without fetching the repo or publishing anything', async () => {
+    const res = await service.ingestPREvent({
+      prMeta: {
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        prNumber: 42,
+        title: 'WIP',
+        author: 'octocat',
+        branch: 'feat',
+        headSha: 'sha1',
+        htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+        action: 'opened',
+        isDraft: true,
+      },
+    });
+
+    expect(res).toMatchObject({ success: true, status: 'ignored' });
+    expect(mockGitAdapter.getRepoTarball).not.toHaveBeenCalled();
+    expect(mockPublishMessage).not.toHaveBeenCalled();
+    expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+      'github:test-org:test-repo:42',
+      expect.objectContaining({
+        status: 'skipped',
+        lastReview: expect.objectContaining({
+          route: expect.objectContaining({ tier: 'skip', source: 'rule' }),
+        }),
+      }),
+    );
+  });
+
+  it('reviews a PR marked ready for review', async () => {
+    const res = await service.ingestPREvent({
+      prMeta: {
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        prNumber: 42,
+        title: 'Ready now',
+        author: 'octocat',
+        branch: 'feat',
+        headSha: 'sha1',
+        htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+        action: 'ready_for_review',
+      },
+    });
+
+    expect(res.status).toBe('completed');
   });
 
   it('performs incremental review passing prior findings from prRepository', async () => {
@@ -257,7 +310,9 @@ describe('EventOrchestratorService', () => {
     });
     const failingService = new EventOrchestratorService({
       envService: {
-        get: vi.fn(() => 30_000),
+        get: vi.fn((key: string) =>
+          key === 'REVIEW_TIMEOUT_MS' ? 30_000 : undefined,
+        ),
       } as unknown as CoreEnvService,
       prRepository: mockPrRepo as unknown as PrRepository,
       pubsub: mockPubSub as unknown as PubSub,

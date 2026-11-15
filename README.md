@@ -17,6 +17,7 @@ Production-ready, secretless Infrastructure as Code (IaC) using **Pulumi (TypeSc
 - **Strict Security Boundaries**: `github-ingress` is public with **zero GitHub write tokens** and zero database credentials. Both `core` and `github-adapter` are completely private (`--ingress=internal`).
 - **Zero-Disk In-Memory Code Indexing**: Stream-extracts and indexes repo files into memory (`@code-review-agent/agent-tools`) directly from tarballs, avoiding disk overhead and heavy Git clone processes.
 - **Fast, High-Signal Review Agent**: Single-pass ADK review agent (`@code-review-agent/review-agent`) with surgical search tools (`grep_code`, `read_file`, `find_files`, `get_pr_diff`), deterministic diff-line validation with self-correction, and 0-LLM-call short-circuiting for empty/lockfile changes.
+- **Cost-Aware Review Routing**: Free rules skip drafts, bot PRs, `[skip review]` PRs, and docs-only or generated-only changes. Paths in `DEEP_REVIEW_PATHS` always get a deep review. Everything else goes to a cheap triage model that picks `skip`, `light` (low reasoning effort, small budget) or `deep` (high effort, full budget), and the repo tarball is only downloaded when a review actually runs. Triage fails open to a deep review, and every run records its route and per-role token usage (including implicitly cached tokens) on the PR's Firestore record.
 - **Zero-Cost Guideline Extraction**: Ingests repo rules (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`) automatically from memory with 0 LLM calls.
 - **Top-Level Summaries & Inline Comments**: Submits formal pull request reviews alongside actionable inline review comments directly to the Git provider.
 - **Fail-Fast Environment Configuration**: Strict validation with zero silent default fallbacks on required environment variables.
@@ -613,20 +614,21 @@ Each service strictly validates required variables and fails fast at startup if 
 
 ### Core Service (`apps/core`)
 
-| Variable                  | Required | Description                                                                         |
-| :------------------------ | :------: | :---------------------------------------------------------------------------------- |
-| `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                                     |
-| `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                          |
-| `REVIEW_RESULTS_TOPIC`    |   Yes    | Google Cloud Pub/Sub topic to publish review result events to                       |
-| `REVIEWER_MODEL`          |   Yes    | Model for the reviewer agent, which reads the diff (e.g. `gemini-4-hydrogen`)       |
-| `VERIFIER_MODEL`          |   Yes    | Model for the verifier agent, which confirms findings (e.g. `gemini-4-argon`)       |
-| `TRIAGE_MODEL`            | Optional | Model for triage and guard decisions (default `gemini-decision-1`)                  |
-| `REVIEW_TIMEOUT_MS`       | Optional | Wall-clock cap per review in ms (default `480000`, valid `30000`–`540000`)          |
-| `GIT_ADAPTER_URL`         |   Yes    | URL of Git Provider Adapter for on-demand code queries (e.g. `http://adapter:8080`) |
-| `GEMINI_API_KEY`          | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)          |
-| `GOOGLE_CLOUD_PROJECT`    | Optional | GCP Project ID (auto-detected when running in GCP)                                  |
-| `FIRESTORE_EMULATOR_HOST` | Optional | Host of local Firestore emulator for dev/testing (e.g. `localhost:8081`)            |
-| `PUBSUB_EMULATOR_HOST`    | Optional | Host of local Pub/Sub emulator for dev/testing (e.g. `localhost:8085`)              |
+| Variable                  | Required | Description                                                                                                                        |
+| :------------------------ | :------: | :--------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                                                                                    |
+| `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                                                                         |
+| `REVIEW_RESULTS_TOPIC`    |   Yes    | Google Cloud Pub/Sub topic to publish review result events to                                                                      |
+| `REVIEWER_MODEL`          |   Yes    | Model for the reviewer agent, which reads the diff (e.g. `gemini-4-hydrogen`)                                                      |
+| `VERIFIER_MODEL`          |   Yes    | Model for the verifier agent, which confirms findings (e.g. `gemini-4-argon`)                                                      |
+| `TRIAGE_MODEL`            | Optional | Model for triage and guard decisions (default `gemini-decision-1`)                                                                 |
+| `DEEP_REVIEW_PATHS`       | Optional | Comma-separated globs that always get a deep review (defaults: auth, security, migrations, SQL, workflows, Dockerfiles, Terraform) |
+| `REVIEW_TIMEOUT_MS`       | Optional | Wall-clock cap per review in ms (default `480000`, valid `30000`–`540000`)                                                         |
+| `GIT_ADAPTER_URL`         |   Yes    | URL of Git Provider Adapter for on-demand code queries (e.g. `http://adapter:8080`)                                                |
+| `GEMINI_API_KEY`          | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)                                                         |
+| `GOOGLE_CLOUD_PROJECT`    | Optional | GCP Project ID (auto-detected when running in GCP)                                                                                 |
+| `FIRESTORE_EMULATOR_HOST` | Optional | Host of local Firestore emulator for dev/testing (e.g. `localhost:8081`)                                                           |
+| `PUBSUB_EMULATOR_HOST`    | Optional | Host of local Pub/Sub emulator for dev/testing (e.g. `localhost:8085`)                                                             |
 
 ---
 

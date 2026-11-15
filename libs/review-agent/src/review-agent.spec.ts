@@ -1,11 +1,6 @@
 import { RepoWorkspace } from '@code-review-agent/agent-tools';
 import type { PRMeta } from '@code-review-agent/shared-types';
-import {
-  BaseLlm,
-  type BaseLlmConnection,
-  type LlmRequest,
-  type LlmResponse,
-} from '@google/adk';
+import { ThinkingLevel } from '@google/genai';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -13,60 +8,10 @@ import {
   buildReviewUserPrompt,
   runCodeReview,
 } from './review-agent.js';
-
-type StepResponder = (request: LlmRequest, callIndex: number) => LlmResponse;
-
-class ScriptedLlm extends BaseLlm {
-  public readonly requests: LlmRequest[] = [];
-  private readonly steps: StepResponder[];
-
-  constructor(steps: StepResponder[]) {
-    super({ model: 'scripted-test-llm' });
-    this.steps = steps;
-  }
-
-  override async *generateContentAsync(
-    llmRequest: LlmRequest,
-  ): AsyncGenerator<LlmResponse, void> {
-    const callIndex = this.requests.length;
-    this.requests.push(llmRequest);
-    const responder = this.steps[callIndex];
-    if (!responder) {
-      yield {
-        content: {
-          role: 'model',
-          parts: [{ text: 'No more scripted steps.' }],
-        },
-      };
-      return;
-    }
-    yield responder(llmRequest, callIndex);
-  }
-
-  override connect(): Promise<BaseLlmConnection> {
-    return Promise.reject(new Error('Not implemented'));
-  }
-}
-
-function createFunctionCallResponse(
-  name: string,
-  args: Record<string, unknown>,
-): LlmResponse {
-  return {
-    content: {
-      role: 'model',
-      parts: [
-        {
-          functionCall: {
-            id: `call_${name}_${Math.random().toString(36).slice(2, 7)}`,
-            name,
-            args,
-          },
-        },
-      ],
-    },
-  };
-}
+import {
+  createFunctionCallResponse,
+  ScriptedLlm,
+} from './testing/scripted-llm.js';
 
 const SAMPLE_PR_META: PRMeta = {
   provider: 'github',
@@ -307,11 +252,13 @@ describe('review-agent', () => {
     expect(result.reviewResult.comments).toEqual([]);
   });
 
-  it('includes repo guidelines and prior findings in instruction and switches to get_pr_diff when diff exceeds inline budget', () => {
+  it('keeps the instruction PR-independent: guidelines in the instruction, prior findings and focus files in the user prompt', () => {
     const workspace = createSampleWorkspace();
-    const instruction = buildReviewInstruction({
+    const instruction = buildReviewInstruction({ workspace });
+    const userPrompt = buildReviewUserPrompt({
       prMeta: SAMPLE_PR_META,
       workspace,
+      focusFiles: ['src/charge.ts'],
       priorFindings: [
         {
           path: 'src/charge.ts',
@@ -324,7 +271,14 @@ describe('review-agent', () => {
     });
 
     expect(instruction).toContain('Never divide by taxRate.');
-    expect(instruction).toContain('Prior issue');
+    expect(instruction).not.toContain('Prior issue');
+    expect(instruction).not.toContain(SAMPLE_PR_META.title);
+    expect(userPrompt).toContain('Prior issue');
+    expect(userPrompt).toContain('### Focus Files');
+  });
+
+  it('switches to get_pr_diff when the diff exceeds the inline budget', () => {
+    const workspace = createSampleWorkspace();
 
     const inlinePrompt = buildReviewUserPrompt(
       { prMeta: SAMPLE_PR_META, workspace },
@@ -400,5 +354,45 @@ describe('review-agent', () => {
     expect(result.reviewResult.comments[0]?.body).toContain('Division by zero');
     expect(result.publishedFindings).toHaveLength(1);
     expect(result.publishedFindings[0]?.title).toBe('Division by zero');
+  });
+
+  it('sends the configured thinking level and sums token usage over all calls', async () => {
+    const workspace = createSampleWorkspace();
+    const llm = new ScriptedLlm([
+      () => ({
+        ...createFunctionCallResponse('grep_code', {
+          pattern: 'calculateTotal',
+        }),
+        usageMetadata: { promptTokenCount: 1000, candidatesTokenCount: 20 },
+      }),
+      () => ({
+        ...createFunctionCallResponse('submit_review', {
+          summary: 'Looks fine.',
+          findings: [],
+        }),
+        usageMetadata: {
+          promptTokenCount: 1100,
+          cachedContentTokenCount: 900,
+          candidatesTokenCount: 30,
+          thoughtsTokenCount: 40,
+        },
+      }),
+    ]);
+
+    const result = await runCodeReview(
+      { prMeta: SAMPLE_PR_META, workspace },
+      { model: llm, thinkingLevel: ThinkingLevel.LOW },
+    );
+
+    expect(llm.requests[0].config?.thinkingConfig?.thinkingLevel).toBe(
+      ThinkingLevel.LOW,
+    );
+    expect(result.usage).toEqual({
+      calls: 2,
+      promptTokens: 2100,
+      cachedTokens: 900,
+      outputTokens: 50,
+      thoughtsTokens: 40,
+    });
   });
 });

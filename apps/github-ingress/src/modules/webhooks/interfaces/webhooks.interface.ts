@@ -14,6 +14,7 @@ export interface GithubWebhookPayload {
     head: { ref: string; sha?: string };
     base?: { ref: string; repo?: { clone_url?: string } };
     merged?: boolean;
+    draft?: boolean;
   };
   issue?: {
     number: number;
