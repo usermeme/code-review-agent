@@ -2,17 +2,23 @@ import {
   createRepoTools,
   type RepoWorkspace,
 } from '@code-review-agent/agent-tools';
-import { addUsageMetadata, emptyTokenUsage } from '@code-review-agent/llm';
+import { emptyTokenUsage } from '@code-review-agent/llm';
 import type {
   PriorFinding,
   PRMeta,
   ReviewResultPayload,
   TokenUsage,
 } from '@code-review-agent/shared-types';
-import { type BaseLlm, InMemoryRunner, LlmAgent } from '@google/adk';
+import { type BaseLlm, LlmAgent } from '@google/adk';
 import type { ThinkingLevel } from '@google/genai';
 
 import {
+  type AgentSessionOutcome,
+  runAgentSession,
+  thinkingConfig,
+} from './agents/agent-session.js';
+import {
+  type AnchoredFinding,
   createSubmitReviewTool,
   type SubmitReviewState,
   type SubmitReviewToolBundle,
@@ -58,6 +64,8 @@ export interface ReviewAgentOptions {
 export interface ReviewAgentResult {
   reviewResult: ReviewResultPayload;
   publishedFindings: PriorFinding[];
+  /** This run's new findings (the ones in `reviewResult.comments`). */
+  findings: AnchoredFinding[];
   /** Token usage summed over every model call of this review. */
   usage: TokenUsage;
 }
@@ -210,6 +218,7 @@ function buildSuccessResult(
       comments: submission.comments,
     },
     publishedFindings: [...priorFindings, ...submission.publishedFindings],
+    findings: submission.findings,
     usage,
   };
 }
@@ -223,7 +232,7 @@ export function buildSummaryOnlyResult(
 ): ReviewAgentResult {
   return buildSuccessResult(
     prMeta,
-    { summary, comments: [], publishedFindings: [] },
+    { summary, comments: [], publishedFindings: [], findings: [] },
     priorFindings,
     usage,
   );
@@ -246,6 +255,7 @@ function buildFailureResult(
       failure: { reason },
     },
     publishedFindings: priorFindings,
+    findings: [],
     usage,
   };
 }
@@ -256,109 +266,61 @@ function getBestSubmission(
   return state.getAcceptedSubmission() ?? state.getFallbackDraft();
 }
 
-function resolveFinalSubmission(
-  prMeta: PRMeta,
-  state: SubmitReviewState,
-  priorFindings: PriorFinding[],
-  usage: TokenUsage,
-): ReviewAgentResult {
-  const submission = getBestSubmission(state);
-  if (submission) {
-    return buildSuccessResult(prMeta, submission, priorFindings, usage);
-  }
-  return buildFailureResult(
-    prMeta,
-    'Review agent finished without calling submit_review within the LLM call budget.',
-    priorFindings,
-    usage,
-  );
-}
+const NO_SUBMISSION_REASON =
+  'Review agent finished without calling submit_review within the LLM call budget.';
 
-function createReviewRunner(
-  input: ReviewAgentInput,
-  resolved: ResolvedReviewOptions,
-  submitBundle: SubmitReviewToolBundle,
-): InMemoryRunner {
-  const repoTools = createRepoTools(input.workspace);
-  const instructionText = buildReviewInstruction(input);
-  const agent = new LlmAgent({
-    name: 'code_review_agent',
-    model: resolved.model,
-    instruction: () => instructionText,
-    ...(resolved.thinkingLevel
-      ? {
-          generateContentConfig: {
-            thinkingConfig: { thinkingLevel: resolved.thinkingLevel },
-          },
-        }
-      : {}),
-    disallowTransferToParent: true,
-    disallowTransferToPeers: true,
-    tools: [...repoTools.all, submitBundle.tool],
-  });
-
-  return new InMemoryRunner({
-    appName: 'code-review-agent',
-    agent,
-  });
-}
-
-async function driveRunnerLoop(
-  runner: InMemoryRunner,
-  userPrompt: string,
-  maxLlmCalls: number,
-  abortSignal: AbortSignal,
-  state: SubmitReviewState,
-  usage: TokenUsage,
-): Promise<void> {
-  const session = await runner.sessionService.createSession({
-    appName: runner.appName,
-    userId: 'pr-reviewer',
-  });
-
-  const events = runner.runAsync({
-    userId: session.userId,
-    sessionId: session.id,
-    newMessage: { role: 'user', parts: [{ text: userPrompt }] },
-    runConfig: { maxLlmCalls },
-    abortSignal,
-  });
-
-  for await (const event of events) {
-    addUsageMetadata(usage, event?.usageMetadata);
-    if (event && state.getAcceptedSubmission()) {
-      break;
-    }
-  }
-}
-
-function extractErrorReason(error: unknown, timedOut: boolean): string {
-  if (timedOut) {
-    return 'Review timed out before completion.';
-  }
+function describeError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
   return String(error);
 }
 
-function handleRunnerError(
+function extractErrorReason(outcome: AgentSessionOutcome): string {
+  if (outcome.timedOut) {
+    return 'Review timed out before completion.';
+  }
+  if (outcome.error === undefined) {
+    return NO_SUBMISSION_REASON;
+  }
+  return describeError(outcome.error);
+}
+
+/** Uses the best submission the agent produced, even if the run later failed. */
+function resolveOutcome(
   prMeta: PRMeta,
   state: SubmitReviewState,
   priorFindings: PriorFinding[],
-  failure: { error: unknown; timedOut: boolean },
-  usage: TokenUsage,
+  outcome: AgentSessionOutcome,
 ): ReviewAgentResult {
-  const fallback = getBestSubmission(state);
-  if (fallback) {
-    return buildSuccessResult(prMeta, fallback, priorFindings, usage);
+  const submission = getBestSubmission(state);
+  if (submission) {
+    return buildSuccessResult(prMeta, submission, priorFindings, outcome.usage);
   }
   return buildFailureResult(
     prMeta,
-    extractErrorReason(failure.error, failure.timedOut),
+    extractErrorReason(outcome),
     priorFindings,
-    usage,
+    outcome.usage,
   );
+}
+
+function createReviewAgent(
+  input: ReviewAgentInput,
+  resolved: ResolvedReviewOptions,
+  submitBundle: SubmitReviewToolBundle,
+): LlmAgent {
+  const repoTools = createRepoTools(input.workspace);
+  const instructionText = buildReviewInstruction(input);
+  return new LlmAgent({
+    name: 'code_review_agent',
+    model: resolved.model,
+    instruction: () => instructionText,
+    ...thinkingConfig(resolved.thinkingLevel),
+    disallowTransferToParent: true,
+    disallowTransferToPeers: true,
+    tools: [...repoTools.all, submitBundle.tool],
+  });
 }
 
 async function executeAgentSession(
@@ -367,43 +329,19 @@ async function executeAgentSession(
   resolved: ResolvedReviewOptions,
 ): Promise<ReviewAgentResult> {
   const submitBundle = createSubmitReviewTool(input.workspace, priorFindings);
-  const runner = createReviewRunner(input, resolved, submitBundle);
-  const userPrompt = buildReviewUserPrompt(input, resolved.maxInlineDiffChars);
-  const usage = emptyTokenUsage();
-
-  const abortController = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    abortController.abort();
-  }, resolved.timeoutMs);
-
-  try {
-    await driveRunnerLoop(
-      runner,
-      userPrompt,
-      resolved.maxLlmCalls,
-      abortController.signal,
-      submitBundle.state,
-      usage,
-    );
-    return resolveFinalSubmission(
-      input.prMeta,
-      submitBundle.state,
-      priorFindings,
-      usage,
-    );
-  } catch (error: unknown) {
-    return handleRunnerError(
-      input.prMeta,
-      submitBundle.state,
-      priorFindings,
-      { error, timedOut },
-      usage,
-    );
-  } finally {
-    clearTimeout(timer);
-  }
+  const outcome = await runAgentSession({
+    agent: createReviewAgent(input, resolved, submitBundle),
+    prompt: buildReviewUserPrompt(input, resolved.maxInlineDiffChars),
+    maxLlmCalls: resolved.maxLlmCalls,
+    timeoutMs: resolved.timeoutMs,
+    isDone: () => Boolean(submitBundle.state.getAcceptedSubmission()),
+  });
+  return resolveOutcome(
+    input.prMeta,
+    submitBundle.state,
+    priorFindings,
+    outcome,
+  );
 }
 
 /**

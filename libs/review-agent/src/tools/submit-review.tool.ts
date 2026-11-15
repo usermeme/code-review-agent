@@ -1,4 +1,7 @@
-import type { RepoWorkspace } from '@code-review-agent/agent-tools';
+import type {
+  DiffCommentAnchor,
+  RepoWorkspace,
+} from '@code-review-agent/agent-tools';
 import type {
   PriorFinding,
   ReviewCommentPayload,
@@ -14,10 +17,18 @@ import {
   toReviewCommentPayload,
 } from '../schemas/review-output.schema.js';
 
+/** A finding whose lines were validated against the PR diff. */
+export interface AnchoredFinding {
+  finding: ReviewFinding;
+  anchor: DiffCommentAnchor;
+}
+
 export interface ValidatedReviewSubmission {
   summary: string;
   comments: ReviewCommentPayload[];
   publishedFindings: PriorFinding[];
+  /** The same findings as `comments`, unformatted, for later checks. */
+  findings: AnchoredFinding[];
 }
 
 export interface SubmitReviewState {
@@ -33,6 +44,7 @@ export interface SubmitReviewToolBundle {
 interface PartitionedFindings {
   comments: ReviewCommentPayload[];
   publishedFindings: PriorFinding[];
+  findings: AnchoredFinding[];
   errors: string[];
 }
 
@@ -50,6 +62,7 @@ function partitionFindingsByAnchor(
 ): PartitionedFindings {
   const comments: ReviewCommentPayload[] = [];
   const publishedFindings: PriorFinding[] = [];
+  const anchored: AnchoredFinding[] = [];
   const errors: string[] = [];
 
   for (const finding of findings) {
@@ -64,9 +77,10 @@ function partitionFindingsByAnchor(
     }
     comments.push(toReviewCommentPayload(finding, anchor));
     publishedFindings.push(toPriorFinding(finding, anchor));
+    anchored.push({ finding, anchor });
   }
 
-  return { comments, publishedFindings, errors };
+  return { comments, publishedFindings, findings: anchored, errors };
 }
 
 function markSkipSummarization(toolContext?: Context): void {
@@ -100,6 +114,7 @@ export function createSubmitReviewTool(
         summary: input.summary.trim(),
         comments: partitioned.comments,
         publishedFindings: partitioned.publishedFindings,
+        findings: partitioned.findings,
       };
       fallbackDraft = draft;
 

@@ -23,6 +23,7 @@ import {
 } from './review-rules.js';
 import { TIER_PROFILES } from './tier-profiles.js';
 import { runTriage, type TriageResult } from './triage.js';
+import { verifyStep } from './verify-step.js';
 
 /** Hard cap on the triage call, whatever the overall budget. */
 const MAX_TRIAGE_TIMEOUT_MS = 30_000;
@@ -77,9 +78,11 @@ function createContext(
 function withRouteNote(
   result: ReviewAgentResult,
   route: ReviewRoute,
+  verifierNote: string,
 ): ReviewAgentResult {
   if (result.reviewResult.failure) return result;
-  const note = `<sub>Review depth: ${route.tier}. ${route.reason}</sub>`;
+  const details = [route.reason, verifierNote].filter(Boolean).join(' ');
+  const note = `<sub>Review depth: ${route.tier}. ${details}</sub>`;
   const summary = `${result.reviewResult.summary ?? ''}\n\n${note}`.trim();
   return { ...result, reviewResult: { ...result.reviewResult, summary } };
 }
@@ -113,16 +116,26 @@ function shouldEscalate(
   );
 }
 
+interface ReviewedRun {
+  result: ReviewAgentResult;
+  route: ReviewRoute;
+  /** The tier that produced `result` (deep after an escalation). */
+  tier: 'light' | 'deep';
+  workspace: RepoWorkspace;
+}
+
 /** Runs the chosen tier; a failed light review is retried once as deep. */
 async function review(
   ctx: PipelineContext,
   route: ReviewRoute,
   focusFiles: string[],
-): Promise<{ result: ReviewAgentResult; route: ReviewRoute }> {
+): Promise<ReviewedRun> {
   const tier = route.tier === 'light' ? 'light' : 'deep';
   const workspace = await ctx.input.loadWorkspace();
   const first = await runTier(ctx, workspace, tier, focusFiles);
-  if (!shouldEscalate(ctx, tier, first)) return { result: first, route };
+  if (!shouldEscalate(ctx, tier, first)) {
+    return { result: first, route, tier, workspace };
+  }
 
   const second = await runTier(ctx, workspace, 'deep', focusFiles);
   const escalated: ReviewRoute = {
@@ -133,6 +146,8 @@ async function review(
   return {
     result: { ...second, usage: sumTokenUsage(first.usage, second.usage) },
     route: escalated,
+    tier: 'deep',
+    workspace,
   };
 }
 
@@ -175,16 +190,25 @@ async function reviewRouted(
   ctx: PipelineContext,
   routing: TriageResult,
 ): Promise<ReviewPipelineResult> {
-  const { result, route } = await review(
-    ctx,
-    routing.route,
-    routing.focusFiles,
-  );
+  const run = await review(ctx, routing.route, routing.focusFiles);
+  const verified = await verifyStep({
+    prMeta: ctx.input.prMeta,
+    workspace: run.workspace,
+    tier: run.tier,
+    result: run.result,
+    priorFindings: ctx.priorFindings,
+    model: ctx.options.models.verifier,
+    remainingMs: ctx.remainingMs(),
+  });
   return {
-    publish: withRouteNote(result, route),
+    publish: withRouteNote(verified.result, run.route, verified.note),
     metrics: {
-      route,
-      usage: { triage: routing.usage, reviewer: result.usage },
+      route: run.route,
+      usage: {
+        triage: routing.usage,
+        reviewer: run.result.usage,
+        ...(verified.usage ? { verifier: verified.usage } : {}),
+      },
     },
   };
 }
@@ -211,7 +235,8 @@ async function routeAndReview(
 
 /**
  * Routes a PR to the cheapest review that fits it:
- * free rules → (deep-path rule | triage model) → reviewer at the chosen depth.
+ * free rules → (deep-path rule | triage model) → reviewer at the chosen
+ * depth → verifier on the findings that matter.
  * Every model-backed step fails open towards a full review.
  */
 export async function runReviewPipeline(

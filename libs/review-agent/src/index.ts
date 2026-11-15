@@ -40,8 +40,23 @@ export {
   toReviewCommentPayload,
 } from './schemas/review-output.schema.js';
 export {
+  type AnchoredFinding,
   createSubmitReviewTool,
   type SubmitReviewState,
   type SubmitReviewToolBundle,
   type ValidatedReviewSubmission,
 } from './tools/submit-review.tool.js';
+export {
+  createSubmitVerdictsTool,
+  type FindingVerdict,
+  findingVerdictSchema,
+  submitVerdictsSchema,
+} from './verifier/submit-verdicts.tool.js';
+export {
+  buildVerifierInstruction,
+  buildVerifierPrompt,
+  runVerifier,
+  type VerifierInput,
+  type VerifierOptions,
+  type VerifierResult,
+} from './verifier/verifier.js';
