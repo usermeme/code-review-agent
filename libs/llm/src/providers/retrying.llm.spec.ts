@@ -14,7 +14,6 @@ import {
   isTransientLlmError,
   RetryingLlm,
   withLlmRetry,
-  withRateLimitRetry,
 } from './retrying.llm.js';
 
 type Attempt = (request: LlmRequest) => LlmResponse | Promise<LlmResponse>;
@@ -387,14 +386,5 @@ describe('RetryingLlm', () => {
 
     expect(connection).toBeDefined();
     expect(inner.attempts).toBe(3);
-  });
-
-  it('keeps the deprecated withRateLimitRetry alias working', () => {
-    const llm = withRateLimitRetry(
-      new ScriptedLlm([() => ok('alias')]),
-      fastRetries,
-    );
-
-    expect(llm).toBeInstanceOf(RetryingLlm);
   });
 });
