@@ -61,6 +61,26 @@ function extractPriorFindings(state: PRState | null): PriorFinding[] {
   return state.publishedFindings;
 }
 
+/** The diffs one review run works on. */
+interface ReviewDiffs {
+  /** What the reviewer reads: the whole PR, or only the new pushes. */
+  review: PRDiffResult;
+  /** Full PR diff when `review` is a delta; comments must anchor inside it. */
+  anchor?: PRDiffResult;
+  /** Commit the delta starts from, for incremental reviews. */
+  since?: string;
+}
+
+/** A plain push after an earlier review is reviewed as a delta. */
+function incrementalBase(
+  meta: PRMeta,
+  state: PRState | null,
+): string | undefined {
+  const since = state?.lastReviewedSha;
+  if (meta.action !== 'synchronize' || !meta.headSha) return undefined;
+  return since !== meta.headSha ? since : undefined;
+}
+
 function resolveTarballRef(meta: PRMeta): string {
   return meta.headSha || meta.branch;
 }
@@ -149,9 +169,50 @@ export class EventOrchestratorService {
     }
   }
 
+  /**
+   * Compare diff since `since`, or undefined when the branch was rewritten
+   * (force-push/rebase) or the compare failed: those get a full review.
+   */
+  private async fetchDelta(
+    meta: PRMeta,
+    since: string,
+    logger?: FastifyBaseLogger,
+  ): Promise<PRDiffResult | undefined> {
+    try {
+      const compare = await this.gitAdapterClient.getCompareDiff(
+        meta.owner,
+        meta.repo,
+        since,
+        meta.headSha ?? '',
+      );
+      return compare.status === 'ahead' ? compare : undefined;
+    } catch (error) {
+      logger?.warn(
+        { err: error },
+        '[Core] Compare failed; falling back to a full review',
+      );
+      return undefined;
+    }
+  }
+
+  private async fetchDiffs(
+    meta: PRMeta,
+    prKey: string,
+    state: PRState | null,
+    logger?: FastifyBaseLogger,
+  ): Promise<ReviewDiffs> {
+    const since = incrementalBase(meta, state);
+    const [full, delta] = await Promise.all([
+      this.callAdapter(meta, prKey, () => this.fetchDiff(meta)),
+      since ? this.fetchDelta(meta, since, logger) : undefined,
+    ]);
+    if (!since || !delta) return { review: full };
+    return { review: delta, anchor: full, since };
+  }
+
   private async loadWorkspace(
     meta: PRMeta,
-    diffData: PRDiffResult,
+    diffs: ReviewDiffs,
   ): Promise<RepoWorkspace> {
     const tarball = await this.gitAdapterClient.getRepoTarball(
       meta.owner,
@@ -159,8 +220,9 @@ export class EventOrchestratorService {
       resolveTarballRef(meta),
     );
     return loadRepoWorkspaceFromTarball(tarball, {
-      rawDiff: diffData.diff,
-      changedFiles: diffData.changedFiles,
+      rawDiff: diffs.review.diff,
+      changedFiles: diffs.review.changedFiles,
+      anchorRawDiff: diffs.anchor?.diff,
     });
   }
 
@@ -206,28 +268,33 @@ export class EventOrchestratorService {
   private async executeReview(
     meta: PRMeta,
     prKey: string,
-    priorFindings: PriorFinding[],
+    state: PRState | null,
     logger?: FastifyBaseLogger,
   ): Promise<ReviewPipelineResult> {
-    const [diffData, reviewThreads] = await Promise.all([
-      this.callAdapter(meta, prKey, () => this.fetchDiff(meta)),
+    const [diffs, reviewThreads] = await Promise.all([
+      this.fetchDiffs(meta, prKey, state, logger),
       this.fetchThreads(meta, logger),
     ]);
+    if (diffs.since) {
+      logger?.info(
+        `[Core] Incremental review of ${prKey} since ${diffs.since}`,
+      );
+    }
     const diffWorkspace = new RepoWorkspace({
       files: new Map(),
-      rawDiff: diffData.diff,
-      changedFiles: diffData.changedFiles,
+      rawDiff: diffs.review.diff,
+      changedFiles: diffs.review.changedFiles,
+      anchorRawDiff: diffs.anchor?.diff,
     });
     return runReviewPipeline(
       {
         prMeta: meta,
         diffWorkspace,
         loadWorkspace: () =>
-          this.callAdapter(meta, prKey, () =>
-            this.loadWorkspace(meta, diffData),
-          ),
-        priorFindings,
+          this.callAdapter(meta, prKey, () => this.loadWorkspace(meta, diffs)),
+        priorFindings: extractPriorFindings(state),
         reviewThreads,
+        incrementalSince: diffs.since,
       },
       {
         models: this.models,
@@ -256,6 +323,7 @@ export class EventOrchestratorService {
 
   private async persistReviewResult(
     prKey: string,
+    meta: PRMeta,
     result: ReviewAgentResult,
     metrics: ReviewMetrics,
   ): Promise<PREventResult> {
@@ -279,6 +347,8 @@ export class EventOrchestratorService {
       summary: result.reviewResult.summary,
       publishedFindings: result.publishedFindings,
       lastReview: metrics,
+      // The next push is reviewed as a delta from this commit.
+      ...(meta.headSha ? { lastReviewedSha: meta.headSha } : {}),
     });
     return {
       success: true,
@@ -293,7 +363,6 @@ export class EventOrchestratorService {
     logger?: FastifyBaseLogger,
   ): Promise<PREventResult> {
     const existing = await this.prRepository.getPRStatus(prKey);
-    const priorFindings = extractPriorFindings(existing);
 
     await this.prRepository.updatePRStatus(prKey, {
       provider: meta.provider,
@@ -306,7 +375,7 @@ export class EventOrchestratorService {
     const { publish, metrics } = await this.executeReview(
       meta,
       prKey,
-      priorFindings,
+      existing,
       logger,
     );
     logger?.info(
@@ -317,6 +386,6 @@ export class EventOrchestratorService {
       return this.persistSkip(prKey, metrics);
     }
     await this.publishReviewResults(publish.reviewResult);
-    return this.persistReviewResult(prKey, publish, metrics);
+    return this.persistReviewResult(prKey, meta, publish, metrics);
   }
 }

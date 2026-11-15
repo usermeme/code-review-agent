@@ -65,6 +65,7 @@ describe('EventOrchestratorService', () => {
     getPRDiff: ReturnType<typeof vi.fn>;
     getRepoTarball: ReturnType<typeof vi.fn>;
     getReviewThreads: ReturnType<typeof vi.fn>;
+    getCompareDiff: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(async () => {
@@ -93,6 +94,7 @@ describe('EventOrchestratorService', () => {
         changedFiles: ['src/index.ts'],
       }),
       getReviewThreads: vi.fn().mockResolvedValue([]),
+      getCompareDiff: vi.fn(),
       getRepoTarball: vi.fn().mockResolvedValue(
         new Response(new Uint8Array(tarGz), {
           status: 200,
@@ -470,6 +472,127 @@ describe('EventOrchestratorService', () => {
         comments: [],
         summary: 'LGTM',
       },
+    });
+  });
+
+  describe('incremental reviews', () => {
+    const syncMeta = {
+      provider: 'github',
+      owner: 'test-org',
+      repo: 'test-repo',
+      prNumber: 42,
+      title: 'Test PR',
+      author: 'octocat',
+      branch: 'feat',
+      headSha: 'new-sha',
+      htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+      action: 'synchronize',
+    };
+
+    function serviceWithReviewer(reviewer: MockLlm): EventOrchestratorService {
+      return new EventOrchestratorService({
+        envService: {
+          get: vi.fn((key: string) =>
+            key === 'REVIEW_TIMEOUT_MS' ? 30_000 : undefined,
+          ),
+        } as unknown as CoreEnvService,
+        prRepository: mockPrRepo as unknown as PrRepository,
+        pubsub: mockPubSub as unknown as PubSub,
+        gitAdapterClient: mockGitAdapter as unknown as GitAdapterContract,
+        models: createMockAgentModels({ reviewer }),
+      });
+    }
+
+    function reviewerPrompt(reviewer: MockLlm): string {
+      return JSON.stringify(reviewer.calls[0]?.contents ?? []);
+    }
+
+    beforeEach(() => {
+      mockPrRepo.getPRStatus.mockResolvedValue({
+        status: 'completed',
+        lastReviewedSha: 'old-sha',
+        publishedFindings: [],
+      });
+    });
+
+    it('reviews only the changes since the last reviewed commit', async () => {
+      mockGitAdapter.getCompareDiff.mockResolvedValue({
+        diff: sampleDiff,
+        changedFiles: ['src/index.ts'],
+        status: 'ahead',
+      });
+      const reviewer = new MockLlm({ defaultResponse: 'Delta ok.' });
+
+      const res = await serviceWithReviewer(reviewer).ingestPREvent({
+        prMeta: syncMeta,
+      });
+
+      expect(res.status).toBe('completed');
+      expect(mockGitAdapter.getCompareDiff).toHaveBeenCalledWith(
+        'test-org',
+        'test-repo',
+        'old-sha',
+        'new-sha',
+      );
+      expect(reviewerPrompt(reviewer)).toContain('Incremental Update');
+      expect(mockPrRepo.updatePRStatus).toHaveBeenCalledWith(
+        'github:test-org:test-repo:42',
+        expect.objectContaining({
+          status: 'completed',
+          lastReviewedSha: 'new-sha',
+        }),
+      );
+    });
+
+    it('falls back to a full review when the branch was rewritten', async () => {
+      mockGitAdapter.getCompareDiff.mockResolvedValue({
+        diff: sampleDiff,
+        changedFiles: ['src/index.ts'],
+        status: 'diverged',
+      });
+      const reviewer = new MockLlm({ defaultResponse: 'Full ok.' });
+
+      await serviceWithReviewer(reviewer).ingestPREvent({ prMeta: syncMeta });
+
+      expect(reviewer.calls.length).toBeGreaterThan(0);
+      expect(reviewerPrompt(reviewer)).not.toContain('Incremental Update');
+    });
+
+    it('falls back to a full review when the compare fails', async () => {
+      mockGitAdapter.getCompareDiff.mockRejectedValue(new Error('404'));
+      const reviewer = new MockLlm({ defaultResponse: 'Full ok.' });
+
+      const res = await serviceWithReviewer(reviewer).ingestPREvent({
+        prMeta: syncMeta,
+      });
+
+      expect(res.status).toBe('completed');
+      expect(reviewer.calls.length).toBeGreaterThan(0);
+      expect(reviewerPrompt(reviewer)).not.toContain('Incremental Update');
+    });
+
+    it('skips silently when the new pushes hold no reviewable changes', async () => {
+      mockGitAdapter.getCompareDiff.mockResolvedValue({
+        diff: '',
+        changedFiles: ['pnpm-lock.yaml'],
+        status: 'ahead',
+      });
+
+      const res = await serviceWithReviewer(new MockLlm()).ingestPREvent({
+        prMeta: syncMeta,
+      });
+
+      expect(res).toMatchObject({ success: true, status: 'ignored' });
+      expect(mockPublishMessage).not.toHaveBeenCalled();
+      expect(mockGitAdapter.getRepoTarball).not.toHaveBeenCalled();
+    });
+
+    it('does a full review for a /review request even after earlier reviews', async () => {
+      await serviceWithReviewer(new MockLlm()).ingestPREvent({
+        prMeta: { ...syncMeta, action: 'manual_trigger' },
+      });
+
+      expect(mockGitAdapter.getCompareDiff).not.toHaveBeenCalled();
     });
   });
 });

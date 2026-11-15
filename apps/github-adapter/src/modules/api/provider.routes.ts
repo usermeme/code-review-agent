@@ -99,7 +99,32 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
     }
   });
 
-  // 3. Download Repository Tarball Archive
+  // 3. Diff between two commits (incremental reviews after a push)
+  fastify.get<{
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/compare']['Params']
+    >;
+    Querystring: EndpointPayloadRecord['/api/v1/repos/:owner/:repo/compare']['Query'];
+  }>('/repos/:owner/:repo/compare', async (request, reply) => {
+    const { owner, repo } = request.params;
+    const { base, head } = request.query;
+    if (!base || !head) {
+      return reply.code(400).send({ error: 'base and head are required' });
+    }
+
+    try {
+      return await githubService.getCompareDiff(owner, repo, base, head);
+    } catch (error) {
+      return sendProviderError(
+        fastify,
+        reply,
+        'Failed to compare commits',
+        error,
+      );
+    }
+  });
+
+  // 4. Download Repository Tarball Archive
   fastify.get<{
     Params: NonNullable<
       EndpointPayloadRecord['/api/v1/repos/:owner/:repo/tarball']['Params']

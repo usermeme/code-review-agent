@@ -19,6 +19,8 @@ export interface LoadRepoWorkspaceOptions {
   rawDiff?: string;
   /** Optional list of changed file paths in the PR. */
   changedFiles?: string[];
+  /** Full PR diff when `rawDiff` is a partial (incremental) diff. */
+  anchorRawDiff?: string;
 }
 
 const DEFAULT_MAX_FILE_BYTES = 512 * 1024;
@@ -153,5 +155,6 @@ export async function loadRepoWorkspaceFromTarball(
     files: state.files,
     rawDiff: options.rawDiff,
     changedFiles: options.changedFiles,
+    anchorRawDiff: options.anchorRawDiff,
   });
 }

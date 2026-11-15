@@ -42,6 +42,8 @@ export interface ReviewPipelineInput {
   priorFindings?: PriorFinding[];
   /** Inline review threads already on the PR (any author); empty if unknown. */
   reviewThreads?: ReviewThread[];
+  /** Set when the diffs hold only the changes since this already-reviewed commit. */
+  incrementalSince?: string;
 }
 
 export interface ReviewPipelineOptions {
@@ -98,7 +100,7 @@ async function runTier(
   tier: 'light' | 'deep',
   focusFiles: string[],
 ): Promise<ReviewAgentResult> {
-  const { prMeta, reviewThreads } = ctx.input;
+  const { prMeta, reviewThreads, incrementalSince } = ctx.input;
   return runCodeReview(
     {
       prMeta,
@@ -106,6 +108,7 @@ async function runTier(
       priorFindings: ctx.priorFindings,
       focusFiles,
       existingThreads: reviewThreads,
+      incrementalSince,
     },
     {
       model: ctx.options.models.reviewer,
@@ -179,7 +182,7 @@ async function dedupeStep(ctx: PipelineContext, result: ReviewAgentResult) {
 }
 
 async function triage(ctx: PipelineContext): Promise<TriageResult> {
-  const { prMeta, diffWorkspace } = ctx.input;
+  const { prMeta, diffWorkspace, incrementalSince } = ctx.input;
   // Triage may use at most a quarter of what is left, so the review keeps
   // most of the budget even when the overall timeout is short.
   const timeoutMs = Math.min(
@@ -188,7 +191,7 @@ async function triage(ctx: PipelineContext): Promise<TriageResult> {
   );
   const result = await runTriage(
     ctx.options.models.triage,
-    { prMeta, workspace: diffWorkspace },
+    { prMeta, workspace: diffWorkspace, incrementalSince },
     timeoutMs,
   );
   // An explicit `/review` request is never skipped by the model's judgement.
@@ -277,6 +280,15 @@ export async function runReviewPipeline(
 ): Promise<ReviewPipelineResult> {
   const ctx = createContext(input, options);
   const { changedFiles } = input.diffWorkspace.getPrDiff({ maxChars: 0 });
+
+  if (changedFiles.length === 0 && input.incrementalSince) {
+    const route: ReviewRoute = {
+      tier: 'skip',
+      reason: 'No new reviewable changes since the last review.',
+      source: 'rule',
+    };
+    return { publish: null, metrics: { route, usage: {} } };
+  }
 
   if (changedFiles.length === 0) {
     return {

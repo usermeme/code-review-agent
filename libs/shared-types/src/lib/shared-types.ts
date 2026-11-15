@@ -44,6 +44,8 @@ export interface PRState {
   error?: string;
   /** Routing and token usage of the most recent review run. */
   lastReview?: ReviewMetrics;
+  /** Head commit covered by the last review; later pushes are reviewed as a delta. */
+  lastReviewedSha?: string;
 }
 
 export interface PRMeta {
@@ -116,6 +118,15 @@ export interface PRDiffResult {
   changedFiles: string[];
 }
 
+/**
+ * Diff between two commits. `ahead` means `base` is an ancestor of `head`
+ * (a plain push); anything else (diverged, behind, identical) means the
+ * branch was rewritten or did not move.
+ */
+export interface CompareDiffResult extends PRDiffResult {
+  status: 'ahead' | 'behind' | 'diverged' | 'identical';
+}
+
 export interface GitAdapterContract {
   getPRDiff(
     owner: string,
@@ -128,6 +139,12 @@ export interface GitAdapterContract {
     repo: string,
     prNumber: number,
   ): Promise<ReviewThread[]>;
+  getCompareDiff(
+    owner: string,
+    repo: string,
+    base: string,
+    head: string,
+  ): Promise<CompareDiffResult>;
 }
 
 /**

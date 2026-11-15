@@ -214,4 +214,41 @@ describe('RepoWorkspace', () => {
       expect(stats).toEqual([{ path: 'src/a.ts', added: 1, deleted: 2 }]);
     });
   });
+
+  describe('anchorRawDiff', () => {
+    const prDiff = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1,2 +1,3 @@',
+      ' one',
+      '+two',
+      ' three',
+    ].join('\n');
+    const deltaDiff = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -2,3 +2,3 @@',
+      ' two',
+      ' three',
+      '-four',
+      '+FOUR',
+    ].join('\n');
+
+    it('only anchors to lines valid in both the reviewed and the PR diff', () => {
+      const workspace = new RepoWorkspace({
+        files: new Map(),
+        rawDiff: deltaDiff,
+        changedFiles: ['src/a.ts'],
+        anchorRawDiff: prDiff,
+      });
+
+      expect(workspace.resolveCommentAnchor('src/a.ts', 2)).toEqual({
+        line: 2,
+      });
+      expect(workspace.resolveCommentAnchor('src/a.ts', 4)).toBeNull();
+      expect(workspace.getPrDiff().diff).toContain('FOUR');
+    });
+  });
 });

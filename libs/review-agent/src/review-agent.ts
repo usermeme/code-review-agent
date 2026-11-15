@@ -43,6 +43,17 @@ export interface ReviewAgentInput {
   focusFiles?: string[];
   /** Inline review threads already on the PR, from any author. */
   existingThreads?: ReviewThread[];
+  /**
+   * Set on incremental reviews: the commit the last review covered. The diff
+   * then holds only the changes pushed since that commit.
+   */
+  incrementalSince?: string;
+}
+
+/** Tells the model the diff is a delta on top of an already-reviewed PR. */
+export function formatIncrementalNote(since: string | undefined): string {
+  if (!since) return '';
+  return `\n\n### Incremental Update\nThis diff contains only the changes pushed since commit \`${since.slice(0, 12)}\`, which was already reviewed. Review these new changes; use the repository tools when you need the rest of the PR for context.`;
 }
 
 export interface ReviewAgentOptions {
@@ -180,7 +191,9 @@ function formatThreadsSection(threads: ReviewThread[]): string {
 function formatPrContextSections(input: ReviewAgentInput): string {
   const priorSection = formatPriorFindingsSection(input.priorFindings ?? []);
   const threadsSection = formatThreadsSection(input.existingThreads ?? []);
-  return `${priorSection}${threadsSection}${formatFocusSection(input.focusFiles ?? [])}`;
+  const focusSection = formatFocusSection(input.focusFiles ?? []);
+  const incrementalNote = formatIncrementalNote(input.incrementalSince);
+  return `${priorSection}${threadsSection}${focusSection}${incrementalNote}`;
 }
 
 /**
