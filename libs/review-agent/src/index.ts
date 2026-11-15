@@ -3,7 +3,6 @@ export {
   buildReviewUserPrompt,
   DEFAULT_MAX_INLINE_DIFF_CHARS,
   DEFAULT_MAX_LLM_CALLS,
-  DEFAULT_REVIEW_MODEL,
   DEFAULT_REVIEW_TIMEOUT_MS,
   type ReviewAgentInput,
   type ReviewAgentOptions,

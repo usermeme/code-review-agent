@@ -1,11 +1,10 @@
-import { MockLlm } from '@code-review-agent/llm';
+import { createMockAgentModels, MockLlm } from '@code-review-agent/llm';
 import {
   type GitAdapterContract,
   NonRetryableTaskError,
   type PREventPayload,
   type PriorFinding,
 } from '@code-review-agent/shared-types';
-import type { BaseLlm } from '@google/adk';
 import { PubSub } from '@google-cloud/pubsub';
 import { Header, Pack, ReadEntry } from 'tar';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -66,7 +65,6 @@ describe('EventOrchestratorService', () => {
     getPRDiff: ReturnType<typeof vi.fn>;
     getRepoTarball: ReturnType<typeof vi.fn>;
   };
-  let llm: BaseLlm;
 
   beforeEach(async () => {
     mockPrRepo = {
@@ -109,14 +107,15 @@ describe('EventOrchestratorService', () => {
       }),
     } as unknown as CoreEnvService;
 
-    llm = new MockLlm({ defaultResponse: 'Code looks great!' });
-
     service = new EventOrchestratorService({
       envService: mockEnvService,
       prRepository: mockPrRepo as unknown as PrRepository,
       pubsub: mockPubSub as unknown as PubSub,
       gitAdapterClient: mockGitAdapter as unknown as GitAdapterContract,
-      llm,
+      models: createMockAgentModels(
+        {},
+        { defaultResponse: 'Code looks great!' },
+      ),
     });
   });
 
@@ -263,7 +262,7 @@ describe('EventOrchestratorService', () => {
       prRepository: mockPrRepo as unknown as PrRepository,
       pubsub: mockPubSub as unknown as PubSub,
       gitAdapterClient: mockGitAdapter as unknown as GitAdapterContract,
-      llm: failingLlm,
+      models: createMockAgentModels({ reviewer: failingLlm }),
     });
 
     const res = await failingService.ingestPREvent({

@@ -1,4 +1,4 @@
-import { LlmFactory } from '@code-review-agent/llm';
+import { createAgentModels } from '@code-review-agent/llm';
 import { Firestore } from '@google-cloud/firestore';
 import { PubSub } from '@google-cloud/pubsub';
 
@@ -22,15 +22,14 @@ async function bootstrap() {
   const gitAdapterClient = new GitAdapterClient(
     envService.get('GIT_ADAPTER_URL'),
   );
-  const llmFactory = new LlmFactory(envService.data);
-  const llm = llmFactory.createLlm();
+  const models = createAgentModels(envService.data);
 
   const orchestrator = new EventOrchestratorService({
     envService,
     pubsub,
     prRepository,
     gitAdapterClient,
-    llm,
+    models,
   });
 
   const server = await buildCoreServer({

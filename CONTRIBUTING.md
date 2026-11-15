@@ -23,7 +23,7 @@ libs/
   agent-code-reviewer/    # Google ADK agent executing multi-agent code analysis
   endpoints/              # Shared endpoint definitions and URL path interpolation
   env/                    # Zod-based environment configuration service
-  llm/                    # LLM provider factory (Gemini & mock)
+  llm/                    # Per-role Gemini models, retrying wrapper & test doubles
   pubsub/                 # Google Cloud Pub/Sub push envelope parser
   shared-types/           # Shared TypeScript interfaces and error types
 ```

@@ -83,7 +83,7 @@ code-review-agent/
 │   ├── agent-tools/            # In-memory tarball streaming, diff annotator & ADK repo tools
 │   ├── review-agent/           # Lean single-pass ADK review agent with anchor validation
 │   ├── pubsub/                 # Abstract Pub/Sub consumer & push envelope parsing utilities
-│   ├── llm/                    # Resilient LLM factory, retrying wrapper & test doubles
+│   ├── llm/                    # Per-role Gemini models, retrying wrapper & test doubles
 │   ├── env/                    # Type-safe environment manager with eager Zod schema validation
 │   ├── shared-types/           # Common domain TypeScript interfaces & schemas
 │   └── endpoints/              # Shared REST endpoint constants
@@ -235,7 +235,7 @@ jobs:
             --no-cpu-throttling \
             --timeout 900 \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,REVIEW_MODEL=${{ vars.REVIEW_MODEL || 'gemini-3.8-flash' }},REVIEW_TIMEOUT_MS=${{ vars.REVIEW_TIMEOUT_MS || '480000' }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,REVIEWER_MODEL=${{ vars.REVIEWER_MODEL }},VERIFIER_MODEL=${{ vars.VERIFIER_MODEL }},TRIAGE_MODEL=${{ vars.TRIAGE_MODEL || 'gemini-decision-1' }},REVIEW_TIMEOUT_MS=${{ vars.REVIEW_TIMEOUT_MS || '480000' }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
       # 2. Deploy GitHub Adapter (Private Provider Adapter)
       - name: Deploy GitHub Adapter
@@ -537,7 +537,9 @@ services:
       - PORT=8080
       - HOST=0.0.0.0
       - REVIEW_RESULTS_TOPIC=review-results
-      - REVIEW_MODEL=gemini-3.8-flash
+      - REVIEWER_MODEL=${REVIEWER_MODEL}
+      - VERIFIER_MODEL=${VERIFIER_MODEL}
+      - TRIAGE_MODEL=${TRIAGE_MODEL:-gemini-decision-1}
       - REVIEW_TIMEOUT_MS=${REVIEW_TIMEOUT_MS:-480000}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GIT_ADAPTER_URL=http://adapter:8080
@@ -616,7 +618,9 @@ Each service strictly validates required variables and fails fast at startup if 
 | `PORT`                    |   Yes    | Port to listen on (e.g. `8080`)                                                     |
 | `HOST`                    |   Yes    | Host interface to bind to (e.g. `0.0.0.0`)                                          |
 | `REVIEW_RESULTS_TOPIC`    |   Yes    | Google Cloud Pub/Sub topic to publish review result events to                       |
-| `REVIEW_MODEL`            |   Yes    | Gemini model identifier (e.g. `gemini-3.8-flash`)                                   |
+| `REVIEWER_MODEL`          |   Yes    | Model for the reviewer agent, which reads the diff (e.g. `gemini-4-hydrogen`)       |
+| `VERIFIER_MODEL`          |   Yes    | Model for the verifier agent, which confirms findings (e.g. `gemini-4-argon`)       |
+| `TRIAGE_MODEL`            | Optional | Model for triage and guard decisions (default `gemini-decision-1`)                  |
 | `REVIEW_TIMEOUT_MS`       | Optional | Wall-clock cap per review in ms (default `480000`, valid `30000`–`540000`)          |
 | `GIT_ADAPTER_URL`         |   Yes    | URL of Git Provider Adapter for on-demand code queries (e.g. `http://adapter:8080`) |
 | `GEMINI_API_KEY`          | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)          |

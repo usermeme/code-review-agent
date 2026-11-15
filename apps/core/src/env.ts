@@ -1,8 +1,5 @@
 import { EnvService } from '@code-review-agent/env';
-import {
-  geminiLlmConfigSchema,
-  mockLlmConfigSchema,
-} from '@code-review-agent/llm';
+import { modelConfigSchema } from '@code-review-agent/llm';
 import { z } from 'zod';
 
 const coreBaseEnvSchema = z.object({
@@ -23,10 +20,7 @@ const coreBaseEnvSchema = z.object({
     .optional(),
 });
 
-export const coreEnvSchema = z.discriminatedUnion('LLM_PROVIDER', [
-  coreBaseEnvSchema.merge(geminiLlmConfigSchema),
-  coreBaseEnvSchema.merge(mockLlmConfigSchema),
-]);
+export const coreEnvSchema = coreBaseEnvSchema.merge(modelConfigSchema);
 
 export type CoreEnvService = EnvService<typeof coreEnvSchema>;
 
