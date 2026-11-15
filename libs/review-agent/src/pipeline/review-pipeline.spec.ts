@@ -392,3 +392,65 @@ describe('runReviewPipeline verification', () => {
     expect(comments[0].body).toContain('Unjudged issue');
   });
 });
+
+describe('runReviewPipeline thread dedup', () => {
+  it('shows existing threads to the reviewer and drops a repeated finding before the verifier', async () => {
+    const reviewer = reviewerFinds(
+      finding('Division by zero', 'major'),
+      finding('Wrong rounding', 'major'),
+    );
+    const triage = new ScriptedLlm([
+      () =>
+        createTextResponse(
+          JSON.stringify({ tier: 'deep', reason: 'Money.', focusFiles: [] }),
+        ),
+      () =>
+        createTextResponse(
+          JSON.stringify({
+            matches: [
+              { findingId: 0, threadId: 'T1' },
+              { findingId: 1, threadId: 'none' },
+            ],
+          }),
+        ),
+    ]);
+    const verifier = verifierSays({
+      verdicts: [{ id: 0, verdict: 'keep', reason: 'Real.' }],
+    });
+    const { diffWorkspace, loadWorkspace } = workspaces();
+
+    const result = await runReviewPipeline(
+      {
+        prMeta: META,
+        diffWorkspace,
+        loadWorkspace,
+        reviewThreads: [
+          {
+            id: 'PRRT_1',
+            path: 'src/charge.ts',
+            line: 2,
+            isResolved: false,
+            isOutdated: false,
+            comments: [
+              { author: 'other-bot[bot]', body: 'b divides by zero here.' },
+            ],
+          },
+        ],
+      },
+      {
+        ...OPTIONS,
+        models: createMockAgentModels({ triage, reviewer, verifier }),
+      },
+    );
+
+    expect(JSON.stringify(reviewer.requests[0].contents)).toContain(
+      'Existing Review Threads',
+    );
+    const verifierPrompt = JSON.stringify(verifier.requests[0].contents);
+    expect(verifierPrompt).toContain('Wrong rounding');
+    expect(verifierPrompt).not.toContain('Division by zero');
+    const out = published(result);
+    expect(out.reviewResult.comments).toHaveLength(1);
+    expect(out.reviewResult.summary).toContain('already raised');
+  });
+});

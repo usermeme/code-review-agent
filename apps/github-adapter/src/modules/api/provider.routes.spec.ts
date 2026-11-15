@@ -44,6 +44,33 @@ describe('providerRoutes', () => {
     );
   });
 
+  it('GET /repos/:owner/:repo/pulls/:number/threads returns review threads', async () => {
+    const threads = [
+      {
+        id: 'T1',
+        path: 'src/a.ts',
+        line: 4,
+        isResolved: false,
+        isOutdated: false,
+        comments: [{ author: 'octocat', body: 'Null check?' }],
+      },
+    ];
+    mockGithubService.getReviewThreads = vi.fn().mockResolvedValue(threads);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/pulls/123/threads',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(threads);
+    expect(mockGithubService.getReviewThreads).toHaveBeenCalledWith(
+      'test-owner',
+      'test-repo',
+      123,
+    );
+  });
+
   it('GET /repos/:owner/:repo/tarball returns tarball stream', async () => {
     const mockStream = Readable.from([Buffer.from('fake-tar-bytes')]);
     mockGithubService.getRepoTarball = vi.fn().mockResolvedValue({

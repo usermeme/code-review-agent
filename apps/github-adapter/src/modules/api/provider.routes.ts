@@ -75,7 +75,31 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
     }
   });
 
-  // 2. Download Repository Tarball Archive
+  // 2. List inline review threads (any author) with resolved/outdated state
+  fastify.get<{
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/pulls/:prNumber/threads']['Params']
+    >;
+  }>('/repos/:owner/:repo/pulls/:number/threads', async (request, reply) => {
+    const { owner, repo, number } = request.params;
+    const prNumber = parseInt(number, 10);
+    if (isNaN(prNumber)) {
+      return reply.code(400).send({ error: 'Invalid PR number' });
+    }
+
+    try {
+      return await githubService.getReviewThreads(owner, repo, prNumber);
+    } catch (error) {
+      return sendProviderError(
+        fastify,
+        reply,
+        'Failed to fetch PR review threads',
+        error,
+      );
+    }
+  });
+
+  // 3. Download Repository Tarball Archive
   fastify.get<{
     Params: NonNullable<
       EndpointPayloadRecord['/api/v1/repos/:owner/:repo/tarball']['Params']

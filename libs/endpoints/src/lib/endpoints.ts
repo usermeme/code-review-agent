@@ -12,6 +12,18 @@ export interface EndpointPayloadRecord {
       number: string;
     };
   };
+  '/api/v1/repos/:owner/:repo/pulls/:prNumber/threads': {
+    Path: {
+      owner: string;
+      repo: string;
+      prNumber: number | string;
+    };
+    Params?: {
+      owner: string;
+      repo: string;
+      number: string;
+    };
+  };
   '/api/v1/repos/:owner/:repo/tarball': {
     Path: {
       owner: string;
@@ -47,6 +59,7 @@ export type Endpoint = keyof EndpointPayloadRecord;
 
 export const ENDPOINTS = {
   PR_DIFF: '/api/v1/repos/:owner/:repo/pulls/:prNumber/diff',
+  PR_THREADS: '/api/v1/repos/:owner/:repo/pulls/:prNumber/threads',
   TARBALL: '/api/v1/repos/:owner/:repo/tarball',
   PUBSUB_PR_EVENTS: '/api/v1/pubsub/pr-events',
   PUBSUB_REVIEW_RESULTS: '/api/v1/pubsub/review-results',

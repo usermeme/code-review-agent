@@ -94,6 +94,23 @@ export interface ReviewResultPayload {
   };
 }
 
+export interface ReviewThreadComment {
+  author: string;
+  body: string;
+}
+
+/** An inline review thread on a PR, from any author (this bot, other bots, people). */
+export interface ReviewThread {
+  id: string;
+  path: string;
+  /** Current NEW-side line on the PR head; null when the thread is outdated. */
+  line: number | null;
+  isResolved: boolean;
+  /** True when the code the thread was anchored to has since changed. */
+  isOutdated: boolean;
+  comments: ReviewThreadComment[];
+}
+
 export interface PRDiffResult {
   diff: string;
   changedFiles: string[];
@@ -106,6 +123,11 @@ export interface GitAdapterContract {
     prNumber: number,
   ): Promise<PRDiffResult>;
   getRepoTarball(owner: string, repo: string, ref?: string): Promise<Response>;
+  getReviewThreads(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<ReviewThread[]>;
 }
 
 /**

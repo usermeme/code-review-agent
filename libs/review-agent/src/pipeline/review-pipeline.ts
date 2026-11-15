@@ -9,6 +9,7 @@ import type {
   PRMeta,
   ReviewMetrics,
   ReviewRoute,
+  ReviewThread,
 } from '@code-review-agent/shared-types';
 
 import {
@@ -16,6 +17,8 @@ import {
   type ReviewAgentResult,
   runCodeReview,
 } from '../review-agent.js';
+import { dedupeAgainstThreads } from './dedupe-step.js';
+import { withFindings } from './result-findings.js';
 import {
   DEFAULT_DEEP_REVIEW_PATHS,
   evaluateDeepReviewPaths,
@@ -37,6 +40,8 @@ export interface ReviewPipelineInput {
   /** Loads the full workspace (repo tarball); called only when a review runs. */
   loadWorkspace: () => Promise<RepoWorkspace>;
   priorFindings?: PriorFinding[];
+  /** Inline review threads already on the PR (any author); empty if unknown. */
+  reviewThreads?: ReviewThread[];
 }
 
 export interface ReviewPipelineOptions {
@@ -78,10 +83,10 @@ function createContext(
 function withRouteNote(
   result: ReviewAgentResult,
   route: ReviewRoute,
-  verifierNote: string,
+  notes: string[],
 ): ReviewAgentResult {
   if (result.reviewResult.failure) return result;
-  const details = [route.reason, verifierNote].filter(Boolean).join(' ');
+  const details = [route.reason, ...notes].filter(Boolean).join(' ');
   const note = `<sub>Review depth: ${route.tier}. ${details}</sub>`;
   const summary = `${result.reviewResult.summary ?? ''}\n\n${note}`.trim();
   return { ...result, reviewResult: { ...result.reviewResult, summary } };
@@ -93,9 +98,15 @@ async function runTier(
   tier: 'light' | 'deep',
   focusFiles: string[],
 ): Promise<ReviewAgentResult> {
-  const { prMeta } = ctx.input;
+  const { prMeta, reviewThreads } = ctx.input;
   return runCodeReview(
-    { prMeta, workspace, priorFindings: ctx.priorFindings, focusFiles },
+    {
+      prMeta,
+      workspace,
+      priorFindings: ctx.priorFindings,
+      focusFiles,
+      existingThreads: reviewThreads,
+    },
     {
       model: ctx.options.models.reviewer,
       timeoutMs: Math.max(1, ctx.remainingMs()),
@@ -151,6 +162,22 @@ async function review(
   };
 }
 
+/** Drops findings already raised in an existing review thread (any author). */
+async function dedupeStep(ctx: PipelineContext, result: ReviewAgentResult) {
+  const deduped = await dedupeAgainstThreads({
+    findings: result.findings,
+    threads: ctx.input.reviewThreads ?? [],
+    model: ctx.options.models.triage,
+    remainingMs: ctx.remainingMs(),
+  });
+  return {
+    result: withFindings(result, deduped.findings, ctx.priorFindings),
+    context: deduped.context,
+    note: deduped.note,
+    usage: deduped.usage,
+  };
+}
+
 async function triage(ctx: PipelineContext): Promise<TriageResult> {
   const { prMeta, diffWorkspace } = ctx.input;
   // Triage may use at most a quarter of what is left, so the review keeps
@@ -191,21 +218,26 @@ async function reviewRouted(
   routing: TriageResult,
 ): Promise<ReviewPipelineResult> {
   const run = await review(ctx, routing.route, routing.focusFiles);
+  const deduped = await dedupeStep(ctx, run.result);
   const verified = await verifyStep({
     prMeta: ctx.input.prMeta,
     workspace: run.workspace,
     tier: run.tier,
-    result: run.result,
+    result: deduped.result,
     priorFindings: ctx.priorFindings,
     model: ctx.options.models.verifier,
     remainingMs: ctx.remainingMs(),
+    context: deduped.context,
   });
   return {
-    publish: withRouteNote(verified.result, run.route, verified.note),
+    publish: withRouteNote(verified.result, run.route, [
+      deduped.note,
+      verified.note,
+    ]),
     metrics: {
       route: run.route,
       usage: {
-        triage: routing.usage,
+        triage: sumTokenUsage(routing.usage, deduped.usage),
         reviewer: run.result.usage,
         ...(verified.usage ? { verifier: verified.usage } : {}),
       },

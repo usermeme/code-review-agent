@@ -42,6 +42,21 @@ describe('GitAdapterClient', () => {
     );
   });
 
+  it('fetches PR review threads', async () => {
+    const threads = [{ id: 'T1', path: 'a.ts', line: 1 }];
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue(threads),
+    });
+
+    const result = await client.getReviewThreads('owner', 'repo', 10);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://adapter:8080/api/v1/repos/owner/repo/pulls/10/threads',
+    );
+    expect(result).toEqual(threads);
+  });
+
   it('fetches repo tarball successfully', async () => {
     const mockResponse = {
       ok: true,

@@ -3,6 +3,7 @@ import {
   type GitAdapterContract,
   NonRetryableTaskError,
   type PRDiffResult,
+  type ReviewThread,
 } from '@code-review-agent/shared-types';
 
 interface AdapterErrorBody {
@@ -50,6 +51,17 @@ export class GitAdapterClient implements GitAdapterContract {
       Path: { owner, repo, prNumber },
     });
     return this.fetchJson<PRDiffResult>(path, 'fetch PR diff');
+  }
+
+  async getReviewThreads(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<ReviewThread[]> {
+    const path = interpolatePath(ENDPOINTS.PR_THREADS, {
+      Path: { owner, repo, prNumber },
+    });
+    return this.fetchJson<ReviewThread[]>(path, 'fetch PR review threads');
   }
 
   async getRepoTarball(

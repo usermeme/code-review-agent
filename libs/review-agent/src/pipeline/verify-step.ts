@@ -8,12 +8,9 @@ import type { BaseLlm } from '@google/adk';
 import { ThinkingLevel } from '@google/genai';
 
 import type { ReviewAgentResult } from '../review-agent.js';
-import {
-  toPriorFinding,
-  toReviewCommentPayload,
-} from '../schemas/review-output.schema.js';
 import type { AnchoredFinding } from '../tools/submit-review.tool.js';
 import { runVerifier } from '../verifier/verifier.js';
+import { withFindings } from './result-findings.js';
 
 /** The verifier never gets more than this, whatever the overall budget. */
 const MAX_VERIFIER_TIMEOUT_MS = 120_000;
@@ -35,6 +32,8 @@ export interface VerifyStepInput {
   priorFindings: PriorFinding[];
   model: BaseLlm;
   remainingMs: number;
+  /** Earlier review-thread discussion per finding, shown to the verifier. */
+  context?: Map<AnchoredFinding, string>;
 }
 
 export interface VerifyStepResult {
@@ -57,29 +56,6 @@ export function selectCandidates(
   findings: AnchoredFinding[],
 ): AnchoredFinding[] {
   return tier === 'deep' ? findings : findings.filter(isSevere);
-}
-
-function rebuildResult(
-  input: VerifyStepInput,
-  findings: AnchoredFinding[],
-  summary: string,
-): ReviewAgentResult {
-  const { result, priorFindings } = input;
-  return {
-    ...result,
-    findings,
-    reviewResult: {
-      ...result.reviewResult,
-      summary,
-      comments: findings.map((f) =>
-        toReviewCommentPayload(f.finding, f.anchor),
-      ),
-    },
-    publishedFindings: [
-      ...priorFindings,
-      ...findings.map((f) => toPriorFinding(f.finding, f.anchor)),
-    ],
-  };
 }
 
 /** Keeps unchecked findings in place and swaps checked ones for the verdicts. */
@@ -134,6 +110,7 @@ export async function verifyStep(
       workspace: input.workspace,
       summary: result.reviewResult.summary ?? '',
       findings: candidates,
+      context: input.context,
     },
     { model: input.model, timeoutMs, ...VERIFIER_PROFILES[tier] },
   );
@@ -146,7 +123,7 @@ export async function verifyStep(
   }
   const merged = mergeVerified(result.findings, candidates, verified.findings);
   return {
-    result: rebuildResult(input, merged, verified.summary),
+    result: withFindings(result, merged, input.priorFindings, verified.summary),
     note: `Verifier kept ${verified.findings.length} of ${candidates.length} checked findings.`,
     usage: verified.usage,
   };

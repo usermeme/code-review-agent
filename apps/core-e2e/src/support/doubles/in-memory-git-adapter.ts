@@ -1,6 +1,7 @@
 import type {
   GitAdapterContract,
   PRDiffResult,
+  ReviewThread,
 } from '@code-review-agent/shared-types';
 import { Header, Pack, ReadEntry } from 'tar';
 
@@ -54,6 +55,17 @@ export class InMemoryGitAdapterClient implements GitAdapterContract {
       diff: defaultDiff,
       changedFiles: ['src/index.ts'],
     };
+  }
+
+  async getReviewThreads(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<ReviewThread[]> {
+    void owner;
+    void repo;
+    void prNumber;
+    return [];
   }
 
   async getRepoTarball(

@@ -7,6 +7,7 @@ import type {
   PriorFinding,
   PRMeta,
   ReviewResultPayload,
+  ReviewThread,
   TokenUsage,
 } from '@code-review-agent/shared-types';
 import { type BaseLlm, LlmAgent } from '@google/adk';
@@ -17,6 +18,11 @@ import {
   runAgentSession,
   thinkingConfig,
 } from './agents/agent-session.js';
+import {
+  firstLine,
+  threadLocation,
+  threadStatus,
+} from './pipeline/thread-format.js';
 import {
   type AnchoredFinding,
   createSubmitReviewTool,
@@ -35,6 +41,8 @@ export interface ReviewAgentInput {
   priorFindings?: PriorFinding[];
   /** Files triage flagged as the riskiest; the reviewer looks at them first. */
   focusFiles?: string[];
+  /** Inline review threads already on the PR, from any author. */
+  existingThreads?: ReviewThread[];
 }
 
 export interface ReviewAgentOptions {
@@ -148,10 +156,31 @@ function formatDiffSection(
   return `### Changed Files (${changedFiles.length})\n${filesList}\n\n*Note: The full annotated diff exceeds the inline threshold (${maxInlineDiffChars} chars). Use \`get_pr_diff({ path: "<file>" })\` to inspect the annotated diff for each changed file.*`;
 }
 
+const MAX_LISTED_THREADS = 30;
+
+function formatThreadsSection(threads: ReviewThread[]): string {
+  const current = threads
+    .filter((t) => !t.isOutdated)
+    .slice(0, MAX_LISTED_THREADS);
+  if (current.length === 0) {
+    return '';
+  }
+  const items = current
+    .map((t) => {
+      const opener = t.comments[0];
+      const text = opener ? firstLine(opener.body, 140) : '';
+      const author = opener ? ` by ${opener.author}` : '';
+      return `- \`${threadLocation(t)}\` [${threadStatus(t)}]${author}: ${text}`;
+    })
+    .join('\n');
+  return `\n\n### Existing Review Threads (Do Not Repeat)\nThese issues are already being discussed on this PR. Do NOT report them again:\n${items}`;
+}
+
 /** Per-PR sections that sit between the description and the diff. */
 function formatPrContextSections(input: ReviewAgentInput): string {
   const priorSection = formatPriorFindingsSection(input.priorFindings ?? []);
-  return `${priorSection}${formatFocusSection(input.focusFiles ?? [])}`;
+  const threadsSection = formatThreadsSection(input.existingThreads ?? []);
+  return `${priorSection}${threadsSection}${formatFocusSection(input.focusFiles ?? [])}`;
 }
 
 /**

@@ -34,6 +34,8 @@ export interface VerifierInput {
   /** Reviewer summary, rewritten by the verifier if it no longer fits. */
   summary: string;
   findings: AnchoredFinding[];
+  /** Earlier review-thread discussion per finding, if any. */
+  context?: Map<AnchoredFinding, string>;
 }
 
 export interface VerifierOptions {
@@ -62,7 +64,11 @@ export function buildVerifierInstruction(workspace: RepoWorkspace): string {
   return `${VERIFIER_ROLE_INSTRUCTION}${formatGuidelines(workspace)}`;
 }
 
-function formatCandidate(item: AnchoredFinding, id: number): string {
+function formatCandidate(
+  item: AnchoredFinding,
+  id: number,
+  context: string | undefined,
+): string {
   const { finding, anchor } = item;
   const lines =
     anchor.startLine !== undefined
@@ -71,9 +77,10 @@ function formatCandidate(item: AnchoredFinding, id: number): string {
   const suggestion = finding.suggestion
     ? `\n- Suggested fix:\n\`\`\`\n${finding.suggestion}\n\`\`\``
     : '';
+  const history = context ? `\n- Earlier discussion: ${context}` : '';
   return `### Candidate ${id}: [${finding.severity.toUpperCase()}] ${finding.title}
 - File: \`${finding.path}\` lines ${lines}
-- Claim: ${finding.comment}${suggestion}`;
+- Claim: ${finding.comment}${suggestion}${history}`;
 }
 
 function formatHunks(input: VerifierInput): string {
@@ -90,7 +97,9 @@ function formatHunks(input: VerifierInput): string {
 }
 
 export function buildVerifierPrompt(input: VerifierInput): string {
-  const candidates = input.findings.map(formatCandidate).join('\n\n');
+  const candidates = input.findings
+    .map((item, id) => formatCandidate(item, id, input.context?.get(item)))
+    .join('\n\n');
   return `## Pull Request #${input.prMeta.prNumber}: ${input.prMeta.title}
 
 ### Reviewer summary
