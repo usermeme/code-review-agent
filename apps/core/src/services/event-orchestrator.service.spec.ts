@@ -64,6 +64,7 @@ describe('EventOrchestratorService', () => {
   let mockGitAdapter: {
     getPRDiff: ReturnType<typeof vi.fn>;
     getRepoTarball: ReturnType<typeof vi.fn>;
+    getReviewThreads: ReturnType<typeof vi.fn>;
   };
 
   beforeEach(async () => {
@@ -91,6 +92,7 @@ describe('EventOrchestratorService', () => {
         diff: sampleDiff,
         changedFiles: ['src/index.ts'],
       }),
+      getReviewThreads: vi.fn().mockResolvedValue([]),
       getRepoTarball: vi.fn().mockResolvedValue(
         new Response(new Uint8Array(tarGz), {
           status: 200,
@@ -208,6 +210,32 @@ describe('EventOrchestratorService', () => {
           route: expect.objectContaining({ tier: 'deep' }),
         }),
       }),
+    );
+  });
+
+  it('still reviews when the review threads cannot be read', async () => {
+    mockGitAdapter.getReviewThreads.mockRejectedValue(new Error('403'));
+
+    const res = await service.ingestPREvent({
+      prMeta: {
+        provider: 'github',
+        owner: 'test-org',
+        repo: 'test-repo',
+        prNumber: 42,
+        title: 'Test PR',
+        author: 'octocat',
+        branch: 'feat',
+        headSha: 'sha1',
+        htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+        action: 'opened',
+      },
+    });
+
+    expect(res.status).toBe('completed');
+    expect(mockGitAdapter.getReviewThreads).toHaveBeenCalledWith(
+      'test-org',
+      'test-repo',
+      42,
     );
   });
 

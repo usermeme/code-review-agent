@@ -19,6 +19,7 @@ import {
   type PRState,
   type ReviewMetrics,
   type ReviewResultPayload,
+  type ReviewThread,
 } from '@code-review-agent/shared-types';
 import { PubSub } from '@google-cloud/pubsub';
 import { FastifyBaseLogger } from 'fastify';
@@ -125,6 +126,29 @@ export class EventOrchestratorService {
     );
   }
 
+  /**
+   * Existing review threads only sharpen dedup; a failure to read them
+   * (e.g. missing GraphQL permission) must not block the review.
+   */
+  private async fetchThreads(
+    meta: PRMeta,
+    logger?: FastifyBaseLogger,
+  ): Promise<ReviewThread[]> {
+    try {
+      return await this.gitAdapterClient.getReviewThreads(
+        meta.owner,
+        meta.repo,
+        meta.prNumber,
+      );
+    } catch (error) {
+      logger?.warn(
+        { err: error },
+        '[Core] Could not read review threads; continuing without them',
+      );
+      return [];
+    }
+  }
+
   private async loadWorkspace(
     meta: PRMeta,
     diffData: PRDiffResult,
@@ -183,10 +207,12 @@ export class EventOrchestratorService {
     meta: PRMeta,
     prKey: string,
     priorFindings: PriorFinding[],
+    logger?: FastifyBaseLogger,
   ): Promise<ReviewPipelineResult> {
-    const diffData = await this.callAdapter(meta, prKey, () =>
-      this.fetchDiff(meta),
-    );
+    const [diffData, reviewThreads] = await Promise.all([
+      this.callAdapter(meta, prKey, () => this.fetchDiff(meta)),
+      this.fetchThreads(meta, logger),
+    ]);
     const diffWorkspace = new RepoWorkspace({
       files: new Map(),
       rawDiff: diffData.diff,
@@ -201,6 +227,7 @@ export class EventOrchestratorService {
             this.loadWorkspace(meta, diffData),
           ),
         priorFindings,
+        reviewThreads,
       },
       {
         models: this.models,
@@ -280,6 +307,7 @@ export class EventOrchestratorService {
       meta,
       prKey,
       priorFindings,
+      logger,
     );
     logger?.info(
       { route: metrics.route, usage: metrics.usage },
