@@ -34,9 +34,6 @@ export interface LlmRetryOptions {
   random?: () => number;
 }
 
-/** @deprecated Use {@link LlmRetryOptions}; retries are no longer rate-limit-only. */
-export type RateLimitRetryOptions = LlmRetryOptions;
-
 const DEFAULT_MAX_RETRIES = 4;
 const DEFAULT_BASE_DELAY_MS = 1_000;
 const DEFAULT_MAX_DELAY_MS = 30_000;
@@ -360,12 +357,4 @@ export class RetryingLlm extends BaseLlm {
  */
 export function withLlmRetry(llm: BaseLlm, options?: LlmRetryOptions): BaseLlm {
   return new RetryingLlm(llm, options);
-}
-
-/** @deprecated Use {@link withLlmRetry}; retries are no longer rate-limit-only. */
-export function withRateLimitRetry(
-  llm: BaseLlm,
-  options?: LlmRetryOptions,
-): BaseLlm {
-  return withLlmRetry(llm, options);
 }

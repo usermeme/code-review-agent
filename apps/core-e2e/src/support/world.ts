@@ -1,5 +1,5 @@
 import { EnvService } from '@code-review-agent/env';
-import { LlmFactory } from '@code-review-agent/llm';
+import { createMockAgentModels } from '@code-review-agent/llm';
 import { IWorldOptions, setWorldConstructor, World } from '@cucumber/cucumber';
 import { PubSub } from '@google-cloud/pubsub';
 import { FastifyInstance, LightMyRequestResponse } from 'fastify';
@@ -34,20 +34,19 @@ export class CoreWorld extends World {
       HOST: '0.0.0.0',
       PORT: '8080',
       REVIEW_RESULTS_TOPIC: 'test-review-results-topic',
-      LLM_PROVIDER: 'mock',
-      REVIEW_MODEL: 'test-model',
+      REVIEWER_MODEL: 'test-reviewer-model',
+      VERIFIER_MODEL: 'test-verifier-model',
       GIT_ADAPTER_URL: 'http://adapter:8080',
     });
 
     const gitAdapterClient = new InMemoryGitAdapterClient();
-    const llm = new LlmFactory(this.envService.data).createLlm();
 
     this.orchestrator = new EventOrchestratorService({
       pubsub: this.pubsub as unknown as PubSub,
       prRepository: this.prRepository,
       envService: this.envService,
       gitAdapterClient,
-      llm,
+      models: createMockAgentModels(),
     });
 
     this.app = await buildCoreServer({

@@ -16,7 +16,6 @@ import {
   type ValidatedReviewSubmission,
 } from './tools/submit-review.tool.js';
 
-export const DEFAULT_REVIEW_MODEL = 'gemini-2.5-flash';
 export const DEFAULT_MAX_LLM_CALLS = 10;
 export const DEFAULT_REVIEW_TIMEOUT_MS = 300_000;
 export const DEFAULT_MAX_INLINE_DIFF_CHARS = 80_000;
@@ -28,11 +27,8 @@ export interface ReviewAgentInput {
 }
 
 export interface ReviewAgentOptions {
-  /**
-   * Model name (e.g. 'gemini-2.5-flash') or a BaseLlm instance for testing.
-   * Defaults to process.env['GEMINI_MODEL'] || 'gemini-2.5-flash'.
-   */
-  model?: string | BaseLlm;
+  /** The LLM that runs the review (the reviewer role's model). */
+  model: BaseLlm;
   /**
    * Maximum LLM calls permitted for the review session. Defaults to 10.
    */
@@ -55,7 +51,7 @@ export interface ReviewAgentResult {
 }
 
 interface ResolvedReviewOptions {
-  model: string | BaseLlm;
+  model: BaseLlm;
   maxLlmCalls: number;
   timeoutMs: number;
   maxInlineDiffChars: number;
@@ -144,13 +140,6 @@ ${diffSection}
 Review the changes above, use repository tools only when needed to verify cross-file context, and call \`submit_review\` with your final review.`;
 }
 
-function resolveDefaultModel(modelOption?: string | BaseLlm): string | BaseLlm {
-  if (modelOption !== undefined) {
-    return modelOption;
-  }
-  return process.env['GEMINI_MODEL']?.trim() || DEFAULT_REVIEW_MODEL;
-}
-
 function resolveNumericOptions(options: ReviewAgentOptions): {
   maxLlmCalls: number;
   timeoutMs: number;
@@ -168,7 +157,7 @@ function resolveReviewOptions(
   options: ReviewAgentOptions,
 ): ResolvedReviewOptions {
   return {
-    model: resolveDefaultModel(options.model),
+    model: options.model,
     ...resolveNumericOptions(options),
   };
 }
@@ -234,7 +223,7 @@ function resolveFinalSubmission(
 
 function createReviewRunner(
   input: ReviewAgentInput,
-  model: string | BaseLlm,
+  model: BaseLlm,
   submitBundle: SubmitReviewToolBundle,
 ): InMemoryRunner {
   const repoTools = createRepoTools(input.workspace);
@@ -357,7 +346,7 @@ async function executeAgentSession(
  */
 export async function runCodeReview(
   input: ReviewAgentInput,
-  options: ReviewAgentOptions = {},
+  options: ReviewAgentOptions,
 ): Promise<ReviewAgentResult> {
   const priorFindings = input.priorFindings ?? [];
   const { changedFiles } = input.workspace.getPrDiff();

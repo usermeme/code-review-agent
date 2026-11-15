@@ -2,6 +2,7 @@ import {
   loadRepoWorkspaceFromTarball,
   type RepoWorkspace,
 } from '@code-review-agent/agent-tools';
+import type { AgentModels } from '@code-review-agent/llm';
 import {
   type ReviewAgentResult,
   runCodeReview,
@@ -15,7 +16,6 @@ import {
   type PRState,
   type ReviewResultPayload,
 } from '@code-review-agent/shared-types';
-import type { BaseLlm } from '@google/adk';
 import { PubSub } from '@google-cloud/pubsub';
 import { FastifyBaseLogger } from 'fastify';
 
@@ -33,7 +33,7 @@ export interface EventOrchestratorDependencies {
   prRepository: PrRepository;
   pubsub: PubSub;
   gitAdapterClient: GitAdapterContract;
-  llm: BaseLlm;
+  models: AgentModels;
 }
 
 const REVIEW_ACTIONS = new Set([
@@ -64,14 +64,14 @@ export class EventOrchestratorService {
   private readonly prRepository: PrRepository;
   private readonly envService: CoreEnvService;
   private readonly gitAdapterClient: GitAdapterContract;
-  private readonly llm: BaseLlm;
+  private readonly models: AgentModels;
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub;
     this.prRepository = deps.prRepository;
     this.envService = deps.envService;
     this.gitAdapterClient = deps.gitAdapterClient;
-    this.llm = deps.llm;
+    this.models = deps.models;
   }
 
   async ingestPREvent(
@@ -169,7 +169,7 @@ export class EventOrchestratorService {
     const timeoutMs = this.envService.get('REVIEW_TIMEOUT_MS');
     return runCodeReview(
       { prMeta: meta, workspace, priorFindings },
-      { model: this.llm, timeoutMs },
+      { model: this.models.reviewer, timeoutMs },
     );
   }
 
