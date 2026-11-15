@@ -165,8 +165,38 @@ function resolveReviewableChangedFiles(
 
 export interface RepoWorkspaceInit {
   files: Map<string, string[]>;
+  /** The diff under review (the whole PR, or only the changes since the last review). */
   rawDiff?: string;
   changedFiles?: string[];
+  /**
+   * The full PR diff, when `rawDiff` is only part of it. Comments may only
+   * anchor to lines valid in both, because GitHub rejects inline comments
+   * outside the PR diff.
+   */
+  anchorRawDiff?: string;
+}
+
+function intersectValidLines(
+  reviewed: Map<string, Set<number>>,
+  anchorable: Map<string, Set<number>>,
+): Map<string, Set<number>> {
+  const result = new Map<string, Set<number>>();
+  for (const [path, lines] of reviewed) {
+    const allowed = anchorable.get(path) ?? new Set<number>();
+    result.set(path, new Set([...lines].filter((line) => allowed.has(line))));
+  }
+  return result;
+}
+
+function resolveAnchorLines(
+  annotated: AnnotatedDiff,
+  anchorRawDiff: string | undefined,
+): Map<string, Set<number>> {
+  if (anchorRawDiff === undefined) return annotated.validLinesByFile;
+  return intersectValidLines(
+    annotated.validLinesByFile,
+    annotateUnifiedDiff(anchorRawDiff).validLinesByFile,
+  );
 }
 
 export class RepoWorkspace {
@@ -174,6 +204,7 @@ export class RepoWorkspace {
   private readonly sortedPaths: string[];
   private readonly annotated: AnnotatedDiff;
   private readonly changedFiles: string[];
+  private readonly anchorLinesByFile: Map<string, Set<number>>;
 
   constructor(init: RepoWorkspaceInit) {
     this.files = init.files;
@@ -182,6 +213,10 @@ export class RepoWorkspace {
     this.changedFiles = resolveReviewableChangedFiles(
       init.changedFiles,
       this.annotated.byFile,
+    );
+    this.anchorLinesByFile = resolveAnchorLines(
+      this.annotated,
+      init.anchorRawDiff,
     );
   }
 
@@ -409,7 +444,7 @@ export class RepoWorkspace {
   ): DiffCommentAnchor | null {
     const normalized = normalizeLookupPath(path);
     return resolveDiffAnchor(
-      this.annotated.validLinesByFile,
+      this.anchorLinesByFile,
       normalized,
       endLine,
       startLine,

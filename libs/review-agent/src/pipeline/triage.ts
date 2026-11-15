@@ -11,6 +11,8 @@ import type {
 import type { BaseLlm } from '@google/adk';
 import { z } from 'zod';
 
+import { formatIncrementalNote } from '../review-agent.js';
+
 const MAX_TRIAGE_DIFF_CHARS = 12_000;
 const MAX_DESCRIPTION_CHARS = 2_000;
 const MAX_FOCUS_FILES = 10;
@@ -43,6 +45,8 @@ When in doubt, choose "deep". List the changed files most likely to contain defe
 export interface TriageInput {
   prMeta: PRMeta;
   workspace: RepoWorkspace;
+  /** Commit the last review covered, when the diff is only the new pushes. */
+  incrementalSince?: string;
 }
 
 export interface TriageResult {
@@ -68,7 +72,7 @@ export function buildTriagePrompt(input: TriageInput): string {
   const truncationNote = truncated ? '\n(diff truncated)' : '';
   return `## ${prMeta.title}
 
-${description || '_No description provided._'}
+${description || '_No description provided._'}${formatIncrementalNote(input.incrementalSince)}
 
 ### Changed files
 ${formatStats(workspace.getDiffStats())}
