@@ -1,6 +1,7 @@
 import type {
   GitAdapterContract,
   PRDiffResult,
+  ReviewThread,
 } from '@code-review-agent/shared-types';
 import { Octokit } from 'octokit';
 
@@ -9,6 +10,7 @@ import {
   PostReviewOptions,
   PostReviewResult,
 } from './interfaces/github.interface.js';
+import { fetchReviewThreads } from './review-threads.query.js';
 
 export interface GithubServiceDependencies {
   authService: GithubAuthProvider;
@@ -127,6 +129,19 @@ export class GithubService implements GitAdapterContract {
       diff,
       changedFiles,
     };
+  }
+
+  async getReviewThreads(
+    owner: string,
+    repo: string,
+    prNumber: number,
+  ): Promise<ReviewThread[]> {
+    const octokit = await this.authService.getOctokit(owner, repo);
+    return fetchReviewThreads(octokit.graphql, {
+      owner,
+      repo,
+      number: prNumber,
+    });
   }
 
   async getRepoTarball(
