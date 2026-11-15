@@ -18,6 +18,7 @@ import {
   thinkingConfig,
 } from './agents/agent-session.js';
 import {
+  type AnchoredFinding,
   createSubmitReviewTool,
   type SubmitReviewState,
   type SubmitReviewToolBundle,
@@ -63,6 +64,8 @@ export interface ReviewAgentOptions {
 export interface ReviewAgentResult {
   reviewResult: ReviewResultPayload;
   publishedFindings: PriorFinding[];
+  /** This run's new findings (the ones in `reviewResult.comments`). */
+  findings: AnchoredFinding[];
   /** Token usage summed over every model call of this review. */
   usage: TokenUsage;
 }
@@ -215,6 +218,7 @@ function buildSuccessResult(
       comments: submission.comments,
     },
     publishedFindings: [...priorFindings, ...submission.publishedFindings],
+    findings: submission.findings,
     usage,
   };
 }
@@ -228,7 +232,7 @@ export function buildSummaryOnlyResult(
 ): ReviewAgentResult {
   return buildSuccessResult(
     prMeta,
-    { summary, comments: [], publishedFindings: [] },
+    { summary, comments: [], publishedFindings: [], findings: [] },
     priorFindings,
     usage,
   );
@@ -251,6 +255,7 @@ function buildFailureResult(
       failure: { reason },
     },
     publishedFindings: priorFindings,
+    findings: [],
     usage,
   };
 }

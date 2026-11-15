@@ -9,7 +9,10 @@ import {
   createTextResponse,
   ScriptedLlm,
 } from '../testing/scripted-llm.js';
-import { runReviewPipeline } from './review-pipeline.js';
+import {
+  type ReviewPipelineResult,
+  runReviewPipeline,
+} from './review-pipeline.js';
 
 const META: PRMeta = {
   provider: 'github',
@@ -231,5 +234,161 @@ describe('runReviewPipeline', () => {
 
     expect(result.metrics.route.tier).toBe('light');
     expect(reviewer.requests).toHaveLength(1);
+  });
+});
+
+function finding(title: string, severity: 'critical' | 'major' | 'minor') {
+  return {
+    path: 'src/charge.ts',
+    line: 2,
+    severity,
+    title,
+    comment: `${title} explained.`,
+  };
+}
+
+function reviewerFinds(...findings: ReturnType<typeof finding>[]) {
+  return new ScriptedLlm([
+    () =>
+      createFunctionCallResponse('submit_review', {
+        summary: 'Found issues.',
+        findings,
+      }),
+  ]);
+}
+
+function verifierSays(args: Record<string, unknown>) {
+  return new ScriptedLlm([
+    () => ({
+      ...createFunctionCallResponse('submit_verdicts', args),
+      usageMetadata: { promptTokenCount: 700 },
+    }),
+  ]);
+}
+
+async function runWith(models: Parameters<typeof createMockAgentModels>[0]) {
+  const { diffWorkspace, loadWorkspace } = workspaces();
+  return runReviewPipeline(
+    { prMeta: META, diffWorkspace, loadWorkspace },
+    { ...OPTIONS, models: createMockAgentModels(models) },
+  );
+}
+
+function published(result: ReviewPipelineResult) {
+  if (!result.publish) throw new Error('Expected a published review.');
+  return result.publish;
+}
+
+describe('runReviewPipeline verification', () => {
+  it('drops rejected findings, corrects severity and rewrites the summary on a deep review', async () => {
+    const verifier = verifierSays({
+      verdicts: [
+        { id: 0, verdict: 'drop', reason: 'Guarded by the caller.' },
+        { id: 1, verdict: 'keep', severity: 'critical', reason: 'Crashes.' },
+      ],
+      summary: 'One real crash.',
+    });
+
+    const result = await runWith({
+      triage: triageSays('deep'),
+      reviewer: reviewerFinds(
+        finding('False alarm', 'major'),
+        finding('Division by zero', 'major'),
+      ),
+      verifier,
+    });
+
+    const comments = published(result).reviewResult.comments;
+    expect(comments).toHaveLength(1);
+    expect(comments[0].body).toContain('[CRITICAL] Division by zero');
+    expect(published(result).publishedFindings).toEqual([
+      expect.objectContaining({
+        title: 'Division by zero',
+        severity: 'critical',
+      }),
+    ]);
+    expect(published(result).reviewResult.summary).toContain('One real crash.');
+    expect(published(result).reviewResult.summary).toContain(
+      'Verifier kept 1 of 2 checked findings.',
+    );
+    expect(result.metrics.usage.verifier!.promptTokens).toBe(700);
+  });
+
+  it('checks only major and critical findings on a light review', async () => {
+    const verifier = verifierSays({
+      verdicts: [{ id: 0, verdict: 'drop', reason: 'Not reachable.' }],
+    });
+
+    const result = await runWith({
+      triage: triageSays('light'),
+      reviewer: reviewerFinds(
+        finding('Small typo bug', 'minor'),
+        finding('Wrong total', 'major'),
+      ),
+      verifier,
+    });
+
+    const prompt = JSON.stringify(verifier.requests[0].contents);
+    expect(prompt).toContain('Wrong total');
+    expect(prompt).not.toContain('Small typo bug');
+    expect(verifier.requests[0].config?.thinkingConfig?.thinkingLevel).toBe(
+      ThinkingLevel.MEDIUM,
+    );
+    const comments = published(result).reviewResult.comments;
+    expect(comments).toHaveLength(1);
+    expect(comments[0].body).toContain('Small typo bug');
+  });
+
+  it('does not call the verifier for a light review with only minor findings', async () => {
+    const verifier = verifierSays({ verdicts: [] });
+
+    const result = await runWith({
+      triage: triageSays('light'),
+      reviewer: reviewerFinds(finding('Small typo bug', 'minor')),
+      verifier,
+    });
+
+    expect(verifier.requests).toHaveLength(0);
+    expect(published(result).reviewResult.comments).toHaveLength(1);
+    expect(result.metrics.usage.verifier).toBeUndefined();
+  });
+
+  it('keeps every finding when the verifier never submits verdicts', async () => {
+    const verifier = new ScriptedLlm([
+      () => createTextResponse('I have no opinion.'),
+    ]);
+
+    const result = await runWith({
+      triage: triageSays('deep'),
+      reviewer: reviewerFinds(
+        finding('First issue', 'major'),
+        finding('Second issue', 'critical'),
+      ),
+      verifier,
+    });
+
+    expect(published(result).reviewResult.comments).toHaveLength(2);
+    expect(published(result).reviewResult.summary).toContain(
+      'not double-checked (verifier unavailable)',
+    );
+  });
+
+  it('keeps a candidate the verifier did not rule on', async () => {
+    const verifier = verifierSays({
+      verdicts: [{ id: 1, verdict: 'drop', reason: 'Duplicate.' }],
+    });
+
+    const result = await runWith({
+      triage: triageSays('deep'),
+      reviewer: reviewerFinds(
+        finding('Unjudged issue', 'major'),
+        finding('Dropped issue', 'major'),
+      ),
+      verifier,
+    });
+
+    const comments = published(result).reviewResult.comments;
+    expect(comments).toHaveLength(1);
+    expect(comments[0].body).toContain('Unjudged issue');
   });
 });
