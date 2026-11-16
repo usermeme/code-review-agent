@@ -87,6 +87,12 @@ export interface ReviewAgentResult {
   findings: AnchoredFinding[];
   /** Token usage summed over every model call of this review. */
   usage: TokenUsage;
+  /**
+   * True only when the agent's own submit_review was accepted. False or
+   * absent for fallback drafts (the run ended before a valid submission),
+   * failures and summary-only results; such reviews are never approved.
+   */
+  complete?: boolean;
 }
 
 interface ResolvedReviewOptions {
@@ -249,8 +255,10 @@ function buildSuccessResult(
   submission: ValidatedReviewSubmission,
   priorFindings: PriorFinding[],
   usage: TokenUsage = emptyTokenUsage(),
+  complete = false,
 ): ReviewAgentResult {
   return {
+    complete,
     reviewResult: {
       provider: prMeta.provider,
       owner: prMeta.owner,
@@ -337,7 +345,14 @@ function resolveOutcome(
 ): ReviewAgentResult {
   const submission = getBestSubmission(state);
   if (submission) {
-    return buildSuccessResult(prMeta, submission, priorFindings, outcome.usage);
+    const complete = submission === state.getAcceptedSubmission();
+    return buildSuccessResult(
+      prMeta,
+      submission,
+      priorFindings,
+      outcome.usage,
+      complete,
+    );
   }
   return buildFailureResult(
     prMeta,

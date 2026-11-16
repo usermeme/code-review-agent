@@ -94,6 +94,28 @@ function withRouteNote(
   return { ...result, reviewResult: { ...result.reviewResult, summary } };
 }
 
+/**
+ * Marks a clean review for approval: the agent's own submission was
+ * accepted, nothing failed, and no finding survived dedupe and verification.
+ * The approval is pinned to the reviewed head; without a known head there is
+ * nothing to pin it to, so the review stays a comment.
+ */
+function withApproval(
+  result: ReviewAgentResult,
+  headSha: string | undefined,
+): ReviewAgentResult {
+  const { reviewResult } = result;
+  const clean =
+    result.complete === true &&
+    !reviewResult.failure &&
+    reviewResult.comments.length === 0;
+  if (!clean || !headSha) return result;
+  return {
+    ...result,
+    reviewResult: { ...reviewResult, approve: true, reviewedSha: headSha },
+  };
+}
+
 async function runTier(
   ctx: PipelineContext,
   workspace: RepoWorkspace,
@@ -232,11 +254,12 @@ async function reviewRouted(
     remainingMs: ctx.remainingMs(),
     context: deduped.context,
   });
+  const noted = withRouteNote(verified.result, run.route, [
+    deduped.note,
+    verified.note,
+  ]);
   return {
-    publish: withRouteNote(verified.result, run.route, [
-      deduped.note,
-      verified.note,
-    ]),
+    publish: withApproval(noted, ctx.input.prMeta.headSha),
     metrics: {
       route: run.route,
       usage: {

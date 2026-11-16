@@ -145,6 +145,7 @@ describe('review-agent', () => {
         title: 'Division by taxRate instead of multiplication',
       },
     ]);
+    expect(result.complete).toBe(true);
   });
 
   it('allows the agent to self-correct when first submit_review uses an invalid diff line', async () => {
@@ -376,6 +377,8 @@ describe('review-agent', () => {
     expect(result.reviewResult.comments[0]?.body).toContain('Division by zero');
     expect(result.publishedFindings).toHaveLength(1);
     expect(result.publishedFindings[0]?.title).toBe('Division by zero');
+    // A fallback draft is a partial result: never eligible for approval.
+    expect(result.complete).toBe(false);
   });
 
   it('sends the configured thinking level and sums token usage over all calls', async () => {

@@ -31,7 +31,29 @@ function buildPostReviewOptions(payload: ReviewResultPayload) {
     prNumber: payload.prNumber,
     summary: payload.summary || '',
     comments: payload.comments || [],
+    ...(payload.approve === true
+      ? { approve: true, reviewedSha: payload.reviewedSha }
+      : {}),
   };
+}
+
+function describePr(payload: ReviewResultPayload): string {
+  return `${payload.owner}/${payload.repo} #${payload.prNumber}`;
+}
+
+function logPosting(request: FastifyRequest, payload: ReviewResultPayload) {
+  if (payload.failure) {
+    // A review-failure notice (timeout / non-retryable abandonment) from
+    // core: posted like a normal review so the failure is visible on the
+    // PR instead of being silently acked.
+    request.log.warn(
+      `[ReviewResultsPush] Posting review-failure notice for ${describePr(payload)}: ${payload.failure.reason}`,
+    );
+    return;
+  }
+  request.log.info(
+    `[ReviewResultsPush] Posting review results for ${describePr(payload)}`,
+  );
 }
 
 function handlePostReviewError(
@@ -90,21 +112,15 @@ export const reviewResultsPushRoutes: FastifyPluginAsync<
     }
 
     try {
-      if (payload.failure) {
-        // A review-failure notice (timeout / non-retryable abandonment) from
-        // core: posted like a normal review so the failure is visible on the
-        // PR instead of being silently acked.
-        request.log.warn(
-          `[ReviewResultsPush] Posting review-failure notice for ${payload.owner}/${payload.repo} #${payload.prNumber}: ${payload.failure.reason}`,
-        );
-      } else {
-        request.log.info(
-          `[ReviewResultsPush] Posting review results for ${payload.owner}/${payload.repo} #${payload.prNumber}`,
-        );
-      }
+      logPosting(request, payload);
       const res = await options.githubService.postReview(
         buildPostReviewOptions(payload),
       );
+      if (res.event === 'APPROVE') {
+        request.log.info(
+          `[ReviewResultsPush] Approved ${describePr(payload)} at ${payload.reviewedSha}`,
+        );
+      }
       return reply.status(200).send({
         success: res.success,
         data: res,

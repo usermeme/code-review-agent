@@ -94,6 +94,15 @@ export interface ReviewResultPayload {
   failure?: {
     reason: string;
   };
+  /**
+   * Set by core when a light or deep review ran to completion (the agent's
+   * own submission, not a fallback draft) and left zero findings. The adapter
+   * approves only if the PR head is still `reviewedSha` and the PR has no
+   * unresolved review threads; otherwise it posts a normal comment review.
+   */
+  approve?: boolean;
+  /** Head commit the review covered; an approval is pinned to it. */
+  reviewedSha?: string;
 }
 
 export interface ReviewThreadComment {
