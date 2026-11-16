@@ -238,7 +238,7 @@ jobs:
             --no-cpu-throttling \
             --timeout 900 \
             --service-account "code-review-agent-sa@${{ env.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
-            --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,REVIEWER_MODEL=${{ vars.REVIEWER_MODEL }},VERIFIER_MODEL=${{ vars.VERIFIER_MODEL }},TRIAGE_MODEL=${{ vars.TRIAGE_MODEL || 'gemini-2.5-flash-lite' }},REVIEW_TIMEOUT_MS=${{ vars.REVIEW_TIMEOUT_MS || '480000' }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
+            --set-env-vars "PORT=8080,HOST=0.0.0.0,REVIEW_RESULTS_TOPIC=review-results,REVIEWER_MODEL=${{ vars.REVIEWER_MODEL }},VERIFIER_MODEL=${{ vars.VERIFIER_MODEL }},TRIAGE_MODEL=${{ vars.TRIAGE_MODEL || 'gemini-3.5-flash-lite' }},REVIEW_TIMEOUT_MS=${{ vars.REVIEW_TIMEOUT_MS || '480000' }},GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}"
 
       # 2. Deploy GitHub Adapter (Private Provider Adapter)
       - name: Deploy GitHub Adapter
@@ -542,7 +542,7 @@ services:
       - REVIEW_RESULTS_TOPIC=review-results
       - REVIEWER_MODEL=${REVIEWER_MODEL}
       - VERIFIER_MODEL=${VERIFIER_MODEL}
-      - TRIAGE_MODEL=${TRIAGE_MODEL:-gemini-2.5-flash-lite}
+      - TRIAGE_MODEL=${TRIAGE_MODEL:-gemini-3.5-flash-lite}
       - REVIEW_TIMEOUT_MS=${REVIEW_TIMEOUT_MS:-480000}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GIT_ADAPTER_URL=http://adapter:8080
@@ -623,7 +623,7 @@ Each service strictly validates required variables and fails fast at startup if 
 | `REVIEW_RESULTS_TOPIC`    |   Yes    | Google Cloud Pub/Sub topic to publish review result events to                                                                      |
 | `REVIEWER_MODEL`          |   Yes    | Model for the reviewer agent, which reads the diff (e.g. `gemini-4-hydrogen`)                                                      |
 | `VERIFIER_MODEL`          |   Yes    | Model for the verifier agent, which confirms findings (e.g. `gemini-4-argon`)                                                      |
-| `TRIAGE_MODEL`            | Optional | Cheap text model for triage and thread dedupe (default `gemini-2.5-flash-lite`)                                                    |
+| `TRIAGE_MODEL`            | Optional | Cheap text model for triage and thread dedupe (default `gemini-3.5-flash-lite`)                                                    |
 | `DEEP_REVIEW_PATHS`       | Optional | Comma-separated globs that always get a deep review (defaults: auth, security, migrations, SQL, workflows, Dockerfiles, Terraform) |
 | `REVIEW_TIMEOUT_MS`       | Optional | Wall-clock cap per review in ms (default `480000`, valid `30000`–`540000`)                                                         |
 | `GIT_ADAPTER_URL`         |   Yes    | URL of Git Provider Adapter for on-demand code queries (e.g. `http://adapter:8080`)                                                |
