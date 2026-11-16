@@ -22,6 +22,7 @@ Production-ready, secretless Infrastructure as Code (IaC) using **Pulumi (TypeSc
 - **Thread-Aware Dedup**: Before posting, new findings are compared with the PR's existing inline review threads from any author (this bot, other review bots, people). The reviewer sees open threads up front, and a batched triage-model check drops findings that repeat an open thread or a resolved thread whose code is unchanged. A finding that matches a thread resolved before the code changed is kept as a possible regression, and the earlier discussion is passed to the verifier.
 - **Zero-Cost Guideline Extraction**: Ingests repo rules (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`) automatically from memory with 0 LLM calls.
 - **Top-Level Summaries & Inline Comments**: Submits formal pull request reviews alongside actionable inline review comments directly to the Git provider.
+- **Approves Clean PRs**: When a light or deep review completes with zero findings, the bot approves the PR instead of only commenting. It approves only the commit it reviewed (a newer push is reviewed on its own), only when no review thread on the PR is unresolved (a finding from an earlier push, or one another reviewer raised, blocks approval until someone resolves it), and never for skipped, failed, timed-out or `/review`-triggered runs. When a later review posts findings, the bot dismisses its own earlier approvals. A bot approval counts toward branch protection's required approvals, so require a human review too if that matters.
 - **Fail-Fast Environment Configuration**: Strict validation with zero silent default fallbacks on required environment variables.
 - **Container-First CI/CD**: Multi-arch container images are automatically built and published to GHCR.
 
@@ -643,7 +644,7 @@ Each service strictly validates required variables and fails fast at startup if 
 Configure the following **Repository permissions** on your GitHub App:
 
 - **Contents**: `Read-only` (fetching file contents, diffs, code search, and repository tarballs)
-- **Pull requests**: `Read and write` (reading PR metadata/files and posting formal reviews & inline comments)
+- **Pull requests**: `Read and write` (reading PR metadata/files, posting formal reviews & inline comments, approving clean PRs and dismissing the bot's own stale approvals)
 - **Metadata**: `Read-only` (mandatory default for GitHub Apps)
 
 ### 2. Per-Repository Installation Requirement
