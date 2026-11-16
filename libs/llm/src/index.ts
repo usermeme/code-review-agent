@@ -1,4 +1,7 @@
 export * from './calls/generate-json.js';
+export * from './decisions/decide.js';
+export * from './decisions/decision-model.js';
+export * from './decisions/mock-decision-model.js';
 export * from './models/agent-models.js';
 export * from './models/mock-agent-models.js';
 export * from './providers/mock.llm.js';
