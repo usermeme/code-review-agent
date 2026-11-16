@@ -12,14 +12,16 @@ export const reviewFindingSchema = z.object({
   line: z
     .number()
     .int()
-    .positive()
+    // min(1), not positive(): positive() becomes `exclusiveMinimum`, which
+    // the Gemini API rejects in function declarations.
+    .min(1)
     .describe(
       '1-based NEW-side ending line number taken from the L<num> | prefix in the annotated PR diff.',
     ),
   startLine: z
     .number()
     .int()
-    .positive()
+    .min(1)
     .optional()
     .describe(
       'Optional 1-based NEW-side start line for a multi-line comment (must be <= line and within the same diff hunk).',
