@@ -1,6 +1,7 @@
 import { Gemini } from '@google/adk';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { GeminiDecisionModel } from '../decisions/decision-model.js';
 import { RetryingLlm } from '../providers/retrying.llm.js';
 import {
   DEFAULT_TRIAGE_MODEL,
@@ -15,12 +16,13 @@ const BASE_CONFIG = {
 };
 
 describe('createAgentModels', () => {
-  it('creates a retry-wrapped Gemini client for each role', () => {
+  it('creates a decision model for triage and a retry-wrapped Gemini per agent', () => {
     const models = createAgentModels(
       modelConfigSchema.parse({ ...BASE_CONFIG, TRIAGE_MODEL: 'triage-x' }),
     );
 
-    for (const llm of Object.values(models)) {
+    expect(models.triage).toBeInstanceOf(GeminiDecisionModel);
+    for (const llm of [models.reviewer, models.verifier]) {
       expect(llm).toBeInstanceOf(RetryingLlm);
       expect((llm as RetryingLlm).inner).toBeInstanceOf(Gemini);
     }
@@ -55,7 +57,7 @@ describe('Gemini API version', () => {
   it('pins the agents to v1beta instead of the genai 3 default (v1)', () => {
     const models = createAgentModels(modelConfigSchema.parse(BASE_CONFIG));
 
-    for (const llm of Object.values(models)) {
+    for (const llm of [models.reviewer, models.verifier]) {
       expect(resolvedApiVersion(llm)).toBe(GEMINI_API_VERSION);
     }
   });

@@ -1,7 +1,11 @@
+import {
+  choiceAnswer,
+  type DecisionModel,
+  MockDecisionModel,
+} from '@code-review-agent/llm';
 import type { ReviewThread } from '@code-review-agent/shared-types';
 import { describe, expect, it } from 'vitest';
 
-import { createTextResponse, ScriptedLlm } from '../testing/scripted-llm.js';
 import type { AnchoredFinding } from '../tools/submit-review.tool.js';
 import { dedupeAgainstThreads } from './dedupe-step.js';
 
@@ -32,10 +36,18 @@ function thread(overrides: Partial<ReviewThread>): ReviewThread {
   };
 }
 
-function modelSays(matches: Array<{ findingId: number; threadId: string }>) {
-  return new ScriptedLlm([
-    () => createTextResponse(JSON.stringify({ matches })),
-  ]);
+/** Answers each finding's question with the given thread id (or "none"). */
+function modelSays(
+  matches: Array<{ findingId: number; threadId: string }>,
+  confidence = 0.9,
+) {
+  const byQuestion = new Map(
+    matches.map((m) => [`finding_${m.findingId}`, m.threadId]),
+  );
+  return new MockDecisionModel((id, question) => {
+    const threadId = byQuestion.get(id);
+    return threadId ? choiceAnswer(question, threadId, confidence) : undefined;
+  });
 }
 
 const REMAINING = 300_000;
@@ -59,6 +71,38 @@ describe('dedupeAgainstThreads', () => {
 
     expect(result.findings).toEqual([findings[1]]);
     expect(result.note).toContain('Skipped 1 finding');
+  });
+
+  it('asks one choice per finding over its nearby threads plus "none"', async () => {
+    const model = modelSays([]);
+
+    await dedupeAgainstThreads({
+      findings: [anchored('Division by zero', 11)],
+      threads: [thread({}), thread({ path: 'src/other.ts' })],
+      model,
+      remainingMs: REMAINING,
+    });
+
+    expect(model.requests[0]?.questions['finding_0']).toEqual({
+      type: 'choice',
+      instructions: expect.stringContaining('Division by zero'),
+      criteria: {
+        T1: expect.stringContaining('Divides by zero'),
+        none: expect.any(String),
+      },
+    });
+  });
+
+  it('keeps a finding when the model is unsure about the match', async () => {
+    const result = await dedupeAgainstThreads({
+      findings: [anchored('Division by zero', 11)],
+      threads: [thread({})],
+      model: modelSays([{ findingId: 0, threadId: 'T1' }], 0.55),
+      remainingMs: REMAINING,
+    });
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.note).toBe('');
   });
 
   it('drops a finding that matches a resolved thread whose code is unchanged', async () => {
@@ -111,11 +155,15 @@ describe('dedupeAgainstThreads', () => {
     expect(result.findings).toHaveLength(1);
   });
 
-  it('keeps every finding when the model answer is unusable', async () => {
+  it('keeps every finding when the decision call fails', async () => {
+    const failing: DecisionModel = {
+      model: 'failing',
+      decide: () => Promise.reject(new Error('503 unavailable')),
+    };
     const result = await dedupeAgainstThreads({
       findings: [anchored('Division by zero', 10)],
       threads: [thread({})],
-      model: new ScriptedLlm([() => createTextResponse('no idea')]),
+      model: failing,
       remainingMs: REMAINING,
     });
 

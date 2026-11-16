@@ -13,8 +13,6 @@ export { TIER_PROFILES, type TierProfile } from './pipeline/tier-profiles.js';
 export {
   buildTriagePrompt,
   runTriage,
-  type TriageDecision,
-  triageDecisionSchema,
   type TriageResult,
 } from './pipeline/triage.js';
 export {

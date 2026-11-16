@@ -10,7 +10,11 @@ export const DEFAULT_TRIAGE_MODEL = 'gemini-decision-1';
 const modelId = z.string().trim().min(1);
 
 export const modelConfigSchema = z.object({
-  /** Cheap decision model: routes PRs and answers yes/no and choice questions. */
+  /**
+   * Decisions API model (`POST /v1beta/decisions`): routes PRs and matches
+   * findings to existing threads. Text models such as Flash-Lite do not
+   * support that API and fail triage, which then falls back to a deep review.
+   */
   TRIAGE_MODEL: modelId.default(DEFAULT_TRIAGE_MODEL),
   /** Reads the diff and uses repo tools to propose findings (e.g. Gemini 4 Hydrogen). */
   REVIEWER_MODEL: modelId,

@@ -1,7 +1,11 @@
-import { emptyTokenUsage, generateJson } from '@code-review-agent/llm';
+import {
+  decide,
+  type DecisionAnswers,
+  type DecisionModel,
+  type DecisionQuestion,
+  emptyTokenUsage,
+} from '@code-review-agent/llm';
 import type { ReviewThread, TokenUsage } from '@code-review-agent/shared-types';
-import type { BaseLlm } from '@google/adk';
-import { z } from 'zod';
 
 import type { AnchoredFinding } from '../tools/submit-review.tool.js';
 import { firstLine, threadStatus, truncate } from './thread-format.js';
@@ -11,26 +15,20 @@ const LINE_WINDOW = 15;
 const MAX_DEDUPE_TIMEOUT_MS = 30_000;
 const MIN_DEDUPE_TIMEOUT_MS = 5_000;
 const NO_MATCH = 'none';
+/** A finding is dropped only when the model is at least this sure of a match. */
+const MIN_MATCH_CONFIDENCE = 0.6;
 
-const DEDUPE_INSTRUCTION = `You compare new code review findings with existing review threads on the same Pull Request. Threads may come from this reviewer, other review bots, or people.
+const DEDUPE_CONTEXT = `You compare new code review findings with existing review threads on the same Pull Request. Threads may come from this reviewer, other review bots, or people.
 
-For each finding, answer with the id of the thread that raises the same underlying issue, or "${NO_MATCH}". Same issue means the same defect at the same place, even if worded differently. A different problem on nearby lines is "${NO_MATCH}".`;
+Same issue means the same defect at the same place, even if worded differently. A different problem on nearby lines is not the same issue.`;
 
-const dedupeSchema = z.object({
-  matches: z.array(
-    z.object({
-      findingId: z.number().int().nonnegative(),
-      threadId: z
-        .string()
-        .describe(`Thread id such as "T2", or "${NO_MATCH}".`),
-    }),
-  ),
-});
+const NO_MATCH_CRITERION =
+  'None of these threads raises the same underlying issue as the finding.';
 
 export interface DedupeInput {
   findings: AnchoredFinding[];
   threads: ReviewThread[];
-  model: BaseLlm;
+  model: DecisionModel;
   remainingMs: number;
 }
 
@@ -76,19 +74,48 @@ function lastReply(thread: ReviewThread): string {
     : '';
 }
 
-function formatThread({ key, thread }: Candidate['threads'][number]): string {
+function formatThread(thread: ReviewThread): string {
   const opener = thread.comments[0];
   const line = thread.line === null ? 'line unknown' : `line ${thread.line}`;
   const text = opener ? truncate(opener.body, 300) : '';
-  return `  - ${key} (${threadStatus(thread)}, ${line}): ${text}${lastReply(thread)}`;
+  return `Existing thread (${threadStatus(thread)}, ${line}): ${text}${lastReply(thread)}`;
 }
 
-function formatCandidate(candidate: Candidate): string {
+function questionId(candidate: Candidate): string {
+  return `finding_${candidate.findingId}`;
+}
+
+/** One choice per finding: the nearby thread raising the same issue, or none. */
+function matchQuestion(candidate: Candidate): DecisionQuestion {
   const { finding, anchor } = candidate.item;
-  return `Finding ${candidate.findingId}: [${finding.severity.toUpperCase()}] ${finding.title} at ${finding.path}:${anchor.line}
-  ${truncate(finding.comment, 300)}
-  Existing threads nearby:
-${candidate.threads.map(formatThread).join('\n')}`;
+  return {
+    type: 'choice',
+    instructions: `New finding: [${finding.severity.toUpperCase()}] ${finding.title} at ${finding.path}:${anchor.line}
+${truncate(finding.comment, 300)}
+
+Which existing thread raises the same underlying issue as this finding?`,
+    criteria: {
+      ...Object.fromEntries(
+        candidate.threads.map(({ key, thread }) => [key, formatThread(thread)]),
+      ),
+      [NO_MATCH]: NO_MATCH_CRITERION,
+    },
+  };
+}
+
+/** Thread ids the model matched with enough confidence, per finding. */
+function confidentMatches(
+  candidates: Candidate[],
+  answers: DecisionAnswers,
+): Array<{ findingId: number; threadId: string }> {
+  return candidates.flatMap((candidate) => {
+    const answer = answers.choice(questionId(candidate));
+    const matched =
+      answer.choice !== NO_MATCH && answer.confidence >= MIN_MATCH_CONFIDENCE;
+    return matched
+      ? [{ findingId: candidate.findingId, threadId: answer.choice }]
+      : [];
+  });
 }
 
 function resolvedContext(thread: ReviewThread): string {
@@ -154,15 +181,23 @@ export async function dedupeAgainstThreads(
   if (candidates.length === 0 || timeoutMs < MIN_DEDUPE_TIMEOUT_MS) {
     return unchanged(input);
   }
-  const result = await generateJson(input.model, {
-    systemInstruction: DEDUPE_INSTRUCTION,
-    prompt: candidates.map(formatCandidate).join('\n\n'),
-    schema: dedupeSchema,
+  const result = await decide(input.model, {
+    input: DEDUPE_CONTEXT,
+    questions: Object.fromEntries(
+      candidates.map((candidate) => [
+        questionId(candidate),
+        matchQuestion(candidate),
+      ]),
+    ),
     timeoutMs,
   });
   if (!result.ok) return unchanged(input, result.usage);
 
-  const applied = applyMatches(input, candidates, result.value.matches);
+  const applied = applyMatches(
+    input,
+    candidates,
+    confidentMatches(candidates, result.answers),
+  );
   const dropped = input.findings.length - applied.findings.length;
   const note =
     dropped > 0

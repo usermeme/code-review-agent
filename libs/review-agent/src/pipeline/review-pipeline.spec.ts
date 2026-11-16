@@ -1,5 +1,11 @@
 import { RepoWorkspace } from '@code-review-agent/agent-tools';
-import { createMockAgentModels } from '@code-review-agent/llm';
+import {
+  choiceAnswer,
+  createMockAgentModels,
+  type DecisionModel,
+  MockDecisionModel,
+  noulAnswer,
+} from '@code-review-agent/llm';
 import type { PRMeta } from '@code-review-agent/shared-types';
 import { ThinkingLevel } from '@google/genai';
 import { describe, expect, it, vi } from 'vitest';
@@ -55,13 +61,14 @@ function workspaces(path = 'src/charge.ts') {
   return { diffWorkspace, loadWorkspace };
 }
 
+/** Triage picks `tier` and rates the given changed files as likely defects. */
 function triageSays(tier: string, focusFiles: string[] = []) {
-  return new ScriptedLlm([
-    () =>
-      createTextResponse(
-        JSON.stringify({ tier, reason: `Triage chose ${tier}.`, focusFiles }),
-      ),
-  ]);
+  return new MockDecisionModel((id, question) => {
+    if (id === 'tier') return choiceAnswer(question, tier);
+    const asked = JSON.stringify(question.instructions);
+    const isFocus = focusFiles.some((path) => asked.includes(`\`${path}\``));
+    return noulAnswer(isFocus ? 0.9 : 0.1);
+  });
 }
 
 function reviewerSubmits() {
@@ -107,7 +114,7 @@ describe('runReviewPipeline', () => {
     );
 
     expect(result.publish?.reviewResult.summary).toContain(
-      'Triage chose skip.',
+      'No runtime behavior can change (triage confidence 90%).',
     );
     expect(result.metrics.route.source).toBe('triage');
     expect(loadWorkspace).not.toHaveBeenCalled();
@@ -141,9 +148,12 @@ describe('runReviewPipeline', () => {
     );
   });
 
-  it('fails open to a deep review when triage returns garbage', async () => {
+  it('fails open to a deep review when the triage call fails', async () => {
     const reviewer = reviewerSubmits();
-    const triage = new ScriptedLlm([() => createTextResponse('not json')]);
+    const triage: DecisionModel = {
+      model: 'failing',
+      decide: () => Promise.reject(new Error('404 model not found')),
+    };
     const { diffWorkspace, loadWorkspace } = workspaces();
 
     const result = await runReviewPipeline(
@@ -399,21 +409,12 @@ describe('runReviewPipeline thread dedup', () => {
       finding('Division by zero', 'major'),
       finding('Wrong rounding', 'major'),
     );
-    const triage = new ScriptedLlm([
-      () =>
-        createTextResponse(
-          JSON.stringify({ tier: 'deep', reason: 'Money.', focusFiles: [] }),
-        ),
-      () =>
-        createTextResponse(
-          JSON.stringify({
-            matches: [
-              { findingId: 0, threadId: 'T1' },
-              { findingId: 1, threadId: 'none' },
-            ],
-          }),
-        ),
-    ]);
+    // One decision model serves triage (tier) and dedupe (finding_N).
+    const triage = new MockDecisionModel((id, question) => {
+      if (id === 'tier') return choiceAnswer(question, 'deep');
+      if (id === 'finding_0') return choiceAnswer(question, 'T1');
+      return undefined;
+    });
     const verifier = verifierSays({
       verdicts: [{ id: 0, verdict: 'keep', reason: 'Real.' }],
     });
