@@ -6,7 +6,9 @@
     "production": ["default"],
     "sharedGlobals": []
   },
-  "tui": { "enabled": false },
+  "tui": {
+    "enabled": false
+  },
   "targetDefaults": {
     "@nx/esbuild:esbuild": {
       "cache": true,
@@ -28,5 +30,8 @@
         "targetName": "eslint:lint"
       }
     }
-  ]
+  ],
+  "affected": {
+    "legacy": true
+  }
 }
