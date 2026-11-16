@@ -69,7 +69,7 @@ describe('Gemini API version', () => {
 });
 
 describe('modelConfigSchema', () => {
-  it('defaults TRIAGE_MODEL to the decision model', () => {
+  it('defaults TRIAGE_MODEL to the cheap triage model', () => {
     const config = modelConfigSchema.parse(BASE_CONFIG);
     expect(config.TRIAGE_MODEL).toBe(DEFAULT_TRIAGE_MODEL);
   });
