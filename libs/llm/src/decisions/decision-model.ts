@@ -61,6 +61,42 @@ function resourceName(model: string): string {
   return model.startsWith('models/') ? model : `models/${model}`;
 }
 
+interface HttpError {
+  statusCode: number;
+  body?: unknown;
+}
+
+function isHttpError(error: unknown): error is HttpError {
+  return (
+    error instanceof Error &&
+    typeof (error as Partial<HttpError>).statusCode === 'number'
+  );
+}
+
+/** The `error.message` of a Google API error body, if the body is one. */
+function apiErrorMessage(body: unknown): string | undefined {
+  if (typeof body !== 'string') return undefined;
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: unknown } };
+    const message = parsed.error?.message;
+    return typeof message === 'string' ? message : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The genai SDK puts the whole HTTP body into its error messages. This keeps
+ * the status and the API's own message, short enough for a route reason.
+ */
+function conciseError(error: unknown): unknown {
+  if (!isHttpError(error)) return error;
+  const message = apiErrorMessage(error.body) ?? 'request failed';
+  return new Error(`Decisions API ${error.statusCode}: ${message}`, {
+    cause: error,
+  });
+}
+
 /** {@link DecisionModel} backed by the Gemini Decisions API (`POST /decisions`). */
 export class GeminiDecisionModel implements DecisionModel {
   constructor(
@@ -70,15 +106,19 @@ export class GeminiDecisionModel implements DecisionModel {
   ) {}
 
   async decide(request: DecisionRequest): Promise<DecisionResponse> {
-    const response = await this.client.decisions.create(
-      {
-        api_version: this.apiVersion,
-        model: resourceName(this.model),
-        input: request.input,
-        questions: request.questions,
-      },
-      { signal: request.abortSignal },
-    );
+    const response = await this.client.decisions
+      .create(
+        {
+          api_version: this.apiVersion,
+          model: resourceName(this.model),
+          input: request.input,
+          questions: request.questions,
+        },
+        { signal: request.abortSignal },
+      )
+      .catch((error: unknown) => {
+        throw conciseError(error);
+      });
     assertNotBlocked(response);
     return {
       answers: response.answers ?? {},

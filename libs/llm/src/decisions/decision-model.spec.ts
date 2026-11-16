@@ -100,4 +100,25 @@ describe('GeminiDecisionModel', () => {
       }),
     ).rejects.toThrow('Decision input blocked (safety): Blocked.');
   });
+
+  it('shortens an API error to its status and message', async () => {
+    const apiError = Object.assign(new Error('API error occurred: <body>'), {
+      statusCode: 404,
+      body: JSON.stringify({
+        error: { code: 404, message: 'models/gone is not found.' },
+      }),
+    });
+    const create = vi.fn().mockRejectedValue(apiError);
+    const client = { decisions: { create } } as unknown as Pick<
+      GoogleGenAI,
+      'decisions'
+    >;
+
+    await expect(
+      new GeminiDecisionModel(client, 'gone', 'v1beta').decide({
+        input: 'diff',
+        questions: QUESTIONS,
+      }),
+    ).rejects.toThrow(/^Decisions API 404: models\/gone is not found\.$/);
+  });
 });
