@@ -1,6 +1,6 @@
 import { addUsageMetadata, emptyTokenUsage } from '@code-review-agent/llm';
 import type { TokenUsage } from '@code-review-agent/shared-types';
-import { InMemoryRunner, type LlmAgent } from '@google/adk';
+import { type Event, InMemoryRunner, type LlmAgent } from '@google/adk';
 import type { GenerateContentConfig, ThinkingLevel } from '@google/genai';
 
 export interface AgentSessionOptions {
@@ -27,6 +27,22 @@ export function thinkingConfig(thinkingLevel: ThinkingLevel | undefined): {
   return { generateContentConfig: { thinkingConfig: { thinkingLevel } } };
 }
 
+/**
+ * ADK turns a failed model call (HTTP 4xx/5xx, blocked prompt, empty
+ * candidate) into an event with `errorCode`/`errorMessage` and then ends the
+ * run quietly. Without this check such a run looks like an agent that simply
+ * never submitted.
+ */
+function assertNoErrorEvent(event: Event | undefined): void {
+  const { errorCode, errorMessage } = event ?? {};
+  if (!errorCode && !errorMessage) return;
+  throw new Error(describeErrorEvent(errorCode, errorMessage));
+}
+
+function describeErrorEvent(code?: string, message?: string): string {
+  return `Model call failed (${code || 'agent_error'}): ${message || 'unknown error'}`;
+}
+
 async function drive(
   runner: InMemoryRunner,
   options: AgentSessionOptions,
@@ -46,6 +62,7 @@ async function drive(
   });
   for await (const event of events) {
     addUsageMetadata(usage, event?.usageMetadata);
+    assertNoErrorEvent(event);
     if (options.isDone()) break;
   }
 }
