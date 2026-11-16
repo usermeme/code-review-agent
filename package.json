@@ -53,5 +53,10 @@
     "tar": "^7.5.23",
     "zod": "^4.6.7"
   },
-  "type": "module"
+  "type": "module",
+  "pnpm": {
+    "overrides": {
+      "@opentelemetry/api": "1.9.1"
+    }
+  }
 }
