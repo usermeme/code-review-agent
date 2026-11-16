@@ -11,6 +11,11 @@ import {
   PostReviewOptions,
   PostReviewResult,
 } from './interfaces/github.interface.js';
+import {
+  decideReviewEvent,
+  dismissOwnApprovals,
+  type ReviewEvent,
+} from './review-approval.js';
 import { fetchReviewThreads } from './review-threads.query.js';
 
 export interface GithubServiceDependencies {
@@ -31,7 +36,20 @@ interface InlineCommentCounts {
   failedComments: number;
 }
 
-type ReviewSubmission = { reviewId: string } | { failure: PostReviewResult };
+/** A posted review, with the bot login GitHub reports for it when known. */
+interface PostedReview {
+  reviewId: string;
+  login?: string;
+  /** Omitted for the issue-comment fallback, which is neither. */
+  event?: ReviewEvent;
+}
+
+type ReviewSubmission = PostedReview | { failure: PostReviewResult };
+
+interface PublishedReview {
+  result: PostReviewResult;
+  login?: string;
+}
 
 export function formatError(error: unknown): string {
   return error instanceof Error
@@ -205,18 +223,41 @@ export class GithubService implements GitAdapterContract {
   }
 
   async postReview(options: PostReviewOptions): Promise<PostReviewResult> {
-    const { owner, repo, prNumber, summary, comments } = options;
+    const { owner, repo, summary, comments } = options;
 
     const octokit = await this.authService.getOctokit(owner, repo);
-    const body = buildReviewBody(summary, comments);
     const commitId = await this.resolveHeadCommitId(
       octokit,
       owner,
       repo,
-      prNumber,
+      options.prNumber,
     );
+    const decision = await decideReviewEvent(octokit, options, commitId);
+    const body = buildReviewBody(summary, comments) + decision.note;
 
-    const batchedReviewId = await this.tryBatchReview(
+    const published = await this.publishReview(
+      octokit,
+      options,
+      body,
+      commitId,
+      decision.event,
+    );
+    // An earlier approval no longer holds once a newer review finds issues.
+    if (published.login && comments.length > 0) {
+      await dismissOwnApprovals(octokit, options, published.login);
+    }
+    return published.result;
+  }
+
+  private async publishReview(
+    octokit: Octokit,
+    options: PostReviewOptions,
+    body: string,
+    commitId: string | undefined,
+    event: ReviewEvent,
+  ): Promise<PublishedReview> {
+    const { owner, repo, prNumber, comments } = options;
+    const batched = await this.tryBatchReview(
       octokit,
       owner,
       repo,
@@ -225,11 +266,15 @@ export class GithubService implements GitAdapterContract {
       commitId,
       comments,
     );
-    if (batchedReviewId) {
+    if (batched) {
       return {
-        success: true,
-        message: 'Review posted successfully',
-        reviewId: batchedReviewId,
+        result: {
+          success: true,
+          message: 'Review posted successfully',
+          reviewId: batched.reviewId,
+          event: 'COMMENT',
+        },
+        login: batched.login,
       };
     }
 
@@ -241,6 +286,7 @@ export class GithubService implements GitAdapterContract {
       body,
       commitId,
       comments,
+      event,
     );
   }
 
@@ -252,7 +298,7 @@ export class GithubService implements GitAdapterContract {
     body: string,
     commitId: string | undefined,
     comments: ReviewComment[] | undefined,
-  ): Promise<string | undefined> {
+  ): Promise<PostedReview | undefined> {
     if (!hasBatchableComments(commitId, comments)) {
       return undefined;
     }
@@ -266,7 +312,10 @@ export class GithubService implements GitAdapterContract {
         commit_id: commitId,
         comments: comments.map(toReviewCommentParams),
       });
-      return String(reviewRes.data.id);
+      return {
+        reviewId: String(reviewRes.data.id),
+        login: reviewRes.data.user?.login,
+      };
     } catch (err) {
       if (isRetryableGithubError(err)) {
         throw err;
@@ -283,17 +332,19 @@ export class GithubService implements GitAdapterContract {
     body: string,
     commitId: string | undefined,
     comments: ReviewComment[] | undefined,
-  ): Promise<PostReviewResult> {
-    const submission = await this.submitReviewWithFallback(
+    event: ReviewEvent,
+  ): Promise<PublishedReview> {
+    const submission = await this.submitReview(
       octokit,
       owner,
       repo,
       prNumber,
       body,
       commitId,
+      event,
     );
     if ('failure' in submission) {
-      return submission.failure;
+      return { result: submission.failure };
     }
 
     let counts: InlineCommentCounts = {
@@ -312,12 +363,16 @@ export class GithubService implements GitAdapterContract {
     }
 
     return {
-      success: true,
-      message: buildPostedReviewMessage(
-        counts.postedComments,
-        counts.failedComments,
-      ),
-      reviewId: submission.reviewId,
+      result: {
+        success: true,
+        message: buildPostedReviewMessage(
+          counts.postedComments,
+          counts.failedComments,
+        ),
+        reviewId: submission.reviewId,
+        event: submission.event,
+      },
+      login: submission.login,
     };
   }
 
@@ -340,6 +395,61 @@ export class GithubService implements GitAdapterContract {
     }
   }
 
+  private async createFormalReview(
+    octokit: Octokit,
+    pr: { owner: string; repo: string; prNumber: number },
+    body: string,
+    commitId: string | undefined,
+    event: ReviewEvent,
+  ): Promise<PostedReview> {
+    const reviewRes = await octokit.rest.pulls.createReview({
+      owner: pr.owner,
+      repo: pr.repo,
+      pull_number: pr.prNumber,
+      body,
+      event,
+      ...(commitId ? { commit_id: commitId } : {}),
+    });
+    return {
+      reviewId: String(reviewRes.data.id),
+      login: reviewRes.data.user?.login,
+      event,
+    };
+  }
+
+  /** Approves when asked; a rejected approval still posts as a comment. */
+  private async submitReview(
+    octokit: Octokit,
+    owner: string,
+    repo: string,
+    prNumber: number,
+    body: string,
+    commitId: string | undefined,
+    event: ReviewEvent,
+  ): Promise<ReviewSubmission> {
+    const fallback = () =>
+      this.submitReviewWithFallback(
+        octokit,
+        owner,
+        repo,
+        prNumber,
+        body,
+        commitId,
+      );
+    if (event !== 'APPROVE') return fallback();
+    try {
+      const pr = { owner, repo, prNumber };
+      return await this.createFormalReview(octokit, pr, body, commitId, event);
+    } catch (approveErr) {
+      if (isRetryableGithubError(approveErr)) throw approveErr;
+      console.warn(
+        `[GithubService] Approval rejected, posting as a comment instead:`,
+        approveErr,
+      );
+      return fallback();
+    }
+  }
+
   private async submitReviewWithFallback(
     octokit: Octokit,
     owner: string,
@@ -349,15 +459,14 @@ export class GithubService implements GitAdapterContract {
     commitId: string | undefined,
   ): Promise<ReviewSubmission> {
     try {
-      const reviewRes = await octokit.rest.pulls.createReview({
-        owner,
-        repo,
-        pull_number: prNumber,
+      const pr = { owner, repo, prNumber };
+      return await this.createFormalReview(
+        octokit,
+        pr,
         body,
-        event: 'COMMENT',
-        ...(commitId ? { commit_id: commitId } : {}),
-      });
-      return { reviewId: String(reviewRes.data.id) };
+        commitId,
+        'COMMENT',
+      );
     } catch (reviewErr) {
       if (isRetryableGithubError(reviewErr)) {
         throw reviewErr;

@@ -12,12 +12,16 @@ describe('GithubService (Adapter)', () => {
     getOctokit: ReturnType<typeof vi.fn>;
   };
   let mockOctokit: {
+    graphql: ReturnType<typeof vi.fn>;
+    paginate: ReturnType<typeof vi.fn>;
     rest: {
       pulls: {
         get: ReturnType<typeof vi.fn>;
         listFiles: ReturnType<typeof vi.fn>;
         createReview: ReturnType<typeof vi.fn>;
         createReviewComment: ReturnType<typeof vi.fn>;
+        listReviews: ReturnType<typeof vi.fn>;
+        dismissReview: ReturnType<typeof vi.fn>;
       };
       repos: {
         downloadTarballArchive: ReturnType<typeof vi.fn>;
@@ -31,12 +35,16 @@ describe('GithubService (Adapter)', () => {
 
   beforeEach(() => {
     mockOctokit = {
+      graphql: vi.fn(),
+      paginate: vi.fn().mockResolvedValue([]),
       rest: {
         pulls: {
           get: vi.fn(),
           listFiles: vi.fn(),
           createReview: vi.fn(),
           createReviewComment: vi.fn(),
+          listReviews: vi.fn(),
+          dismissReview: vi.fn().mockResolvedValue({}),
         },
         repos: {
           downloadTarballArchive: vi.fn(),
@@ -240,5 +248,118 @@ describe('GithubService (Adapter)', () => {
         comments: [],
       }),
     ).rejects.toBe(rateLimitError);
+  });
+
+  describe('approvals', () => {
+    const BOT = 'review-bot[bot]';
+    const CLEAN = {
+      owner: 'acme',
+      repo: 'widget',
+      prNumber: 7,
+      summary: 'No issues found.',
+      comments: [],
+      approve: true,
+      reviewedSha: 'commit-sha-1',
+    };
+
+    function noThreads() {
+      mockOctokit.graphql.mockResolvedValue({
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [],
+            },
+          },
+        },
+      });
+    }
+
+    beforeEach(() => {
+      mockOctokit.rest.pulls.get.mockResolvedValue({
+        data: { head: { sha: 'commit-sha-1' } },
+      });
+      mockOctokit.rest.pulls.createReview.mockResolvedValue({
+        data: { id: 99, user: { login: BOT } },
+      });
+    });
+
+    it('approves a clean review on the reviewed commit', async () => {
+      noThreads();
+
+      const result = await service.postReview(CLEAN);
+
+      expect(result.event).toBe('APPROVE');
+      expect(mockOctokit.rest.pulls.createReview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'APPROVE',
+          commit_id: 'commit-sha-1',
+        }),
+      );
+    });
+
+    it('posts a comment with the reason when the head moved on', async () => {
+      mockOctokit.rest.pulls.get.mockResolvedValue({
+        data: { head: { sha: 'commit-sha-2' } },
+      });
+
+      const result = await service.postReview(CLEAN);
+
+      expect(result.event).toBe('COMMENT');
+      const params = mockOctokit.rest.pulls.createReview.mock.calls[0]?.[0];
+      expect(params.event).toBe('COMMENT');
+      expect(params.body).toContain('not approved: new commits were pushed');
+    });
+
+    it('still posts the review as a comment when GitHub rejects the approval', async () => {
+      noThreads();
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      mockOctokit.rest.pulls.createReview
+        .mockRejectedValueOnce(
+          Object.assign(new Error('Unprocessable Entity'), { status: 422 }),
+        )
+        .mockResolvedValueOnce({ data: { id: 100, user: { login: BOT } } });
+
+      const result = await service.postReview(CLEAN);
+
+      expect(result).toMatchObject({
+        success: true,
+        reviewId: '100',
+        event: 'COMMENT',
+      });
+      const events = mockOctokit.rest.pulls.createReview.mock.calls.map(
+        ([params]) => params.event,
+      );
+      expect(events).toEqual(['APPROVE', 'COMMENT']);
+    });
+
+    it("dismisses the bot's earlier approval when a new review has findings", async () => {
+      mockOctokit.paginate.mockResolvedValue([
+        { id: 5, state: 'APPROVED', user: { login: BOT } },
+      ]);
+
+      await service.postReview({
+        owner: 'acme',
+        repo: 'widget',
+        prNumber: 7,
+        summary: 'Found a bug.',
+        comments: [{ path: 'src/a.ts', line: 12, body: 'Bug' }],
+      });
+
+      expect(mockOctokit.rest.pulls.dismissReview).toHaveBeenCalledWith(
+        expect.objectContaining({ pull_number: 7, review_id: 5 }),
+      );
+    });
+
+    it('leaves earlier approvals alone when the new review has no findings', async () => {
+      mockOctokit.paginate.mockResolvedValue([
+        { id: 5, state: 'APPROVED', user: { login: BOT } },
+      ]);
+
+      await service.postReview({ ...CLEAN, approve: false });
+
+      expect(mockOctokit.paginate).not.toHaveBeenCalled();
+      expect(mockOctokit.rest.pulls.dismissReview).not.toHaveBeenCalled();
+    });
   });
 });
