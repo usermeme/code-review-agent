@@ -454,3 +454,68 @@ describe('runReviewPipeline thread dedup', () => {
     expect(out.reviewResult.summary).toContain('already raised');
   });
 });
+
+describe('runReviewPipeline approval', () => {
+  const HEAD = 'head-sha-1';
+
+  async function reviewAt(
+    models: Parameters<typeof createMockAgentModels>[0],
+    prMeta: PRMeta = { ...META, headSha: HEAD },
+  ) {
+    const { diffWorkspace, loadWorkspace } = workspaces();
+    return runReviewPipeline(
+      { prMeta, diffWorkspace, loadWorkspace },
+      { ...OPTIONS, models: createMockAgentModels(models) },
+    );
+  }
+
+  it('marks a completed review with zero findings for approval of the reviewed head', async () => {
+    const result = await reviewAt({
+      triage: triageSays('light'),
+      reviewer: reviewerSubmits(),
+    });
+
+    expect(published(result).reviewResult).toMatchObject({
+      approve: true,
+      reviewedSha: HEAD,
+    });
+  });
+
+  it('does not approve a review with findings', async () => {
+    const result = await reviewAt({
+      triage: triageSays('deep'),
+      reviewer: reviewerFinds(finding('Wrong rounding', 'minor')),
+      verifier: verifierSays({
+        verdicts: [{ id: 0, verdict: 'keep', reason: 'Real.' }],
+      }),
+    });
+
+    expect(published(result).reviewResult.approve).toBeUndefined();
+  });
+
+  it('does not approve a PR that triage skipped', async () => {
+    const result = await reviewAt({ triage: triageSays('skip') });
+
+    expect(published(result).reviewResult.approve).toBeUndefined();
+  });
+
+  it('does not approve a failed review', async () => {
+    const reviewer = new ScriptedLlm([
+      () => createTextResponse('I will not call submit_review.'),
+    ]);
+
+    const result = await reviewAt({ triage: triageSays('deep'), reviewer });
+
+    expect(published(result).reviewResult.failure).toBeDefined();
+    expect(published(result).reviewResult.approve).toBeUndefined();
+  });
+
+  it('does not approve when the reviewed head is unknown', async () => {
+    const result = await reviewAt(
+      { triage: triageSays('light'), reviewer: reviewerSubmits() },
+      META,
+    );
+
+    expect(published(result).reviewResult.approve).toBeUndefined();
+  });
+});
