@@ -252,6 +252,28 @@ describe('review-agent', () => {
     expect(result.reviewResult.comments).toEqual([]);
   });
 
+  it('reports the model error instead of a missing submission when a model call fails', async () => {
+    const workspace = createSampleWorkspace();
+    const llm = new ScriptedLlm([
+      () => {
+        throw new Error(
+          JSON.stringify({
+            error: { code: 404, message: 'models/gone is not found.' },
+          }),
+        );
+      },
+    ]);
+
+    const result = await runCodeReview(
+      { prMeta: SAMPLE_PR_META, workspace },
+      { model: llm },
+    );
+
+    expect(result.reviewResult.failure?.reason).toBe(
+      'Model call failed (404): models/gone is not found.',
+    );
+  });
+
   it('keeps the instruction PR-independent: guidelines in the instruction, prior findings and focus files in the user prompt', () => {
     const workspace = createSampleWorkspace();
     const instruction = buildReviewInstruction({ workspace });
