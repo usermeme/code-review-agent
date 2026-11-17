@@ -6,6 +6,7 @@ import {
 } from './diff-annotator.util.js';
 import { createPathMatcher, isIndexableFilePath } from './file-filter.util.js';
 import { extractRepoGuidelines } from './repo-guidelines.util.js';
+import { extractRepoSkillsIndex } from './repo-skills.util.js';
 
 export interface GrepCodeOptions {
   pattern: string;
@@ -435,6 +436,11 @@ export class RepoWorkspace {
 
   getRepoGuidelines(maxChars?: number): string {
     return extractRepoGuidelines(this.files, maxChars);
+  }
+
+  /** Names and paths of the repo's `SKILL.md` files, without their contents. */
+  getRepoSkillsIndex(maxSkills?: number): string {
+    return extractRepoSkillsIndex(this.files, maxSkills);
   }
 
   resolveCommentAnchor(
