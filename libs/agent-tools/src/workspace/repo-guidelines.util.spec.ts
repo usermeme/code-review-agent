@@ -22,6 +22,24 @@ describe('extractRepoGuidelines', () => {
     );
   });
 
+  it('includes a guideline file once when another file repeats it', () => {
+    const files = new Map<string, string[]>([
+      ['AGENTS.md', ['# Repo Rules', '- Use strict types']],
+      ['CLAUDE.md', ['# Repo Rules', '- Use strict types', '']],
+      ['.cursorrules', ['Prefer small functions']],
+    ]);
+
+    expect(extractRepoGuidelines(files)).toBe(
+      [
+        '### AGENTS.md',
+        '# Repo Rules\n- Use strict types',
+        '',
+        '### .cursorrules',
+        'Prefer small functions',
+      ].join('\n'),
+    );
+  });
+
   it('returns empty string when no guideline files exist', () => {
     const files = new Map<string, string[]>([
       ['src/index.ts', ['export const a = 1;']],

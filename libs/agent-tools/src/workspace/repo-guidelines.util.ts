@@ -17,41 +17,44 @@ function buildLowercasePathMap(
   return map;
 }
 
-function formatGuidelineSection(
+function readGuideline(
   files: Map<string, string[]>,
   actualPath: string | undefined,
 ): string | null {
   if (!actualPath) {
     return null;
   }
-  const lines = files.get(actualPath);
-  const content = lines?.join('\n').trim();
-  if (!content) {
-    return null;
+  const content = files.get(actualPath)?.join('\n').trim();
+  return content || null;
+}
+
+/** One `### path` section per guideline file, skipping repeated content. */
+function collectUniqueSections(files: Map<string, string[]>): string[] {
+  const pathLookup = buildLowercasePathMap(files);
+  const sections: string[] = [];
+  const seenContents = new Set<string>();
+  for (const candidate of GUIDELINE_CANDIDATE_PATHS) {
+    const actualPath = pathLookup.get(candidate);
+    const content = readGuideline(files, actualPath);
+    if (content && !seenContents.has(content)) {
+      seenContents.add(content);
+      sections.push(`### ${actualPath}\n${content}`);
+    }
   }
-  return `### ${actualPath}\n${content}`;
+  return sections;
 }
 
 /**
  * Extracts repository coding guidelines (`AGENTS.md`, `CLAUDE.md`,
  * `.github/copilot-instructions.md`, `.cursorrules`) directly from the
- * in-memory workspace without any LLM or network calls.
+ * in-memory workspace without any LLM or network calls. A file whose
+ * content repeats an earlier one (e.g. `CLAUDE.md` kept as a copy of
+ * `AGENTS.md`) is included once.
  */
 export function extractRepoGuidelines(
   files: Map<string, string[]>,
   maxChars = DEFAULT_MAX_GUIDELINE_CHARS,
 ): string {
-  const pathLookup = buildLowercasePathMap(files);
-  const sections: string[] = [];
-
-  for (const candidate of GUIDELINE_CANDIDATE_PATHS) {
-    const actualPath = pathLookup.get(candidate);
-    const section = formatGuidelineSection(files, actualPath);
-    if (section) {
-      sections.push(section);
-    }
-  }
-
-  const combined = sections.join('\n\n');
+  const combined = collectUniqueSections(files).join('\n\n');
   return combined.length > maxChars ? combined.slice(0, maxChars) : combined;
 }
