@@ -2,6 +2,7 @@ import type {
   CompareDiffResult,
   GitAdapterContract,
   PRDiffResult,
+  RepoTreeFilesResult,
   ReviewThread,
 } from '@code-review-agent/shared-types';
 import { Header, Pack, ReadEntry } from 'tar';
@@ -44,6 +45,9 @@ new file mode 100644
 `;
 
 export class InMemoryGitAdapterClient implements GitAdapterContract {
+  /** Files on the base branch, by path (guideline and skill sources). */
+  readonly baseFiles = new Map<string, string>();
+
   async getPRDiff(
     owner: string,
     repo: string,
@@ -84,6 +88,30 @@ export class InMemoryGitAdapterClient implements GitAdapterContract {
     void repo;
     void prNumber;
     return [];
+  }
+
+  async listTreeFiles(
+    owner: string,
+    repo: string,
+    ref: string,
+    names: string[],
+  ): Promise<RepoTreeFilesResult> {
+    void owner;
+    void repo;
+    void ref;
+    const wanted = new Set(names);
+    const files = [...this.baseFiles.keys()]
+      .filter((path) => wanted.has((path.split('/').pop() ?? '').toLowerCase()))
+      .map((path) => ({ path, blobSha: `blob:${path}` }));
+    return { files, truncated: false };
+  }
+
+  async getBlob(owner: string, repo: string, blobSha: string): Promise<string> {
+    void owner;
+    void repo;
+    const content = this.baseFiles.get(blobSha.replace(/^blob:/, ''));
+    if (content === undefined) throw new Error(`Unknown blob ${blobSha}`);
+    return content;
   }
 
   async getRepoTarball(

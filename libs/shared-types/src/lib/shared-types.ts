@@ -26,10 +26,97 @@ export interface ReviewRoute {
   source: 'rule' | 'triage' | 'fallback';
 }
 
+/**
+ * Where a review's rules came from: a stored context, a fresh build, no
+ * sources on the base branch, or the raw-guidelines fallback.
+ */
+export type ReviewContextOrigin = 'cache' | 'built' | 'empty' | 'fallback';
+
+/** How the review context was resolved for one review run. */
+export interface ReviewContextMetrics {
+  origin: ReviewContextOrigin;
+  /** Content hash of the base-branch sources; absent on early fallbacks. */
+  sourceHash?: string;
+  /** Rules in the whole context. */
+  ruleCount: number;
+  /** Rules that matched this PR's changed files and reached the prompts. */
+  selectedRules: number;
+  /** Why the raw guidelines were used instead of rules. */
+  fallbackReason?: string;
+}
+
 /** Per-review routing decision and token usage per agent role. */
 export interface ReviewMetrics {
   route: ReviewRoute;
-  usage: Partial<Record<'triage' | 'reviewer' | 'verifier', TokenUsage>>;
+  usage: Partial<
+    Record<'context' | 'triage' | 'reviewer' | 'verifier', TokenUsage>
+  >;
+  context?: ReviewContextMetrics;
+}
+
+export type FindingSeverity = 'critical' | 'major' | 'minor';
+
+/** Where in the repository a review rule was written down. */
+export interface ReviewRuleSource {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+}
+
+/**
+ * One review rule extracted from the repository's guideline and skill
+ * files: something a reviewer can check in a diff.
+ */
+export interface ReviewRule {
+  /** Stable slug, unique within one context. */
+  id: string;
+  rule: string;
+  /** Globs of the paths the rule covers; empty means the whole repository. */
+  appliesTo: string[];
+  severity: FindingSeverity;
+  source: ReviewRuleSource;
+}
+
+export type ReviewContextSourceKind = 'guideline' | 'skill';
+
+/** A guideline or skill file a review context was built from. */
+export interface ReviewContextSource {
+  path: string;
+  kind: ReviewContextSourceKind;
+  /** Git blob SHA of the file on the base branch. */
+  blobSha: string;
+  chars: number;
+}
+
+/** A source file the builder left out, and why. */
+export interface DiscardedContextSource {
+  path: string;
+  reason: string;
+}
+
+/**
+ * A stored review context (Firestore `review_contexts`). Content-addressed:
+ * the id ends in `sourceHash`, and a document is never changed once written.
+ */
+export interface ReviewContextDoc {
+  provider: string;
+  owner: string;
+  repo: string;
+  sourceHash: string;
+  builderVersion: number;
+  status: 'ready' | 'failed';
+  sources: ReviewContextSource[];
+  rules: ReviewRule[];
+  discarded: DiscardedContextSource[];
+  model: string;
+  usage: TokenUsage;
+  builtAt: Date;
+  /** Firestore TTL field; the context is rebuilt once after it expires. */
+  expireAt: Date;
+  /** Set when `status` is `failed`. */
+  error?: string;
+  /** Epoch ms after which a `failed` context may be rebuilt. */
+  retryAfterMs?: number;
 }
 
 export interface PRState {
@@ -136,6 +223,19 @@ export interface CompareDiffResult extends PRDiffResult {
   status: 'ahead' | 'behind' | 'diverged' | 'identical';
 }
 
+/** A file in a git tree, identified by its blob SHA. */
+export interface RepoTreeFile {
+  path: string;
+  blobSha: string;
+}
+
+/** Files of a ref's tree whose basename matched the requested names. */
+export interface RepoTreeFilesResult {
+  files: RepoTreeFile[];
+  /** True when the provider returned only part of a very large tree. */
+  truncated: boolean;
+}
+
 export interface GitAdapterContract {
   getPRDiff(
     owner: string,
@@ -154,6 +254,18 @@ export interface GitAdapterContract {
     base: string,
     head: string,
   ): Promise<CompareDiffResult>;
+  /**
+   * Lists the files of `ref`'s tree whose lowercased basename is one of
+   * `names` (e.g. `agents.md`, `skill.md`).
+   */
+  listTreeFiles(
+    owner: string,
+    repo: string,
+    ref: string,
+    names: string[],
+  ): Promise<RepoTreeFilesResult>;
+  /** UTF-8 content of a git blob. */
+  getBlob(owner: string, repo: string, blobSha: string): Promise<string>;
 }
 
 /**

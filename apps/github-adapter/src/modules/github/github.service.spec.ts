@@ -27,6 +27,10 @@ describe('GithubService (Adapter)', () => {
         downloadTarballArchive: ReturnType<typeof vi.fn>;
         compareCommitsWithBasehead: ReturnType<typeof vi.fn>;
       };
+      git: {
+        getTree: ReturnType<typeof vi.fn>;
+        getBlob: ReturnType<typeof vi.fn>;
+      };
       issues: {
         createComment: ReturnType<typeof vi.fn>;
       };
@@ -49,6 +53,10 @@ describe('GithubService (Adapter)', () => {
         repos: {
           downloadTarballArchive: vi.fn(),
           compareCommitsWithBasehead: vi.fn(),
+        },
+        git: {
+          getTree: vi.fn(),
+          getBlob: vi.fn(),
         },
         issues: {
           createComment: vi.fn(),
@@ -106,6 +114,54 @@ describe('GithubService (Adapter)', () => {
     expect(
       mockOctokit.rest.repos.compareCommitsWithBasehead,
     ).toHaveBeenCalledWith(expect.objectContaining({ basehead: 'aaa...bbb' }));
+  });
+
+  it('lists the blobs of a ref whose basename matches, ignoring case', async () => {
+    mockOctokit.rest.git.getTree.mockResolvedValue({
+      data: {
+        truncated: false,
+        tree: [
+          { path: 'AGENTS.md', type: 'blob', sha: 'a1' },
+          { path: '.agents/skills/x/SKILL.md', type: 'blob', sha: 'b2' },
+          { path: 'src/index.ts', type: 'blob', sha: 'c3' },
+          { path: 'docs/agents.md', type: 'tree', sha: 'd4' },
+        ],
+      },
+    });
+
+    const result = await service.listTreeFiles('owner', 'repo', 'main', [
+      'agents.md',
+      'skill.md',
+    ]);
+
+    expect(mockOctokit.rest.git.getTree).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      tree_sha: 'main',
+      recursive: 'true',
+    });
+    expect(result).toEqual({
+      truncated: false,
+      files: [
+        { path: 'AGENTS.md', blobSha: 'a1' },
+        { path: '.agents/skills/x/SKILL.md', blobSha: 'b2' },
+      ],
+    });
+  });
+
+  it('decodes a base64 blob as UTF-8', async () => {
+    mockOctokit.rest.git.getBlob.mockResolvedValue({
+      data: { content: Buffer.from('Règle ✓', 'utf8').toString('base64') },
+    });
+
+    const content = await service.getBlob('owner', 'repo', 'a1');
+
+    expect(content).toBe('Règle ✓');
+    expect(mockOctokit.rest.git.getBlob).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      file_sha: 'a1',
+    });
   });
 
   it('downloads repo tarball archive', async () => {

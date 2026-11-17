@@ -38,6 +38,12 @@ export class MockOctokit {
     'diff --git a/src/index.ts b/src/index.ts\n--- a/src/index.ts\n+++ b/src/index.ts\n@@ -1,3 +1,4 @@\n+const x = 1;';
   public changedFiles = ['src/index.ts'];
   public headSha = 'mock-head-sha-12345';
+  /** Files of the default tree, by path; blob SHAs are `blob:<path>`. */
+  public treeFiles = new Map<string, string>([
+    ['AGENTS.md', '# Rules\nNever log tokens.'],
+    ['.agents/skills/testing/SKILL.md', '---\ndescription: Tests.\n---'],
+    ['src/index.ts', 'export const a = 1;'],
+  ]);
 
   rest = {
     pulls: {
@@ -93,6 +99,33 @@ export class MockOctokit {
           });
         }
         return { data: { id: this.postedReviews.length } };
+      },
+    },
+    git: {
+      getTree: async (_params: {
+        owner: string;
+        repo: string;
+        tree_sha: string;
+        recursive?: string;
+      }) => {
+        void _params;
+        const tree = [...this.treeFiles.keys()].map((path) => ({
+          path,
+          type: 'blob',
+          sha: `blob:${path}`,
+        }));
+        return { data: { tree, truncated: false } };
+      },
+      getBlob: async (params: {
+        owner: string;
+        repo: string;
+        file_sha: string;
+      }) => {
+        const content =
+          this.treeFiles.get(params.file_sha.replace(/^blob:/, '')) ?? '';
+        return {
+          data: { content: Buffer.from(content, 'utf8').toString('base64') },
+        };
       },
     },
     issues: {

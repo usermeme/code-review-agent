@@ -29,6 +29,13 @@ function resolveCommitSha(headers: Headers, ref?: string): string {
   return headers.get('x-github-commit-sha') || ref || 'main';
 }
 
+function parseNameList(names: string | undefined): string[] {
+  return (names ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
 function sendProviderError(
   fastify: FastifyInstance,
   reply: FastifyReply,
@@ -124,7 +131,49 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
     }
   });
 
-  // 4. Download Repository Tarball Archive
+  // 4. Files of a ref's tree with matching basenames (review context sources)
+  fastify.get<{
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/tree-files']['Params']
+    >;
+    Querystring: EndpointPayloadRecord['/api/v1/repos/:owner/:repo/tree-files']['Query'];
+  }>('/repos/:owner/:repo/tree-files', async (request, reply) => {
+    const { owner, repo } = request.params;
+    const { ref, names } = request.query;
+    const nameList = parseNameList(names);
+    if (!ref || nameList.length === 0) {
+      return reply.code(400).send({ error: 'ref and names are required' });
+    }
+
+    try {
+      return await githubService.listTreeFiles(owner, repo, ref, nameList);
+    } catch (error) {
+      return sendProviderError(
+        fastify,
+        reply,
+        'Failed to list tree files',
+        error,
+      );
+    }
+  });
+
+  // 5. Content of one git blob
+  fastify.get<{
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/blobs/:blobSha']['Params']
+    >;
+  }>('/repos/:owner/:repo/blobs/:blobSha', async (request, reply) => {
+    const { owner, repo, blobSha } = request.params;
+
+    try {
+      const content = await githubService.getBlob(owner, repo, blobSha);
+      return { blobSha, content };
+    } catch (error) {
+      return sendProviderError(fastify, reply, 'Failed to fetch blob', error);
+    }
+  });
+
+  // 6. Download Repository Tarball Archive
   fastify.get<{
     Params: NonNullable<
       EndpointPayloadRecord['/api/v1/repos/:owner/:repo/tarball']['Params']

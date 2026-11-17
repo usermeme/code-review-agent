@@ -38,6 +38,33 @@ export interface EndpointPayloadRecord {
       head: string;
     };
   };
+  '/api/v1/repos/:owner/:repo/tree-files': {
+    Path: {
+      owner: string;
+      repo: string;
+    };
+    Params?: {
+      owner: string;
+      repo: string;
+    };
+    Query: {
+      ref: string;
+      /** Comma-separated lowercased basenames, e.g. `agents.md,skill.md`. */
+      names: string;
+    };
+  };
+  '/api/v1/repos/:owner/:repo/blobs/:blobSha': {
+    Path: {
+      owner: string;
+      repo: string;
+      blobSha: string;
+    };
+    Params?: {
+      owner: string;
+      repo: string;
+      blobSha: string;
+    };
+  };
   '/api/v1/repos/:owner/:repo/tarball': {
     Path: {
       owner: string;
@@ -76,6 +103,8 @@ export const ENDPOINTS = {
   PR_THREADS: '/api/v1/repos/:owner/:repo/pulls/:prNumber/threads',
   TARBALL: '/api/v1/repos/:owner/:repo/tarball',
   COMPARE: '/api/v1/repos/:owner/:repo/compare',
+  TREE_FILES: '/api/v1/repos/:owner/:repo/tree-files',
+  BLOB: '/api/v1/repos/:owner/:repo/blobs/:blobSha',
   PUBSUB_PR_EVENTS: '/api/v1/pubsub/pr-events',
   PUBSUB_REVIEW_RESULTS: '/api/v1/pubsub/review-results',
   WEBHOOKS: '/api/v1/webhooks',

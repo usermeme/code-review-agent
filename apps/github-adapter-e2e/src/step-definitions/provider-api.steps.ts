@@ -34,3 +34,25 @@ Then(
     );
   },
 );
+
+Then(
+  'the response lists the files {string}',
+  function (this: GithubAdapterWorld, paths: string) {
+    assert(this.lastResponse, 'No HTTP response received');
+    const json = this.lastResponse.json();
+    const listed = json.files.map((file: { path: string }) => file.path);
+    assert.deepEqual(listed, paths.split(', '));
+    assert.equal(json.truncated, false);
+  },
+);
+
+Then(
+  'the response content is {string}',
+  function (this: GithubAdapterWorld, content: string) {
+    assert(this.lastResponse, 'No HTTP response received');
+    assert.equal(
+      this.lastResponse.json().content,
+      content.replace(/\\n/g, '\n'),
+    );
+  },
+);

@@ -2,6 +2,7 @@ import type {
   CompareDiffResult,
   GitAdapterContract,
   PRDiffResult,
+  RepoTreeFilesResult,
   ReviewThread,
 } from '@code-review-agent/shared-types';
 import { Octokit } from 'octokit';
@@ -49,6 +50,11 @@ type ReviewSubmission = PostedReview | { failure: PostReviewResult };
 interface PublishedReview {
   result: PostReviewResult;
   login?: string;
+}
+
+/** Lowercased last segment of a repository path. */
+function basename(path: string): string {
+  return (path.split('/').pop() ?? '').toLowerCase();
 }
 
 export function formatError(error: unknown): string {
@@ -185,6 +191,37 @@ export class GithubService implements GitAdapterContract {
       repo,
       number: prNumber,
     });
+  }
+
+  async listTreeFiles(
+    owner: string,
+    repo: string,
+    ref: string,
+    names: string[],
+  ): Promise<RepoTreeFilesResult> {
+    const octokit = await this.authService.getOctokit(owner, repo);
+    const { data } = await octokit.rest.git.getTree({
+      owner,
+      repo,
+      tree_sha: ref,
+      recursive: 'true',
+    });
+    const wanted = new Set(names.map((name) => name.toLowerCase()));
+    const files = data.tree
+      .filter((entry) => entry.type === 'blob' && entry.path && entry.sha)
+      .filter((entry) => wanted.has(basename(entry.path ?? '')))
+      .map((entry) => ({ path: entry.path ?? '', blobSha: entry.sha ?? '' }));
+    return { files, truncated: data.truncated };
+  }
+
+  async getBlob(owner: string, repo: string, blobSha: string): Promise<string> {
+    const octokit = await this.authService.getOctokit(owner, repo);
+    const { data } = await octokit.rest.git.getBlob({
+      owner,
+      repo,
+      file_sha: blobSha,
+    });
+    return Buffer.from(data.content, 'base64').toString('utf8');
   }
 
   async getRepoTarball(

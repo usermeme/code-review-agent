@@ -4,6 +4,7 @@ import {
   type GitAdapterContract,
   NonRetryableTaskError,
   type PRDiffResult,
+  type RepoTreeFilesResult,
   type ReviewThread,
 } from '@code-review-agent/shared-types';
 
@@ -76,6 +77,27 @@ export class GitAdapterClient implements GitAdapterContract {
       Path: { owner, repo, prNumber },
     });
     return this.fetchJson<ReviewThread[]>(path, 'fetch PR review threads');
+  }
+
+  async listTreeFiles(
+    owner: string,
+    repo: string,
+    ref: string,
+    names: string[],
+  ): Promise<RepoTreeFilesResult> {
+    const path = interpolatePath(ENDPOINTS.TREE_FILES, {
+      Path: { owner, repo },
+      Query: { ref, names: names.join(',') },
+    });
+    return this.fetchJson<RepoTreeFilesResult>(path, 'list tree files');
+  }
+
+  async getBlob(owner: string, repo: string, blobSha: string): Promise<string> {
+    const path = interpolatePath(ENDPOINTS.BLOB, {
+      Path: { owner, repo, blobSha },
+    });
+    const body = await this.fetchJson<{ content: string }>(path, 'fetch blob');
+    return body.content;
   }
 
   async getRepoTarball(

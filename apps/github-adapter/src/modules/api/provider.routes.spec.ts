@@ -140,4 +140,60 @@ describe('providerRoutes', () => {
       nonRetryable: true,
     });
   });
+  it('GET /repos/:owner/:repo/tree-files lists matching files of a ref', async () => {
+    const listing = {
+      files: [{ path: 'AGENTS.md', blobSha: 'a1' }],
+      truncated: false,
+    };
+    mockGithubService.listTreeFiles = vi.fn().mockResolvedValue(listing);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/tree-files?ref=main&names=agents.md,%20skill.md',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual(listing);
+    expect(mockGithubService.listTreeFiles).toHaveBeenCalledWith(
+      'test-owner',
+      'test-repo',
+      'main',
+      ['agents.md', 'skill.md'],
+    );
+  });
+
+  it('GET /repos/:owner/:repo/tree-files requires ref and names', async () => {
+    mockGithubService.listTreeFiles = vi.fn();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/tree-files?ref=main&names=',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(mockGithubService.listTreeFiles).not.toHaveBeenCalled();
+  });
+
+  it('GET /repos/:owner/:repo/blobs/:blobSha returns the blob content', async () => {
+    mockGithubService.getBlob = vi.fn().mockResolvedValue('# Rules');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/blobs/a1',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ blobSha: 'a1', content: '# Rules' });
+  });
+
+  it('GET /repos/:owner/:repo/blobs/:blobSha reports a provider failure', async () => {
+    mockGithubService.getBlob = vi.fn().mockRejectedValue(new Error('boom'));
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/blobs/a1',
+    });
+
+    expect(res.statusCode).toBe(500);
+  });
 });

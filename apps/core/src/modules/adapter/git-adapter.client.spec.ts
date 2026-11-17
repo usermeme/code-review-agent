@@ -72,6 +72,41 @@ describe('GitAdapterClient', () => {
     expect(result).toEqual(compare);
   });
 
+  it('lists base-branch tree files by name', async () => {
+    const listing = {
+      files: [{ path: 'AGENTS.md', blobSha: 'a1' }],
+      truncated: false,
+    };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue(listing),
+    });
+
+    const result = await client.listTreeFiles('owner', 'repo', 'main', [
+      'agents.md',
+      'skill.md',
+    ]);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://adapter:8080/api/v1/repos/owner/repo/tree-files?ref=main&names=agents.md%2Cskill.md',
+    );
+    expect(result).toEqual(listing);
+  });
+
+  it('fetches blob content', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ blobSha: 'a1', content: '# Rules' }),
+    });
+
+    const content = await client.getBlob('owner', 'repo', 'a1');
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://adapter:8080/api/v1/repos/owner/repo/blobs/a1',
+    );
+    expect(content).toBe('# Rules');
+  });
+
   it('fetches repo tarball successfully', async () => {
     const mockResponse = {
       ok: true,
