@@ -67,18 +67,20 @@ describe('GithubService (Adapter)', () => {
     service = new GithubService(deps);
   });
 
-  it('fetches PR diff and changed files', async () => {
+  it('fetches PR diff and every changed file across pages', async () => {
     mockOctokit.rest.pulls.get.mockResolvedValue({
       data: 'diff --git a/foo.ts b/foo.ts',
     });
-    mockOctokit.rest.pulls.listFiles.mockResolvedValue({
-      data: [{ filename: 'foo.ts' }],
-    });
+    const files = Array.from({ length: 31 }, (_, index) => ({
+      filename: `src/file-${index}.ts`,
+    }));
+    mockOctokit.paginate.mockResolvedValue(files);
 
     const result = await service.getPRDiff('owner', 'repo', 1);
 
     expect(result.diff).toBe('diff --git a/foo.ts b/foo.ts');
-    expect(result.changedFiles).toEqual(['foo.ts']);
+    expect(result.changedFiles).toHaveLength(31);
+    expect(result.changedFiles[30]).toBe('src/file-30.ts');
     expect(mockAuthService.getOctokit).toHaveBeenCalledWith('owner', 'repo');
     expect(mockOctokit.rest.pulls.get).toHaveBeenCalledWith({
       owner: 'owner',
@@ -86,6 +88,10 @@ describe('GithubService (Adapter)', () => {
       pull_number: 1,
       mediaType: { format: 'diff' },
     });
+    expect(mockOctokit.paginate).toHaveBeenCalledWith(
+      mockOctokit.rest.pulls.listFiles,
+      { owner: 'owner', repo: 'repo', pull_number: 1, per_page: 100 },
+    );
   });
 
   it('compares two commits, returning the diff, changed files and status', async () => {

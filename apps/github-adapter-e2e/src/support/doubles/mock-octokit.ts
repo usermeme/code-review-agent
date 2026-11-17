@@ -39,6 +39,12 @@ export class MockOctokit {
   public changedFiles = ['src/index.ts'];
   public headSha = 'mock-head-sha-12345';
 
+  /** Single-page stand-in for Octokit's paginate: returns the method's data. */
+  paginate = async <Params, Item>(
+    method: (params: Params) => Promise<{ data: Item[] }>,
+    params: Params,
+  ): Promise<Item[]> => (await method(params)).data;
+
   rest = {
     pulls: {
       get: async (params: {
