@@ -27,6 +27,14 @@ export class FirestoreDatabaseService implements IDatabaseService {
     await docRef.set(data, { merge: true });
   }
 
+  async replaceDocument<T extends object>(
+    collection: string,
+    docId: string,
+    data: T,
+  ): Promise<void> {
+    await this.firestore.collection(collection).doc(docId).set(data);
+  }
+
   async getDocument<T>(collection: string, docId: string): Promise<T | null> {
     const doc = await this.firestore.collection(collection).doc(docId).get();
     if (!doc.exists) {

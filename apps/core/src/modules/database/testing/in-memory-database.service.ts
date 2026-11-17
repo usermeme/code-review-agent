@@ -27,6 +27,16 @@ export class InMemoryDatabaseService implements DatabaseService {
     });
   }
 
+  async replaceDocument<T extends object>(
+    collection: string,
+    docId: string,
+    data: T,
+  ): Promise<void> {
+    this.collection(collection).set(docId, {
+      ...(data as Record<string, unknown>),
+    });
+  }
+
   async getDocument<T>(collection: string, docId: string): Promise<T | null> {
     return (
       (this.collections.get(collection)?.get(docId) as T | undefined) ?? null

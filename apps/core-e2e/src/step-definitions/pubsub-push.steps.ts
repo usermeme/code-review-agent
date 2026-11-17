@@ -55,7 +55,7 @@ When(
         repoFullName,
         prNumber,
         action,
-        `msg-${Date.now()}`,
+        this.nextMessageId(),
       ),
     });
   },

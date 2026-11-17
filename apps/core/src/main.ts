@@ -8,7 +8,9 @@ import { GitAdapterClient } from './modules/adapter/git-adapter.client.js';
 import { FirestoreDatabaseService } from './modules/database/firestore.service.js';
 import { DeliveryRepository } from './modules/database/repositories/delivery.repository.js';
 import { PrRepository } from './modules/database/repositories/pr.repository.js';
+import { ReviewContextRepository } from './modules/database/repositories/review-context.repository.js';
 import { EventOrchestratorService } from './services/event-orchestrator.service.js';
+import { ReviewContextService } from './services/review-context.service.js';
 
 async function bootstrap() {
   const host = envService.get('HOST');
@@ -23,6 +25,11 @@ async function bootstrap() {
     envService.get('GIT_ADAPTER_URL'),
   );
   const models = createAgentModels(envService.data);
+  const reviewContextService = new ReviewContextService({
+    gitAdapterClient,
+    repository: new ReviewContextRepository(databaseService),
+    model: models.triage,
+  });
 
   const orchestrator = new EventOrchestratorService({
     envService,
@@ -30,6 +37,7 @@ async function bootstrap() {
     prRepository,
     gitAdapterClient,
     models,
+    reviewContextService,
   });
 
   const server = await buildCoreServer({

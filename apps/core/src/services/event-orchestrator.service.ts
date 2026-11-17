@@ -5,6 +5,7 @@ import {
 import type { AgentModels } from '@code-review-agent/llm';
 import {
   DEFAULT_REVIEW_TIMEOUT_MS,
+  type ResolvedReviewContext,
   type ReviewAgentResult,
   type ReviewPipelineResult,
   runReviewPipeline,
@@ -26,6 +27,7 @@ import { FastifyBaseLogger } from 'fastify';
 
 import type { CoreEnvService } from '../env.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
+import type { ReviewContextService } from './review-context.service.js';
 
 export interface PREventResult {
   success: boolean;
@@ -39,6 +41,8 @@ export interface EventOrchestratorDependencies {
   pubsub: PubSub;
   gitAdapterClient: GitAdapterContract;
   models: AgentModels;
+  /** Builds review rules from base-branch guidelines; raw guidelines without it. */
+  reviewContextService?: ReviewContextService;
 }
 
 const REVIEW_ACTIONS = new Set([
@@ -91,6 +95,7 @@ export class EventOrchestratorService {
   private readonly envService: CoreEnvService;
   private readonly gitAdapterClient: GitAdapterContract;
   private readonly models: AgentModels;
+  private readonly reviewContextService?: ReviewContextService;
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub;
@@ -98,6 +103,7 @@ export class EventOrchestratorService {
     this.envService = deps.envService;
     this.gitAdapterClient = deps.gitAdapterClient;
     this.models = deps.models;
+    this.reviewContextService = deps.reviewContextService;
   }
 
   async ingestPREvent(
@@ -295,6 +301,7 @@ export class EventOrchestratorService {
         priorFindings: extractPriorFindings(state),
         reviewThreads,
         incrementalSince: diffs.since,
+        loadReviewContext: this.contextLoader(meta, logger),
       },
       {
         models: this.models,
@@ -303,6 +310,15 @@ export class EventOrchestratorService {
         deepReviewPaths: this.envService.get('DEEP_REVIEW_PATHS'),
       },
     );
+  }
+
+  private contextLoader(
+    meta: PRMeta,
+    logger?: FastifyBaseLogger,
+  ): ((timeoutMs: number) => Promise<ResolvedReviewContext>) | undefined {
+    const service = this.reviewContextService;
+    if (!service) return undefined;
+    return (timeoutMs) => service.resolve(meta, timeoutMs, logger);
   }
 
   private async persistSkip(
@@ -379,7 +395,7 @@ export class EventOrchestratorService {
       logger,
     );
     logger?.info(
-      { route: metrics.route, usage: metrics.usage },
+      { route: metrics.route, usage: metrics.usage, context: metrics.context },
       `[Core] Review route for ${prKey}: ${metrics.route.tier} (${metrics.route.source})`,
     );
     if (!publish) {

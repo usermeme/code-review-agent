@@ -7,6 +7,12 @@ export interface DatabaseService {
     docId: string,
     data: Partial<T>,
   ): Promise<void>;
+  /** Writes the whole document, dropping any field `data` leaves out. */
+  replaceDocument<T extends object>(
+    collection: string,
+    docId: string,
+    data: T,
+  ): Promise<void>;
   getDocument<T>(collection: string, docId: string): Promise<T | null>;
   /**
    * Atomically creates a document, failing on an existing id. Resolves true
