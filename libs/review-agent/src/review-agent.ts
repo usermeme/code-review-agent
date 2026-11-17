@@ -19,6 +19,11 @@ import {
   thinkingConfig,
 } from './agents/agent-session.js';
 import {
+  formatRepositoryInstruction,
+  formatScopedRulesSection,
+} from './context/rule-prompt.js';
+import type { SelectedRules } from './context/select-rules.js';
+import {
   firstLine,
   threadLocation,
   threadStatus,
@@ -48,6 +53,11 @@ export interface ReviewAgentInput {
    * then holds only the changes pushed since that commit.
    */
   incrementalSince?: string;
+  /**
+   * Rules from the repository's review context. When absent, the prompt
+   * carries the raw guidelines and skills index from the workspace instead.
+   */
+  rules?: SelectedRules;
 }
 
 /** Tells the model the diff is a delta on top of an already-reviewed PR. */
@@ -117,14 +127,6 @@ const SYSTEM_ROLE_INSTRUCTION = `You are a Principal Software Engineer performin
    - You MUST conclude your review by calling the \`submit_review\` tool with a concise markdown \`summary\` and your \`findings\` array (pass \`[]\` if the PR has no actionable defects).
    - If \`submit_review\` rejects a finding due to an invalid diff anchor, adjust the line number to a valid \`L<num>\` line in the diff and call \`submit_review\` again immediately.`;
 
-function formatGuidelinesSection(workspace: RepoWorkspace): string {
-  const guidelines = workspace.getRepoGuidelines();
-  if (!guidelines) {
-    return '';
-  }
-  return `\n\n## Repository Guidelines\nFollow these project-specific conventions when reviewing:\n\n${guidelines}`;
-}
-
 function formatPriorFindingsSection(priorFindings: PriorFinding[]): string {
   if (priorFindings.length === 0) {
     return '';
@@ -140,14 +142,15 @@ function formatPriorFindingsSection(priorFindings: PriorFinding[]): string {
 
 /**
  * Builds the system instruction for the review agent. It holds only content
- * that is identical for every PR of a repository (role + guidelines), so
- * Gemini's implicit prompt cache can reuse it across reviews; per-PR content
- * goes into {@link buildReviewUserPrompt}.
+ * that is identical for every PR of a repository (role plus repo-wide rules,
+ * or the raw guidelines and skills index), so Gemini's implicit prompt cache
+ * can reuse it across reviews; per-PR content goes into
+ * {@link buildReviewUserPrompt}.
  */
 export function buildReviewInstruction(
-  input: Pick<ReviewAgentInput, 'workspace'>,
+  input: Pick<ReviewAgentInput, 'rules' | 'workspace'>,
 ): string {
-  return `${SYSTEM_ROLE_INSTRUCTION}${formatGuidelinesSection(input.workspace)}`;
+  return `${SYSTEM_ROLE_INSTRUCTION}${formatRepositoryInstruction(input.workspace, input.rules)}`;
 }
 
 function formatFocusSection(focusFiles: string[]): string {
@@ -198,8 +201,9 @@ function formatPrContextSections(input: ReviewAgentInput): string {
   const priorSection = formatPriorFindingsSection(input.priorFindings ?? []);
   const threadsSection = formatThreadsSection(input.existingThreads ?? []);
   const focusSection = formatFocusSection(input.focusFiles ?? []);
+  const rulesSection = formatScopedRulesSection(input.rules);
   const incrementalNote = formatIncrementalNote(input.incrementalSince);
-  return `${priorSection}${threadsSection}${focusSection}${incrementalNote}`;
+  return `${priorSection}${threadsSection}${focusSection}${rulesSection}${incrementalNote}`;
 }
 
 /**

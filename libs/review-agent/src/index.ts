@@ -1,4 +1,33 @@
 export {
+  buildContextPrompt,
+  buildReviewContext,
+  type BuildReviewContextInput,
+  type BuildReviewContextResult,
+  MAX_BUILDER_INPUT_CHARS,
+  prepareSources,
+} from './context/build-review-context.js';
+export {
+  classifyContextSource,
+  CONTEXT_SOURCE_BASENAMES,
+  type ContextSourceRef,
+  hashContextSources,
+  type LoadedContextSource,
+  REVIEW_CONTEXT_BUILDER_VERSION,
+  selectContextSources,
+} from './context/context-sources.js';
+export {
+  formatRepositoryInstruction,
+  formatScopedRulesSection,
+} from './context/rule-prompt.js';
+export {
+  countSelectedRules,
+  formatRuleList,
+  type ResolvedReviewContext,
+  type SelectedRules,
+  selectRules,
+} from './context/select-rules.js';
+export { validateRules } from './context/validate-rules.js';
+export {
   type ReviewPipelineInput,
   type ReviewPipelineOptions,
   type ReviewPipelineResult,

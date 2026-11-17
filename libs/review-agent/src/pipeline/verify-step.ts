@@ -7,6 +7,7 @@ import type {
 import type { BaseLlm } from '@google/adk';
 import { ThinkingLevel } from '@google/genai';
 
+import type { SelectedRules } from '../context/select-rules.js';
 import type { ReviewAgentResult } from '../review-agent.js';
 import type { AnchoredFinding } from '../tools/submit-review.tool.js';
 import { runVerifier } from '../verifier/verifier.js';
@@ -34,6 +35,8 @@ export interface VerifyStepInput {
   remainingMs: number;
   /** Earlier review-thread discussion per finding, shown to the verifier. */
   context?: Map<AnchoredFinding, string>;
+  /** Rules from the repository's review context, when resolved. */
+  rules?: SelectedRules;
 }
 
 export interface VerifyStepResult {
@@ -111,6 +114,7 @@ export async function verifyStep(
       summary: result.reviewResult.summary ?? '',
       findings: candidates,
       context: input.context,
+      rules: input.rules,
     },
     { model: input.model, timeoutMs, ...VERIFIER_PROFILES[tier] },
   );

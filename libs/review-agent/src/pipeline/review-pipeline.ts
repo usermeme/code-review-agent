@@ -13,6 +13,12 @@ import type {
 } from '@code-review-agent/shared-types';
 
 import {
+  countSelectedRules,
+  type ResolvedReviewContext,
+  type SelectedRules,
+  selectRules,
+} from '../context/select-rules.js';
+import {
   buildSummaryOnlyResult,
   type ReviewAgentResult,
   runCodeReview,
@@ -32,6 +38,8 @@ import { verifyStep } from './verify-step.js';
 const MAX_TRIAGE_TIMEOUT_MS = 30_000;
 /** A light review that fails is retried as deep only with this much time left. */
 const MIN_ESCALATION_BUDGET_MS = 60_000;
+/** Hard cap on resolving the review context (cache lookup or a build). */
+const MAX_CONTEXT_TIMEOUT_MS = 45_000;
 
 export interface ReviewPipelineInput {
   prMeta: PRMeta;
@@ -44,6 +52,11 @@ export interface ReviewPipelineInput {
   reviewThreads?: ReviewThread[];
   /** Set when the diffs hold only the changes since this already-reviewed commit. */
   incrementalSince?: string;
+  /**
+   * Resolves the repository's review rules (base branch, cached). Runs next
+   * to `loadWorkspace`. Without it, prompts carry the raw guidelines.
+   */
+  loadReviewContext?: (timeoutMs: number) => Promise<ResolvedReviewContext>;
 }
 
 export interface ReviewPipelineOptions {
@@ -116,9 +129,58 @@ function withApproval(
   };
 }
 
+/** What a review tier works on: the repo and the rules that apply to it. */
+interface ReviewMaterial {
+  workspace: RepoWorkspace;
+  context?: ResolvedReviewContext;
+  rules?: SelectedRules;
+}
+
+function fallbackContext(reason: string): ResolvedReviewContext {
+  return {
+    rules: null,
+    metrics: { origin: 'fallback', ruleCount: 0, fallbackReason: reason },
+  };
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Fails open: any error resolving the context falls back to raw guidelines. */
+async function resolveContext(
+  ctx: PipelineContext,
+): Promise<ResolvedReviewContext | undefined> {
+  const load = ctx.input.loadReviewContext;
+  if (!load) return undefined;
+  const timeoutMs = Math.min(
+    MAX_CONTEXT_TIMEOUT_MS,
+    Math.floor(ctx.remainingMs() / 4),
+  );
+  try {
+    return await load(timeoutMs);
+  } catch (error) {
+    return fallbackContext(describeError(error));
+  }
+}
+
+async function loadMaterial(ctx: PipelineContext): Promise<ReviewMaterial> {
+  const [workspace, context] = await Promise.all([
+    ctx.input.loadWorkspace(),
+    resolveContext(ctx),
+  ]);
+  if (!context?.rules) return { workspace, context };
+  const { changedFiles } = workspace.getPrDiff({ maxChars: 0 });
+  return {
+    workspace,
+    context,
+    rules: selectRules(context.rules, changedFiles),
+  };
+}
+
 async function runTier(
   ctx: PipelineContext,
-  workspace: RepoWorkspace,
+  material: ReviewMaterial,
   tier: 'light' | 'deep',
   focusFiles: string[],
 ): Promise<ReviewAgentResult> {
@@ -126,11 +188,12 @@ async function runTier(
   return runCodeReview(
     {
       prMeta,
-      workspace,
+      workspace: material.workspace,
       priorFindings: ctx.priorFindings,
       focusFiles,
       existingThreads: reviewThreads,
       incrementalSince,
+      rules: material.rules,
     },
     {
       model: ctx.options.models.reviewer,
@@ -157,7 +220,7 @@ interface ReviewedRun {
   route: ReviewRoute;
   /** The tier that produced `result` (deep after an escalation). */
   tier: 'light' | 'deep';
-  workspace: RepoWorkspace;
+  material: ReviewMaterial;
 }
 
 /** Runs the chosen tier; a failed light review is retried once as deep. */
@@ -167,13 +230,13 @@ async function review(
   focusFiles: string[],
 ): Promise<ReviewedRun> {
   const tier = route.tier === 'light' ? 'light' : 'deep';
-  const workspace = await ctx.input.loadWorkspace();
-  const first = await runTier(ctx, workspace, tier, focusFiles);
+  const material = await loadMaterial(ctx);
+  const first = await runTier(ctx, material, tier, focusFiles);
   if (!shouldEscalate(ctx, tier, first)) {
-    return { result: first, route, tier, workspace };
+    return { result: first, route, tier, material };
   }
 
-  const second = await runTier(ctx, workspace, 'deep', focusFiles);
+  const second = await runTier(ctx, material, 'deep', focusFiles);
   const escalated: ReviewRoute = {
     ...route,
     tier: 'deep',
@@ -183,7 +246,7 @@ async function review(
     result: { ...second, usage: sumTokenUsage(first.usage, second.usage) },
     route: escalated,
     tier: 'deep',
-    workspace,
+    material,
   };
 }
 
@@ -246,7 +309,8 @@ async function reviewRouted(
   const deduped = await dedupeStep(ctx, run.result);
   const verified = await verifyStep({
     prMeta: ctx.input.prMeta,
-    workspace: run.workspace,
+    workspace: run.material.workspace,
+    rules: run.material.rules,
     tier: run.tier,
     result: deduped.result,
     priorFindings: ctx.priorFindings,
@@ -263,12 +327,28 @@ async function reviewRouted(
     metrics: {
       route: run.route,
       usage: {
+        ...contextUsage(run.material.context),
         triage: sumTokenUsage(routing.usage, deduped.usage),
         reviewer: run.result.usage,
         ...(verified.usage ? { verifier: verified.usage } : {}),
       },
+      ...contextMetrics(run.material),
     },
   };
+}
+
+function contextUsage(
+  context: ResolvedReviewContext | undefined,
+): Pick<ReviewMetrics['usage'], 'context'> {
+  return context?.usage ? { context: context.usage } : {};
+}
+
+function contextMetrics(
+  material: ReviewMaterial,
+): Pick<ReviewMetrics, 'context'> {
+  if (!material.context) return {};
+  const selectedRules = material.rules ? countSelectedRules(material.rules) : 0;
+  return { context: { ...material.context.metrics, selectedRules } };
 }
 
 async function routeAndReview(

@@ -1,9 +1,10 @@
 import { RepoWorkspace } from '@code-review-agent/agent-tools';
 import { createMockAgentModels } from '@code-review-agent/llm';
-import type { PRMeta } from '@code-review-agent/shared-types';
+import type { PRMeta, ReviewRule } from '@code-review-agent/shared-types';
 import { ThinkingLevel } from '@google/genai';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { ResolvedReviewContext } from '../context/select-rules.js';
 import {
   createFunctionCallResponse,
   createTextResponse,
@@ -517,5 +518,157 @@ describe('runReviewPipeline approval', () => {
     );
 
     expect(published(result).reviewResult.approve).toBeUndefined();
+  });
+});
+
+/** The system instruction of a model request, as searchable text. */
+function instructionOf(request: { config?: { systemInstruction?: unknown } }) {
+  return JSON.stringify(request.config?.systemInstruction ?? '');
+}
+
+describe('runReviewPipeline review context', () => {
+  const RULES: ReviewRule[] = [
+    {
+      id: 'no-division-by-zero',
+      rule: 'Never divide by a literal zero.',
+      appliesTo: [],
+      severity: 'critical',
+      source: { path: 'AGENTS.md', startLine: 1 },
+    },
+    {
+      id: 'charge-rounding',
+      rule: 'Round charge amounts to cents.',
+      appliesTo: ['src/charge*'],
+      severity: 'major',
+      source: { path: 'AGENTS.md', startLine: 2 },
+    },
+    {
+      id: 'migrations',
+      rule: 'Keep migrations backward compatible.',
+      appliesTo: ['db/migrations/**'],
+      severity: 'major',
+      source: { path: 'AGENTS.md', startLine: 3 },
+    },
+  ];
+  const CONTEXT_USAGE = {
+    calls: 1,
+    promptTokens: 900,
+    cachedTokens: 0,
+    outputTokens: 120,
+    thoughtsTokens: 0,
+  };
+
+  function builtContext(): ResolvedReviewContext {
+    return {
+      rules: RULES,
+      metrics: { origin: 'built', sourceHash: 'hash-1', ruleCount: 3 },
+      usage: CONTEXT_USAGE,
+    };
+  }
+
+  async function runWithContext(
+    loadReviewContext: (timeoutMs: number) => Promise<ResolvedReviewContext>,
+    models: Parameters<typeof createMockAgentModels>[0],
+  ) {
+    const { diffWorkspace, loadWorkspace } = workspaces();
+    return runReviewPipeline(
+      { prMeta: META, diffWorkspace, loadWorkspace, loadReviewContext },
+      { ...OPTIONS, models: createMockAgentModels(models) },
+    );
+  }
+
+  it('puts repo-wide rules in the instruction and matching scoped rules in the prompt', async () => {
+    const reviewer = reviewerSubmits();
+
+    await runWithContext(async () => builtContext(), {
+      triage: triageSays('deep'),
+      reviewer,
+    });
+
+    const request = reviewer.requests[0];
+    const instruction = instructionOf(request);
+    const prompt = JSON.stringify(request.contents);
+    expect(instruction).toContain('Never divide by a literal zero.');
+    expect(instruction).not.toContain('Round charge amounts');
+    expect(prompt).toContain('Round charge amounts to cents.');
+    expect(prompt).not.toContain('Keep migrations backward compatible.');
+  });
+
+  it('records the context origin, rule counts and builder usage', async () => {
+    const result = await runWithContext(async () => builtContext(), {
+      triage: triageSays('deep'),
+      reviewer: reviewerSubmits(),
+    });
+
+    expect(result.metrics.context).toEqual({
+      origin: 'built',
+      sourceHash: 'hash-1',
+      ruleCount: 3,
+      selectedRules: 2,
+    });
+    expect(result.metrics.usage.context).toEqual(CONTEXT_USAGE);
+  });
+
+  it('gives the verifier the same rules', async () => {
+    const verifier = verifierSays({
+      verdicts: [{ id: 0, verdict: 'keep', reason: 'Breaks the rule.' }],
+    });
+
+    await runWithContext(async () => builtContext(), {
+      triage: triageSays('deep'),
+      reviewer: reviewerFinds(finding('Division by zero', 'critical')),
+      verifier,
+    });
+
+    const request = verifier.requests[0];
+    expect(instructionOf(request)).toContain('Never divide by a literal zero.');
+    expect(JSON.stringify(request.contents)).toContain(
+      'Round charge amounts to cents.',
+    );
+  });
+
+  it('falls back to the raw guidelines when the context loader throws', async () => {
+    const reviewer = reviewerSubmits();
+
+    const result = await runWithContext(
+      async () => {
+        throw new Error('adapter down');
+      },
+      { triage: triageSays('deep'), reviewer },
+    );
+
+    expect(result.publish?.reviewResult.failure).toBeUndefined();
+    expect(result.metrics.context).toEqual({
+      origin: 'fallback',
+      ruleCount: 0,
+      selectedRules: 0,
+      fallbackReason: 'adapter down',
+    });
+    expect(instructionOf(reviewer.requests[0])).not.toContain(
+      '## Repository Rules',
+    );
+  });
+
+  it('gives the loader at most 45s, and never more than a quarter of the budget', async () => {
+    const loadReviewContext = vi.fn<
+      (timeoutMs: number) => Promise<ResolvedReviewContext>
+    >(async () => builtContext());
+
+    await runWithContext(loadReviewContext, {
+      triage: triageSays('deep'),
+      reviewer: reviewerSubmits(),
+    });
+
+    const [timeoutMs] = loadReviewContext.mock.calls[0];
+    expect(timeoutMs).toBeLessThanOrEqual(45_000);
+    expect(timeoutMs).toBeGreaterThan(0);
+  });
+
+  it('does not resolve the context when the PR is skipped', async () => {
+    const loadReviewContext = vi.fn(async () => builtContext());
+
+    await runWithContext(loadReviewContext, { triage: triageSays('skip') });
+
+    expect(loadReviewContext).not.toHaveBeenCalled();
   });
 });

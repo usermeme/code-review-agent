@@ -300,6 +300,36 @@ describe('review-agent', () => {
     expect(userPrompt).toContain('### Focus Files');
   });
 
+  it('lists repo skills in the instruction by path only, without their contents', () => {
+    const workspace = new RepoWorkspace({
+      files: new Map([
+        [
+          '.agents/skills/billing/SKILL.md',
+          ['---', 'description: Billing rules.', '---', 'Round tax up.'],
+        ],
+      ]),
+      rawDiff: SAMPLE_DIFF,
+      changedFiles: ['src/charge.ts'],
+    });
+
+    const instruction = buildReviewInstruction({ workspace });
+
+    expect(instruction).toContain('## Repository Skills');
+    expect(instruction).toContain(
+      '- `billing`: `.agents/skills/billing/SKILL.md`',
+    );
+    expect(instruction).not.toContain('Billing rules.');
+    expect(instruction).not.toContain('Round tax up.');
+  });
+
+  it('omits the skills section when the repo has no skills', () => {
+    const instruction = buildReviewInstruction({
+      workspace: createSampleWorkspace(),
+    });
+
+    expect(instruction).not.toContain('## Repository Skills');
+  });
+
   it('switches to get_pr_diff when the diff exceeds the inline budget', () => {
     const workspace = createSampleWorkspace();
 

@@ -9,6 +9,11 @@ import { type BaseLlm, LlmAgent } from '@google/adk';
 import type { ThinkingLevel } from '@google/genai';
 
 import { runAgentSession, thinkingConfig } from '../agents/agent-session.js';
+import {
+  formatRepositoryInstruction,
+  formatScopedRulesSection,
+} from '../context/rule-prompt.js';
+import type { SelectedRules } from '../context/select-rules.js';
 import type { AnchoredFinding } from '../tools/submit-review.tool.js';
 import {
   createSubmitVerdictsTool,
@@ -36,6 +41,8 @@ export interface VerifierInput {
   findings: AnchoredFinding[];
   /** Earlier review-thread discussion per finding, if any. */
   context?: Map<AnchoredFinding, string>;
+  /** Rules from the repository's review context, when resolved. */
+  rules?: SelectedRules;
 }
 
 export interface VerifierOptions {
@@ -54,14 +61,15 @@ export interface VerifierResult {
   usage: TokenUsage;
 }
 
-function formatGuidelines(workspace: RepoWorkspace): string {
-  const guidelines = workspace.getRepoGuidelines();
-  return guidelines ? `\n\n## Repository Guidelines\n\n${guidelines}` : '';
-}
-
-/** Role + repo guidelines only, so the prefix is shared across a repo's PRs. */
-export function buildVerifierInstruction(workspace: RepoWorkspace): string {
-  return `${VERIFIER_ROLE_INSTRUCTION}${formatGuidelines(workspace)}`;
+/**
+ * Role plus the repository section (repo-wide rules, or the raw guidelines
+ * and skills index), so the prefix is shared across a repo's PRs.
+ */
+export function buildVerifierInstruction(
+  workspace: RepoWorkspace,
+  rules?: SelectedRules,
+): string {
+  return `${VERIFIER_ROLE_INSTRUCTION}${formatRepositoryInstruction(workspace, rules)}`;
 }
 
 function formatCandidate(
@@ -106,7 +114,7 @@ export function buildVerifierPrompt(input: VerifierInput): string {
 ${input.summary}
 
 ## Candidate findings
-${candidates}
+${candidates}${formatScopedRulesSection(input.rules)}
 
 ## Diff of the files involved
 ${formatHunks(input)}`;
@@ -147,7 +155,7 @@ export async function runVerifier(
   const agent = new LlmAgent({
     name: 'finding_verifier_agent',
     model: options.model,
-    instruction: buildVerifierInstruction(input.workspace),
+    instruction: buildVerifierInstruction(input.workspace, input.rules),
     ...thinkingConfig(options.thinkingLevel),
     disallowTransferToParent: true,
     disallowTransferToPeers: true,
