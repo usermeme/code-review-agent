@@ -209,3 +209,29 @@ Then('PubSub receives no PR events', function (this: GithubIngressWorld) {
     `Expected 0 PR events, but found ${this.ingestedEvents.length}`,
   );
 });
+
+When(
+  'GitHub resolves review thread {string} on {string} PR #{int}',
+  async function (
+    this: GithubIngressWorld,
+    threadId: string,
+    repoFullName: string,
+    prNumber: number,
+  ) {
+    const payload = {
+      ...buildPrWebhookPayload(repoFullName, prNumber, 'resolved'),
+      thread: { node_id: threadId },
+    };
+    await sendSignedWebhook(this, 'pull_request_review_thread', payload);
+  },
+);
+
+Then(
+  'PubSub receives a PR event with action {string} for thread {string}',
+  function (this: GithubIngressWorld, action: string, threadId: string) {
+    const event = this.ingestedEvents.find(
+      (e) => e.prMeta?.action === action && e.prMeta?.threadId === threadId,
+    );
+    assert(event, `Expected a ${action} event for thread ${threadId}`);
+  },
+);

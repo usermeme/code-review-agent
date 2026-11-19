@@ -15,6 +15,11 @@ export interface GithubWebhookPayload {
     base?: { ref: string; repo?: { clone_url?: string } };
     merged?: boolean;
     draft?: boolean;
+    state?: string;
+  };
+  /** `pull_request_review_thread` events. */
+  thread?: {
+    node_id: string;
   };
   issue?: {
     number: number;
