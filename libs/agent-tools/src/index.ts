@@ -1,4 +1,8 @@
 export {
+  createLazyRepoTools,
+  type LazyRepoTools,
+} from './tools/create-lazy-repo-tools.js';
+export {
   createRepoTools,
   type RepoAgentTools,
 } from './tools/create-repo-tools.js';

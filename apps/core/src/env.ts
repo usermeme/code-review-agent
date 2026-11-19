@@ -2,6 +2,12 @@ import { EnvService } from '@code-review-agent/env';
 import { modelConfigSchema } from '@code-review-agent/llm';
 import { z } from 'zod';
 
+/** `'false'` turns a feature off; unset or `'true'` keeps it on. */
+const featureFlag = z
+  .enum(['true', 'false'])
+  .optional()
+  .transform((value) => value !== 'false');
+
 const coreBaseEnvSchema = z.object({
   HOST: z.string().min(1),
   PORT: z.string().transform(Number),
@@ -22,6 +28,10 @@ const coreBaseEnvSchema = z.object({
    * Comma-separated globs of paths that always get a deep review (e.g.
    * `**\/auth/**,**\/migrations/**`). Unset uses the review-agent defaults.
    */
+  /** Reviews PRs on open/push/`/review`. Off leaves only the comment judge. */
+  CODE_REVIEW_ENABLED: featureFlag,
+  /** Checks resolved review threads. Off leaves only code review. */
+  COMMENT_JUDGE_ENABLED: featureFlag,
   DEEP_REVIEW_PATHS: z
     .string()
     .optional()

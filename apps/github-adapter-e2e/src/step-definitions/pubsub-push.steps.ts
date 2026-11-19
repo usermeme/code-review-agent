@@ -120,3 +120,48 @@ Then(
     );
   },
 );
+
+When(
+  'PubSub pushes thread judgments for {string} PR #{int} re-opening thread {string} and confirming comment {string}',
+  async function (
+    this: GithubAdapterWorld,
+    repoFullName: string,
+    prNumber: number,
+    threadId: string,
+    commentId: string,
+  ) {
+    const [owner, repo] = repoFullName.split('/');
+    const payload = {
+      kind: 'thread-judgments',
+      provider: 'github',
+      owner,
+      repo,
+      prNumber,
+      actions: [
+        { type: 'reopen', threadId, body: 'Not resolved yet.' },
+        { type: 'react', threadId: 'PRRT_other', commentId },
+      ],
+      dismissApprovals: false,
+    };
+    this.lastResponse = await this.app.inject({
+      method: 'POST',
+      url: '/api/v1/pubsub/review-results',
+      payload: {
+        message: {
+          attributes: {},
+          data: Buffer.from(JSON.stringify(payload)).toString('base64'),
+          messageId: `msg-judge-${Date.now()}`,
+        },
+        subscription: 'projects/test/subscriptions/review-results-sub',
+      },
+    });
+  },
+);
+
+Then(
+  'GitHub receives the GraphQL operations {string}',
+  function (this: GithubAdapterWorld, operations: string) {
+    const called = this.octokit.graphqlCalls.map((call) => call.operation);
+    assert.deepEqual(called, operations.split(', '));
+  },
+);

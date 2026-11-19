@@ -26,6 +26,7 @@ describe('GithubService (Adapter)', () => {
       repos: {
         downloadTarballArchive: ReturnType<typeof vi.fn>;
         compareCommitsWithBasehead: ReturnType<typeof vi.fn>;
+        getContent: ReturnType<typeof vi.fn>;
       };
       issues: {
         createComment: ReturnType<typeof vi.fn>;
@@ -49,6 +50,7 @@ describe('GithubService (Adapter)', () => {
         repos: {
           downloadTarballArchive: vi.fn(),
           compareCommitsWithBasehead: vi.fn(),
+          getContent: vi.fn(),
         },
         issues: {
           createComment: vi.fn(),
@@ -112,6 +114,53 @@ describe('GithubService (Adapter)', () => {
     expect(
       mockOctokit.rest.repos.compareCommitsWithBasehead,
     ).toHaveBeenCalledWith(expect.objectContaining({ basehead: 'aaa...bbb' }));
+  });
+
+  it('reads a file at a ref as raw text', async () => {
+    mockOctokit.rest.repos.getContent.mockResolvedValue({
+      data: 'export const a = 1;\n',
+    });
+
+    const content = await service.getFileContent(
+      'owner',
+      'repo',
+      'src/a.ts',
+      'sha1',
+    );
+
+    expect(content).toBe('export const a = 1;\n');
+    expect(mockOctokit.rest.repos.getContent).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      path: 'src/a.ts',
+      ref: 'sha1',
+      mediaType: { format: 'raw' },
+    });
+  });
+
+  it('returns null for a missing file or a directory', async () => {
+    mockOctokit.rest.repos.getContent
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Not Found'), { status: 404 }),
+      )
+      .mockResolvedValueOnce({ data: [{ name: 'a.ts' }] });
+
+    await expect(
+      service.getFileContent('owner', 'repo', 'gone.ts', 'sha1'),
+    ).resolves.toBeNull();
+    await expect(
+      service.getFileContent('owner', 'repo', 'src', 'sha1'),
+    ).resolves.toBeNull();
+  });
+
+  it('rethrows other errors reading a file', async () => {
+    mockOctokit.rest.repos.getContent.mockRejectedValue(
+      Object.assign(new Error('Server Error'), { status: 502 }),
+    );
+
+    await expect(
+      service.getFileContent('owner', 'repo', 'src/a.ts', 'sha1'),
+    ).rejects.toThrow('Server Error');
   });
 
   it('downloads repo tarball archive', async () => {

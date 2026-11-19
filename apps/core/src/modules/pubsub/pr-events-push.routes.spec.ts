@@ -337,4 +337,32 @@ describe('prEventsPushRoutes delivery dedup and poison handling', () => {
     expect(res.statusCode).toBe(200);
     expect(mockDeliveryRepo.claim).toHaveBeenCalledWith('msg-manual-1');
   });
+  it('uses messageId for thread_resolved so it never collides with the review claim of the same commit', async () => {
+    const threadEnvelope = {
+      message: {
+        data: Buffer.from(
+          JSON.stringify({
+            ...validPayload,
+            prMeta: {
+              ...validPayload.prMeta,
+              action: 'thread_resolved',
+              headSha: 'abc1234',
+              threadId: 'PRRT_1',
+            },
+          }),
+        ).toString('base64'),
+        messageId: 'msg-thread-1',
+      },
+      subscription: 'projects/test/subscriptions/pr-events-sub',
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/pr-events',
+      payload: threadEnvelope,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockDeliveryRepo.claim).toHaveBeenCalledWith('msg-thread-1');
+  });
 });

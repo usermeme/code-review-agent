@@ -1,3 +1,19 @@
+export type {
+  CommentJudgeInput,
+  CommentJudgeOptions,
+  CommentJudgeResult,
+  JudgeCodeExcerpt,
+  JudgeComment,
+  JudgeFileChanges,
+  JudgeThread,
+  ThreadJudgment,
+} from './judge/judge-input.js';
+export { buildJudgePrompt, JUDGE_INSTRUCTION } from './judge/judge-prompt.js';
+export { runCommentJudge } from './judge/run-comment-judge.js';
+export {
+  createSubmitJudgmentsTool,
+  submitJudgmentsSchema,
+} from './judge/submit-judgments.tool.js';
 export {
   type ReviewPipelineInput,
   type ReviewPipelineOptions,

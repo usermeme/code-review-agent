@@ -23,6 +23,8 @@ Production-ready, secretless Infrastructure as Code (IaC) using **Pulumi (TypeSc
 - **Zero-Cost Guideline Extraction**: Ingests repo rules (`AGENTS.md`, `CLAUDE.md`, `.cursorrules`) automatically from memory with 0 LLM calls.
 - **Top-Level Summaries & Inline Comments**: Submits formal pull request reviews alongside actionable inline review comments directly to the Git provider.
 - **Approves Clean PRs**: When a light or deep review completes with zero findings, the bot approves the PR instead of only commenting. It approves only the commit it reviewed (a newer push is reviewed on its own), only when no review thread on the PR is unresolved (a finding from an earlier push, or one another reviewer raised, blocks approval until someone resolves it), and never for skipped, failed, timed-out or `/review`-triggered runs. When a later review posts findings, the bot dismisses its own earlier approvals. A bot approval counts toward branch protection's required approvals, so require a human review too if that matters.
+- **Comment Judge**: When someone resolves a review thread (from any author: this bot, other bots, or people), the judge checks whether the code at the PR head really resolves the comment. It reads the whole thread, the code the comment was written on, that file's diff since the comment, and the current code around the line, all on `REVIEWER_MODEL` with high reasoning effort. It only downloads the repo when the model needs `read_file`/`grep_code`. Verdicts are `fixed` or `accepted` (unchanged, with a concrete reason in a reply that holds up), which add a 👍 to the original comment, or `not_fixed`, which **re-opens the thread**, replies with what is still wrong and dismisses the bot's earlier approval. It never looks at who resolved a thread or wrote a reply; a "Fixed" reply is a claim it checks. A thread resolved before any commit after the comment waits for the next push. A reply containing `[skip judge]` keeps a resolution without a check. After 3 failed checks on one thread, the judge replies that it needs a human and stops. Only threads resolved after the judge is switched on are judged. Threads resolved in a burst are judged in one session, and the run's verdicts and token usage are recorded on the PR's Firestore record (`lastJudgment`), with per-thread state in `thread_judgments`.
+- **Pick What Runs**: `CODE_REVIEW_ENABLED` and `COMMENT_JUDGE_ENABLED` (both default `true`) switch each job on or off in `core`, e.g. run only the comment judge to keep costs low.
 - **Fail-Fast Environment Configuration**: Strict validation with zero silent default fallbacks on required environment variables.
 - **Container-First CI/CD**: Multi-arch container images are automatically built and published to GHCR.
 
@@ -627,6 +629,8 @@ Each service strictly validates required variables and fails fast at startup if 
 | `TRIAGE_MODEL`            | Optional | Cheap text model for triage and thread dedupe (default `gemini-3.5-flash-lite`)                                                    |
 | `DEEP_REVIEW_PATHS`       | Optional | Comma-separated globs that always get a deep review (defaults: auth, security, migrations, SQL, workflows, Dockerfiles, Terraform) |
 | `REVIEW_TIMEOUT_MS`       | Optional | Wall-clock cap per review in ms (default `480000`, valid `30000`–`540000`)                                                         |
+| `CODE_REVIEW_ENABLED`     | Optional | `false` turns off PR reviews (open, push, `/review`); default `true`                                                               |
+| `COMMENT_JUDGE_ENABLED`   | Optional | `false` turns off the comment judge for resolved review threads; default `true`                                                    |
 | `GIT_ADAPTER_URL`         |   Yes    | URL of Git Provider Adapter for on-demand code queries (e.g. `http://adapter:8080`)                                                |
 | `GEMINI_API_KEY`          | Optional | Google Gemini API key (required if not using Google Cloud ADC / Vertex AI)                                                         |
 | `GOOGLE_CLOUD_PROJECT`    | Optional | GCP Project ID (auto-detected when running in GCP)                                                                                 |
@@ -644,7 +648,7 @@ Each service strictly validates required variables and fails fast at startup if 
 Configure the following **Repository permissions** on your GitHub App:
 
 - **Contents**: `Read-only` (fetching file contents, diffs, code search, and repository tarballs)
-- **Pull requests**: `Read and write` (reading PR metadata/files, posting formal reviews & inline comments, approving clean PRs and dismissing the bot's own stale approvals)
+- **Pull requests**: `Read and write` (reading PR metadata/files, posting formal reviews & inline comments, approving clean PRs and dismissing the bot's own stale approvals, and for the comment judge: replying in review threads, re-opening them and reacting to comments)
 - **Metadata**: `Read-only` (mandatory default for GitHub Apps)
 
 ### 2. Per-Repository Installation Requirement
@@ -672,6 +676,7 @@ In your GitHub App settings (or repository/organization **Webhooks** → **Add w
 4. **Events to trigger**:
    - `Pull requests`
    - `Issue comments`
+   - `Pull request review threads` (for the comment judge; without it no thread is judged)
 
 ---
 

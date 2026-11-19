@@ -7,13 +7,22 @@ import { reviewResultsPushRoutes } from './review-results-push.routes.js';
 
 describe('reviewResultsPushRoutes', () => {
   let app: FastifyInstance;
-  let mockGithubService: { postReview: ReturnType<typeof vi.fn> };
+  let mockGithubService: {
+    postReview: ReturnType<typeof vi.fn>;
+    applyThreadJudgments: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     mockGithubService = {
       postReview: vi.fn().mockResolvedValue({
         success: true,
         message: 'Review posted successfully',
+      }),
+      applyThreadJudgments: vi.fn().mockResolvedValue({
+        reopened: 1,
+        reacted: 0,
+        failed: 0,
+        dismissedApprovals: 1,
       }),
     };
 
@@ -192,5 +201,29 @@ describe('reviewResultsPushRoutes', () => {
       summary: failurePayload.summary,
       comments: [],
     });
+  });
+  it('applies thread judgments instead of posting a review', async () => {
+    const judgments = {
+      kind: 'thread-judgments',
+      provider: 'github',
+      owner: 'test-org',
+      repo: 'test-repo',
+      prNumber: 42,
+      actions: [{ type: 'reopen', threadId: 'T1', body: 'Still broken.' }],
+      dismissApprovals: true,
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/review-results',
+      payload: judgments,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ success: true, data: { reopened: 1 } });
+    expect(mockGithubService.applyThreadJudgments).toHaveBeenCalledWith(
+      judgments,
+    );
+    expect(mockGithubService.postReview).not.toHaveBeenCalled();
   });
 });

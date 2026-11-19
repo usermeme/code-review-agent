@@ -78,6 +78,23 @@ export class GitAdapterClient implements GitAdapterContract {
     return this.fetchJson<ReviewThread[]>(path, 'fetch PR review threads');
   }
 
+  async getFileContent(
+    owner: string,
+    repo: string,
+    path: string,
+    ref: string,
+  ): Promise<string | null> {
+    const url = interpolatePath(ENDPOINTS.CONTENTS, {
+      Path: { owner, repo },
+      Query: { path, ref },
+    });
+    const body = await this.fetchJson<{ content: string | null }>(
+      url,
+      'fetch file content',
+    );
+    return body.content;
+  }
+
   async getRepoTarball(
     owner: string,
     repo: string,

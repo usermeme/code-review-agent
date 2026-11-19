@@ -60,15 +60,19 @@ const INACTIVE_CLAIM: DeliveryClaim = {
  *   `review_requested` webhooks for the same commit are deduplicated alongside
  *   Pub/Sub redeliveries.
  * - Falls back to the Pub/Sub `messageId` for `manual_trigger` (`/review`
- *   comments must be allowed to re-review the same commit) or when `headSha`
- *   is omitted.
+ *   comments must be allowed to re-review the same commit), for
+ *   `thread_resolved` (each resolution is its own job; the head key would
+ *   collide with that commit's review and drop it) or when `headSha` is
+ *   omitted.
  */
+const MESSAGE_KEYED_ACTIONS = new Set(['manual_trigger', 'thread_resolved']);
+
 function resolveClaimKey(
   payload: PREventPayload,
   messageId: string | undefined,
 ): string | undefined {
   const { provider, owner, repo, prNumber, action, headSha } = payload.prMeta;
-  if (headSha && action !== 'manual_trigger' && prNumber) {
+  if (headSha && !MESSAGE_KEYED_ACTIONS.has(action) && prNumber) {
     return `${provider || 'github'}:${owner}:${repo}:${prNumber}@${headSha}`;
   }
   return messageId;

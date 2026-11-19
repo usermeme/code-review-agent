@@ -3,6 +3,7 @@ import type {
   GitAdapterContract,
   PRDiffResult,
   ReviewThread,
+  ThreadJudgmentsPayload,
 } from '@code-review-agent/shared-types';
 import { Octokit } from 'octokit';
 
@@ -17,6 +18,10 @@ import {
   type ReviewEvent,
 } from './review-approval.js';
 import { fetchReviewThreads } from './review-threads.query.js';
+import {
+  type AppliedThreadJudgments,
+  applyThreadJudgments,
+} from './thread-judgments.js';
 
 export interface GithubServiceDependencies {
   authService: GithubAuthProvider;
@@ -112,6 +117,10 @@ function isRetryableGithubError(error: unknown): boolean {
   return typeof status === 'number' && (status === 429 || status >= 500);
 }
 
+function isNotFound(error: unknown): boolean {
+  return (error as { status?: unknown } | null)?.status === 404;
+}
+
 export class GithubService implements GitAdapterContract {
   private readonly authService: GithubAuthProvider;
 
@@ -188,6 +197,39 @@ export class GithubService implements GitAdapterContract {
       repo,
       number: prNumber,
     });
+  }
+
+  async getFileContent(
+    owner: string,
+    repo: string,
+    path: string,
+    ref: string,
+  ): Promise<string | null> {
+    const octokit = await this.authService.getOctokit(owner, repo);
+    try {
+      const { data } = await octokit.rest.repos.getContent({
+        owner,
+        repo,
+        path,
+        ref,
+        mediaType: { format: 'raw' },
+      });
+      // A directory comes back as a JSON listing, not raw text.
+      return typeof data === 'string' ? data : null;
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw error;
+    }
+  }
+
+  async applyThreadJudgments(
+    payload: ThreadJudgmentsPayload,
+  ): Promise<AppliedThreadJudgments> {
+    const octokit = await this.authService.getOctokit(
+      payload.owner,
+      payload.repo,
+    );
+    return applyThreadJudgments(octokit, payload);
   }
 
   async getRepoTarball(
