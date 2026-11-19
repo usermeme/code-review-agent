@@ -46,6 +46,8 @@ export interface PRState {
   lastReview?: ReviewMetrics;
   /** Head commit covered by the last review; later pushes are reviewed as a delta. */
   lastReviewedSha?: string;
+  /** Outcome and token usage of the most recent comment-judge run. */
+  lastJudgment?: CommentJudgeMetrics;
 }
 
 export interface PRMeta {
@@ -65,6 +67,8 @@ export interface PRMeta {
   isDraft?: boolean;
   /** Head commit of the PR at the time of the event. */
   headSha?: string;
+  /** Review thread (GraphQL node id) a `thread_resolved` event is about. */
+  threadId?: string;
 }
 
 export interface PREventPayload {
@@ -79,6 +83,8 @@ export interface ReviewCommentPayload {
 }
 
 export interface ReviewResultPayload {
+  /** Absent on messages published before thread judgments existed. */
+  kind?: 'review';
   provider: string;
   owner: string;
   repo: string;
@@ -108,6 +114,14 @@ export interface ReviewResultPayload {
 export interface ReviewThreadComment {
   author: string;
   body: string;
+  /** GraphQL node id; a reaction target. */
+  id?: string;
+  /** ISO timestamp. */
+  createdAt?: string;
+  /** Commit the comment was written against. */
+  originalCommitSha?: string;
+  /** Diff hunk the comment was attached to, as it was then. */
+  diffHunk?: string;
 }
 
 /** An inline review thread on a PR, from any author (this bot, other bots, people). */
@@ -119,7 +133,95 @@ export interface ReviewThread {
   isResolved: boolean;
   /** True when the code the thread was anchored to has since changed. */
   isOutdated: boolean;
+  /** Line on the commit the thread was opened against. */
+  originalLine?: number | null;
+  /** Login that resolved the thread, when resolved. */
+  resolvedBy?: string | null;
+  /** The opening comment first, then the latest replies, oldest first. */
   comments: ReviewThreadComment[];
+}
+
+/** What the comment judge decided about one resolved thread. */
+export type ThreadVerdict = 'fixed' | 'not_fixed' | 'accepted';
+
+/**
+ * - `queued`: a `resolved` event arrived; waiting to be judged.
+ * - `pending`: resolved before any commit after the comment; judged on the next push.
+ * - `skipped`: not judged (`[skip judge]`, re-opened or gone before judging).
+ * - `escalated`: judged `not_fixed` too often; left to a human for good.
+ */
+export type ThreadJudgmentStatus =
+  ThreadVerdict | 'queued' | 'pending' | 'skipped' | 'escalated';
+
+export interface ThreadJudgmentRecord {
+  verdict: ThreadVerdict;
+  headSha: string;
+  judgedAt: Date;
+}
+
+/** Firestore `thread_judgments`: the judge's state for one review thread. */
+export interface ThreadJudgmentDoc {
+  provider: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
+  /** `provider:owner:repo:prNumber`, for per-PR queries. */
+  prKey: string;
+  /** GraphQL node id of the thread. */
+  threadId: string;
+  status: ThreadJudgmentStatus;
+  /** When the latest `resolved` event queued the thread (epoch ms). */
+  queuedAtMs: number;
+  /** `not_fixed` verdicts so far; the third one escalates. */
+  notFixedCount: number;
+  lastVerdict?: ThreadJudgmentRecord & { reason: string; model: string };
+  /** Newest last, at most 10. */
+  history: ThreadJudgmentRecord[];
+  /** Why the thread was skipped, when `status` is `skipped`. */
+  skipReason?: string;
+  updatedAt: Date;
+}
+
+/** One change the adapter makes on GitHub for a judged thread. */
+export type ThreadJudgmentAction =
+  | {
+      /** Re-open the thread and reply with what is still wrong. */
+      type: 'reopen';
+      threadId: string;
+      body: string;
+    }
+  | {
+      /** Confirm a correct resolution with a reaction. */
+      type: 'react';
+      threadId: string;
+      /** GraphQL node id of the comment to react to. */
+      commentId: string;
+    };
+
+/** Published on the review-results topic next to review results. */
+export interface ThreadJudgmentsPayload {
+  kind: 'thread-judgments';
+  provider: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
+  actions: ThreadJudgmentAction[];
+  /** True when a thread was re-opened: an earlier bot approval no longer holds. */
+  dismissApprovals: boolean;
+}
+
+/** Recorded on the PR after each comment-judge run. */
+export interface CommentJudgeMetrics {
+  judgedAt: Date;
+  /** Threads sent to the model. */
+  judged: number;
+  verdicts: Record<ThreadVerdict, number>;
+  pending: number;
+  skipped: number;
+  escalated: number;
+  usage: TokenUsage;
+  /** Set when the run failed; queued threads are retried on the next event. */
+  failure?: string;
 }
 
 export interface PRDiffResult {
@@ -143,6 +245,13 @@ export interface GitAdapterContract {
     prNumber: number,
   ): Promise<PRDiffResult>;
   getRepoTarball(owner: string, repo: string, ref?: string): Promise<Response>;
+  /** UTF-8 content of `path` at `ref`, or null when there is no such file. */
+  getFileContent(
+    owner: string,
+    repo: string,
+    path: string,
+    ref: string,
+  ): Promise<string | null>;
   getReviewThreads(
     owner: string,
     repo: string,

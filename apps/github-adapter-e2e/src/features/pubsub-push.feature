@@ -19,3 +19,8 @@ Feature: Adapter Pub/Sub Push Review Results
       | src/main.ts | 3    | Fix me |
     Then the push request responds with HTTP 200
     And the push response indicates non-retryable error "GitHub App is not installed on uninstalled-org/private-repo"
+
+  Scenario: PubSub pushes comment-judge verdicts to Adapter
+    When PubSub pushes thread judgments for "usermeme/test-repo" PR #51 re-opening thread "PRRT_1" and confirming comment "PRRC_2"
+    Then the push request responds with HTTP 200
+    And GitHub receives the GraphQL operations "Unresolve, Reply, React"

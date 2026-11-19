@@ -23,18 +23,34 @@ function page(
   };
 }
 
+const OPENER = {
+  id: 'C1',
+  body: 'This can be null.',
+  createdAt: '2026-11-18T10:00:00Z',
+  diffHunk: '@@ -1,2 +1,3 @@\n+const a = maybe();',
+  originalCommit: { oid: 'sha-comment' },
+  author: { login: 'other-bot[bot]' },
+};
+
+const REPLY = {
+  id: 'C2',
+  body: 'Intended, see ADR-7.',
+  createdAt: '2026-11-18T11:00:00Z',
+  originalCommit: { oid: 'sha-comment' },
+  author: null,
+};
+
 const NODE = {
   id: 'T1',
   path: 'src/a.ts',
   line: null,
+  originalLine: 3,
   isResolved: true,
   isOutdated: true,
-  comments: {
-    nodes: [
-      { body: 'This can be null.', author: { login: 'other-bot[bot]' } },
-      { body: 'Intended, see ADR-7.', author: null },
-    ],
-  },
+  resolvedBy: { login: 'alice' },
+  opener: { nodes: [OPENER] },
+  // `last: 9` also returns the opener when the thread is short.
+  latest: { nodes: [OPENER, REPLY] },
 };
 
 describe('fetchReviewThreads', () => {
@@ -55,11 +71,26 @@ describe('fetchReviewThreads', () => {
       id: 'T1',
       path: 'src/a.ts',
       line: null,
+      originalLine: 3,
       isResolved: true,
       isOutdated: true,
+      resolvedBy: 'alice',
       comments: [
-        { author: 'other-bot[bot]', body: 'This can be null.' },
-        { author: 'ghost', body: 'Intended, see ADR-7.' },
+        {
+          author: 'other-bot[bot]',
+          body: 'This can be null.',
+          id: 'C1',
+          createdAt: '2026-11-18T10:00:00Z',
+          originalCommitSha: 'sha-comment',
+          diffHunk: '@@ -1,2 +1,3 @@\n+const a = maybe();',
+        },
+        {
+          author: 'ghost',
+          body: 'Intended, see ADR-7.',
+          id: 'C2',
+          createdAt: '2026-11-18T11:00:00Z',
+          originalCommitSha: 'sha-comment',
+        },
       ],
     });
     expect(graphql.mock.calls[1][1]).toMatchObject({ cursor: 'cursor-1' });

@@ -38,6 +38,20 @@ export interface EndpointPayloadRecord {
       head: string;
     };
   };
+  '/api/v1/repos/:owner/:repo/contents': {
+    Path: {
+      owner: string;
+      repo: string;
+    };
+    Params?: {
+      owner: string;
+      repo: string;
+    };
+    Query: {
+      path: string;
+      ref: string;
+    };
+  };
   '/api/v1/repos/:owner/:repo/tarball': {
     Path: {
       owner: string;
@@ -76,6 +90,7 @@ export const ENDPOINTS = {
   PR_THREADS: '/api/v1/repos/:owner/:repo/pulls/:prNumber/threads',
   TARBALL: '/api/v1/repos/:owner/:repo/tarball',
   COMPARE: '/api/v1/repos/:owner/:repo/compare',
+  CONTENTS: '/api/v1/repos/:owner/:repo/contents',
   PUBSUB_PR_EVENTS: '/api/v1/pubsub/pr-events',
   PUBSUB_REVIEW_RESULTS: '/api/v1/pubsub/review-results',
   WEBHOOKS: '/api/v1/webhooks',

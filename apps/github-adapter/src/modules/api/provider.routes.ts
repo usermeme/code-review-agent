@@ -124,7 +124,38 @@ export const providerRoutes: FastifyPluginAsync<ProviderRoutesOptions> = async (
     }
   });
 
-  // 4. Download Repository Tarball Archive
+  // 4. One file's content at a ref (comment judge: current code)
+  fastify.get<{
+    Params: NonNullable<
+      EndpointPayloadRecord['/api/v1/repos/:owner/:repo/contents']['Params']
+    >;
+    Querystring: EndpointPayloadRecord['/api/v1/repos/:owner/:repo/contents']['Query'];
+  }>('/repos/:owner/:repo/contents', async (request, reply) => {
+    const { owner, repo } = request.params;
+    const { path, ref } = request.query;
+    if (!path || !ref) {
+      return reply.code(400).send({ error: 'path and ref are required' });
+    }
+
+    try {
+      const content = await githubService.getFileContent(
+        owner,
+        repo,
+        path,
+        ref,
+      );
+      return { path, ref, content };
+    } catch (error) {
+      return sendProviderError(
+        fastify,
+        reply,
+        'Failed to fetch file content',
+        error,
+      );
+    }
+  });
+
+  // 5. Download Repository Tarball Archive
   fastify.get<{
     Params: NonNullable<
       EndpointPayloadRecord['/api/v1/repos/:owner/:repo/tarball']['Params']
