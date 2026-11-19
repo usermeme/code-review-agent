@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CoreEnvService } from '../env.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
+import type { CommentJudgeService } from './comment-judge/comment-judge.service.js';
 import { EventOrchestratorService } from './event-orchestrator.service.js';
 
 function createTarGzBuffer(
@@ -593,6 +594,133 @@ describe('EventOrchestratorService', () => {
       });
 
       expect(mockGitAdapter.getCompareDiff).not.toHaveBeenCalled();
+    });
+  });
+  describe('comment judge and feature flags', () => {
+    const PR_META = {
+      provider: 'github',
+      owner: 'test-org',
+      repo: 'test-repo',
+      prNumber: 42,
+      title: 'Test PR',
+      author: 'octocat',
+      branch: 'feat',
+      headSha: 'sha1',
+      htmlUrl: 'https://github.com/test-org/test-repo/pull/42',
+    };
+
+    function orchestrator(
+      flags: Record<string, boolean>,
+      judge?: { run: ReturnType<typeof vi.fn> },
+    ) {
+      const envService = {
+        get: vi.fn((key: string) => {
+          if (key in flags) return flags[key];
+          if (key === 'REVIEW_RESULTS_TOPIC') return 'review-results-topic';
+          if (key === 'REVIEW_TIMEOUT_MS') return 30_000;
+          return undefined;
+        }),
+      } as unknown as CoreEnvService;
+      return new EventOrchestratorService({
+        envService,
+        prRepository: mockPrRepo as unknown as PrRepository,
+        pubsub: mockPubSub as unknown as PubSub,
+        gitAdapterClient: mockGitAdapter as unknown as GitAdapterContract,
+        models: createMockAgentModels({}, { defaultResponse: 'Fine.' }),
+        commentJudge: judge as unknown as CommentJudgeService,
+      });
+    }
+
+    function judgeStub() {
+      return { run: vi.fn().mockResolvedValue({ judged: 2 }) };
+    }
+
+    it('sends a resolved thread to the comment judge, without reviewing', async () => {
+      const judge = judgeStub();
+
+      const res = await orchestrator({}, judge).ingestPREvent({
+        prMeta: { ...PR_META, action: 'thread_resolved', threadId: 'T1' },
+      });
+
+      expect(res).toEqual({
+        success: true,
+        status: 'completed',
+        message: 'Judged 2 resolved thread(s)',
+      });
+      expect(judge.run).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: 'T1' }),
+        'resolved',
+        undefined,
+      );
+      expect(mockGitAdapter.getPRDiff).not.toHaveBeenCalled();
+    });
+
+    it('ignores resolved threads when the comment judge is disabled', async () => {
+      const judge = judgeStub();
+
+      const res = await orchestrator(
+        { COMMENT_JUDGE_ENABLED: false },
+        judge,
+      ).ingestPREvent({
+        prMeta: { ...PR_META, action: 'thread_resolved', threadId: 'T1' },
+      });
+
+      expect(res.status).toBe('ignored');
+      expect(judge.run).not.toHaveBeenCalled();
+    });
+
+    it('reviews a push and judges waiting threads alongside', async () => {
+      const judge = judgeStub();
+
+      const res = await orchestrator({}, judge).ingestPREvent({
+        prMeta: { ...PR_META, action: 'synchronize' },
+      });
+
+      expect(res.status).toBe('completed');
+      expect(judge.run).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'synchronize' }),
+        'push',
+        undefined,
+      );
+    });
+
+    it('still judges on a push with code review disabled, and does not review', async () => {
+      const judge = judgeStub();
+
+      const res = await orchestrator(
+        { CODE_REVIEW_ENABLED: false },
+        judge,
+      ).ingestPREvent({ prMeta: { ...PR_META, action: 'synchronize' } });
+
+      expect(res).toEqual({
+        success: true,
+        status: 'ignored',
+        message: 'Code review is disabled.',
+      });
+      expect(judge.run).toHaveBeenCalledTimes(1);
+      expect(mockGitAdapter.getPRDiff).not.toHaveBeenCalled();
+    });
+
+    it('does not judge on a newly opened PR', async () => {
+      const judge = judgeStub();
+
+      await orchestrator({}, judge).ingestPREvent({
+        prMeta: { ...PR_META, action: 'opened' },
+      });
+
+      expect(judge.run).not.toHaveBeenCalled();
+    });
+
+    it('never fails the review when judging after a push fails', async () => {
+      const judge = {
+        run: vi.fn().mockRejectedValue(new Error('graphql down')),
+      };
+
+      const res = await orchestrator({}, judge).ingestPREvent({
+        prMeta: { ...PR_META, action: 'synchronize' },
+      });
+
+      expect(res.status).toBe('completed');
     });
   });
 });

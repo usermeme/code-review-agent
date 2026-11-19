@@ -4,7 +4,7 @@ import { Then, When } from '@cucumber/cucumber';
 
 import { CoreWorld } from '../support/world.js';
 
-function buildEnvelope(
+export function buildEnvelope(
   repoFullName: string,
   prNumber: number,
   action: string,
@@ -55,7 +55,7 @@ When(
         repoFullName,
         prNumber,
         action,
-        `msg-${Date.now()}`,
+        this.nextMessageId(),
       ),
     });
   },

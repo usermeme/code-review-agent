@@ -10,6 +10,7 @@ import {
   runReviewPipeline,
 } from '@code-review-agent/review-agent';
 import {
+  type CommentJudgeMetrics,
   type GitAdapterContract,
   NonRetryableTaskError,
   type PRDiffResult,
@@ -26,6 +27,7 @@ import { FastifyBaseLogger } from 'fastify';
 
 import type { CoreEnvService } from '../env.js';
 import { PrRepository } from '../modules/database/repositories/pr.repository.js';
+import type { CommentJudgeService } from './comment-judge/comment-judge.service.js';
 
 export interface PREventResult {
   success: boolean;
@@ -39,6 +41,8 @@ export interface EventOrchestratorDependencies {
   pubsub: PubSub;
   gitAdapterClient: GitAdapterContract;
   models: AgentModels;
+  /** Checks resolved review threads; without it they are ignored. */
+  commentJudge?: CommentJudgeService;
 }
 
 const REVIEW_ACTIONS = new Set([
@@ -49,6 +53,14 @@ const REVIEW_ACTIONS = new Set([
   'ready_for_review',
   'manual_trigger',
 ]);
+
+function judgedCount(metrics: CommentJudgeMetrics | null): number {
+  return metrics?.judged ?? 0;
+}
+
+function ignored(message: string): PREventResult {
+  return { success: true, status: 'ignored', message };
+}
 
 function isReviewableAction(action: string): boolean {
   return REVIEW_ACTIONS.has(action);
@@ -91,6 +103,7 @@ export class EventOrchestratorService {
   private readonly envService: CoreEnvService;
   private readonly gitAdapterClient: GitAdapterContract;
   private readonly models: AgentModels;
+  private readonly commentJudge?: CommentJudgeService;
 
   constructor(deps: EventOrchestratorDependencies) {
     this.pubsub = deps.pubsub;
@@ -98,6 +111,7 @@ export class EventOrchestratorService {
     this.envService = deps.envService;
     this.gitAdapterClient = deps.gitAdapterClient;
     this.models = deps.models;
+    this.commentJudge = deps.commentJudge;
   }
 
   async ingestPREvent(
@@ -120,15 +134,94 @@ export class EventOrchestratorService {
       logger.info(`[Core] Ingesting PR event: ${action} for ${prKey}`);
     }
 
-    if (!isReviewableAction(action)) {
-      return {
-        success: true,
-        status: 'ignored',
-        message: `Ignored action: ${action}`,
-      };
+    if (action === 'thread_resolved') {
+      return this.judgeResolvedThread(meta, logger);
     }
 
+    if (!isReviewableAction(action)) {
+      return ignored(`Ignored action: ${action}`);
+    }
+    return this.handleReviewEvent(meta, prKey, logger);
+  }
+
+  /** Reviews the PR and, on a push, judges threads waiting for that push. */
+  private async handleReviewEvent(
+    meta: PRMeta,
+    prKey: string,
+    logger?: FastifyBaseLogger,
+  ): Promise<PREventResult> {
+    // A push can carry the fix a resolved thread was waiting for.
+    const judging =
+      meta.action === 'synchronize'
+        ? this.judgeAfterPush(meta, logger)
+        : Promise.resolve();
+    const [review] = await Promise.allSettled([
+      this.reviewIfEnabled(meta, prKey, logger),
+      judging,
+    ]);
+    if (review.status === 'rejected') throw review.reason;
+    return review.value;
+  }
+
+  private isEnabled(
+    flag: 'CODE_REVIEW_ENABLED' | 'COMMENT_JUDGE_ENABLED',
+  ): boolean {
+    // Unset means on; only an explicit `false` turns a feature off.
+    return this.envService.get(flag) !== false;
+  }
+
+  private async reviewIfEnabled(
+    meta: PRMeta,
+    prKey: string,
+    logger?: FastifyBaseLogger,
+  ): Promise<PREventResult> {
+    if (!this.isEnabled('CODE_REVIEW_ENABLED')) {
+      return ignored('Code review is disabled.');
+    }
     return this.processReview(meta, prKey, logger);
+  }
+
+  /**
+   * A failure here is left to Pub/Sub's retry: the thread is already
+   * queued, so a redelivery judges it without queueing it twice.
+   */
+  private async judgeResolvedThread(
+    meta: PRMeta,
+    logger?: FastifyBaseLogger,
+  ): Promise<PREventResult> {
+    const judge = this.activeJudge();
+    if (!judge) return ignored('Comment judge is disabled.');
+    const metrics = await judge.run(meta, 'resolved', logger);
+    logger?.info(
+      { judgment: metrics },
+      `[Core] Comment judge ran for ${meta.owner}/${meta.repo} #${meta.prNumber}`,
+    );
+    return {
+      success: true,
+      status: 'completed',
+      message: `Judged ${judgedCount(metrics)} resolved thread(s)`,
+    };
+  }
+
+  /** The comment judge when it is wired and switched on. */
+  private activeJudge(): CommentJudgeService | undefined {
+    return this.isEnabled('COMMENT_JUDGE_ENABLED')
+      ? this.commentJudge
+      : undefined;
+  }
+
+  /** Never fails the push's review: waiting threads are retried next time. */
+  private async judgeAfterPush(
+    meta: PRMeta,
+    logger?: FastifyBaseLogger,
+  ): Promise<void> {
+    const judge = this.activeJudge();
+    if (!judge) return;
+    try {
+      await judge.run(meta, 'push', logger);
+    } catch (error) {
+      logger?.warn({ err: error }, '[Core] Comment judge failed after a push');
+    }
   }
 
   async publishReviewResults(payload: ReviewResultPayload): Promise<void> {

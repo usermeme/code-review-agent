@@ -8,6 +8,8 @@ import { GitAdapterClient } from './modules/adapter/git-adapter.client.js';
 import { FirestoreDatabaseService } from './modules/database/firestore.service.js';
 import { DeliveryRepository } from './modules/database/repositories/delivery.repository.js';
 import { PrRepository } from './modules/database/repositories/pr.repository.js';
+import { ThreadJudgmentRepository } from './modules/database/repositories/thread-judgment.repository.js';
+import { CommentJudgeService } from './services/comment-judge/comment-judge.service.js';
 import { EventOrchestratorService } from './services/event-orchestrator.service.js';
 
 async function bootstrap() {
@@ -23,6 +25,18 @@ async function bootstrap() {
     envService.get('GIT_ADAPTER_URL'),
   );
   const models = createAgentModels(envService.data);
+  const commentJudge = new CommentJudgeService({
+    gitAdapterClient,
+    judgments: new ThreadJudgmentRepository(databaseService),
+    claims: deliveryRepository,
+    prRepository,
+    model: models.reviewer,
+    publish: async (payload) => {
+      await pubsub
+        .topic(envService.get('REVIEW_RESULTS_TOPIC'))
+        .publishMessage({ json: payload });
+    },
+  });
 
   const orchestrator = new EventOrchestratorService({
     envService,
@@ -30,6 +44,7 @@ async function bootstrap() {
     prRepository,
     gitAdapterClient,
     models,
+    commentJudge,
   });
 
   const server = await buildCoreServer({
