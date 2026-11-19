@@ -134,15 +134,18 @@ export class GithubService implements GitAdapterContract {
           format: 'diff',
         },
       }),
-      octokit.rest.pulls.listFiles({
+      // listFiles returns 30 files per page by default; GitHub serves up to
+      // 3000 files per PR, 100 per page.
+      octokit.paginate(octokit.rest.pulls.listFiles, {
         owner,
         repo,
         pull_number: prNumber,
+        per_page: 100,
       }),
     ]);
 
     const diff = diffResponse.data as unknown as string;
-    const changedFiles = filesResponse.data.map((file) => file.filename);
+    const changedFiles = filesResponse.map((file) => file.filename);
 
     return {
       diff,
