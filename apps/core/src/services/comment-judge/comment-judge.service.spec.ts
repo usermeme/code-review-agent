@@ -21,7 +21,10 @@ import {
   ThreadJudgmentRepository,
 } from '../../modules/database/repositories/thread-judgment.repository.js';
 import { InMemoryDatabaseService } from '../../modules/database/testing/in-memory-database.service.js';
-import { CommentJudgeService } from './comment-judge.service.js';
+import {
+  CommentJudgeRunError,
+  CommentJudgeService,
+} from './comment-judge.service.js';
 import {
   COMMENT_SHA,
   HEAD_SHA,
@@ -94,6 +97,7 @@ describe('CommentJudgeService', () => {
     typeof vi.fn<(payload: ThreadJudgmentsPayload) => Promise<void>>
   >;
   let getReviewThreads: ReturnType<typeof vi.fn>;
+  let getFileContent: ReturnType<typeof vi.fn>;
   let git: GitAdapterContract;
   let nowMs: number;
 
@@ -127,6 +131,10 @@ describe('CommentJudgeService', () => {
     );
     nowMs = 5_000;
     getReviewThreads = vi.fn(async () => threads);
+    getFileContent = vi.fn(
+      async () =>
+        'export const refund = (a) => {\n  if (a < 0) throw new Error("negative");',
+    );
     git = {
       getReviewThreads,
       getCompareDiff: vi.fn(async () => ({
@@ -134,10 +142,7 @@ describe('CommentJudgeService', () => {
         changedFiles: ['src/refund.ts'],
         status: 'ahead' as const,
       })),
-      getFileContent: vi.fn(
-        async () =>
-          'export const refund = (a) => {\n  if (a < 0) throw new Error("negative");',
-      ),
+      getFileContent,
       getRepoTarball: vi.fn(),
     } as unknown as GitAdapterContract;
   });
@@ -296,34 +301,69 @@ describe('CommentJudgeService', () => {
     expect((await doc())?.status).toBe('queued');
   });
 
-  it('keeps the thread queued when the model gives no verdict', async () => {
+  it('keeps the thread queued and fails the event when the model gives no verdict', async () => {
     const llm = new JudgeLlm(() => null);
 
-    const metrics = await service(llm).run(META, 'resolved');
+    await expect(service(llm).run(META, 'resolved')).rejects.toThrow(
+      CommentJudgeRunError,
+    );
 
     expect(published).toHaveLength(0);
     expect((await doc())?.status).toBe('queued');
-    expect(metrics?.failure).toBe(
+    const pr = (await prRepository.getPRStatus(PR_KEY)) as PRState;
+    expect(pr.lastJudgment?.failure).toBe(
       'Comment judge finished without calling submit_judgments.',
     );
 
-    // The claim was released, so the next run can judge the thread.
+    // The claim was released, so the redelivery can judge the thread.
     const retry = new JudgeLlm(() => [
       { thread: 0, verdict: 'fixed', reason: 'Done.' },
     ]);
-    await service(retry).run({ ...META, threadId: undefined }, 'resolved');
+    await service(retry).run(META, 'resolved');
     expect((await doc())?.status).toBe('fixed');
   });
 
-  it('records nothing as judged when publishing to GitHub fails', async () => {
+  it('records nothing as judged and fails the event when publishing to GitHub fails', async () => {
     publish.mockRejectedValue(new Error('pubsub down'));
     const llm = new JudgeLlm(() => [
       { thread: 0, verdict: 'not_fixed', reason: 'Still broken.' },
     ]);
 
-    const metrics = await service(llm).run(META, 'resolved');
+    await expect(service(llm).run(META, 'resolved')).rejects.toThrow(
+      'Comment judge failed: pubsub down',
+    );
+
+    expect(await doc()).toMatchObject({ status: 'queued', notFixedCount: 0 });
+    const pr = (await prRepository.getPRStatus(PR_KEY)) as PRState;
+    expect(pr.lastJudgment?.failure).toBe('pubsub down');
+  });
+
+  it('fails the event when reading the evidence fails', async () => {
+    getFileContent.mockRejectedValue(new Error('adapter 502'));
+    const llm = new JudgeLlm(() => []);
+
+    await expect(service(llm).run(META, 'resolved')).rejects.toThrow(
+      'Comment judge failed: adapter 502',
+    );
+    expect((await doc())?.status).toBe('queued');
+  });
+
+  it('does not fail a push when judging its waiting threads fails', async () => {
+    await service(new JudgeLlm(() => [])).run(
+      { ...META, headSha: COMMENT_SHA },
+      'resolved',
+    );
+    publish.mockRejectedValue(new Error('pubsub down'));
+    const llm = new JudgeLlm(() => [
+      { thread: 0, verdict: 'fixed', reason: 'Done.' },
+    ]);
+
+    const metrics = await service(llm).run(
+      { ...META, action: 'synchronize', threadId: undefined },
+      'push',
+    );
 
     expect(metrics?.failure).toBe('pubsub down');
-    expect(await doc()).toMatchObject({ status: 'queued', notFixedCount: 0 });
+    expect((await doc())?.status).toBe('pending');
   });
 });

@@ -40,8 +40,9 @@ import {
 } from './verdicts.js';
 
 const MAX_THREADS_PER_BATCH = 10;
-/** Threads beyond this stay queued for the next event or push. */
 const MAX_BATCHES_PER_RUN = 3;
+/** Threads beyond this stay queued, unclaimed, for the next event or push. */
+const MAX_THREADS_PER_RUN = MAX_THREADS_PER_BATCH * MAX_BATCHES_PER_RUN;
 const JUDGE_PROFILE = {
   thinkingLevel: ThinkingLevel.HIGH,
   maxLlmCalls: 6,
@@ -79,6 +80,24 @@ interface BatchResults {
   judged: JudgedThread[];
   usage: TokenUsage;
   failure?: string;
+}
+
+interface JudgeRun {
+  metrics: CommentJudgeMetrics;
+  /** Claimed threads this run could not judge; they stay queued. */
+  unjudged: Set<string>;
+}
+
+/**
+ * Thrown on a `resolved` run that failed to judge the event's own thread,
+ * so Pub/Sub redelivers the event instead of acking it. The thread stays
+ * queued and its claim is released, so the redelivery judges it.
+ */
+export class CommentJudgeRunError extends Error {
+  constructor(failure: string) {
+    super(`Comment judge failed: ${failure}`);
+    this.name = 'CommentJudgeRunError';
+  }
 }
 
 function prKeyOf(meta: PRMeta): string {
@@ -173,7 +192,9 @@ export class CommentJudgeService {
   /**
    * `resolved` queues the event's thread first; `push` only picks up
    * threads that were waiting for a new commit. Returns null when there was
-   * nothing to judge.
+   * nothing to judge. A `resolved` run throws `CommentJudgeRunError` when a
+   * failure left the event's thread unjudged; a `push` run never does, as
+   * its review must not be retried for the judge's sake.
    */
   async run(
     meta: PRMeta,
@@ -182,14 +203,29 @@ export class CommentJudgeService {
   ): Promise<CommentJudgeMetrics | null> {
     if (!meta.headSha) return null;
     const prKey = prKeyOf(meta);
+    const awaiting = await this.awaitingDocs(meta, prKey, trigger);
+    if (awaiting.length === 0) return null;
+    const run = await this.judgeAwaiting(
+      meta,
+      meta.headSha,
+      prKey,
+      awaiting,
+      logger,
+    );
+    if (trigger === 'resolved') throwIfLeftUnjudged(run, meta.threadId);
+    return run.metrics;
+  }
+
+  private async awaitingDocs(
+    meta: PRMeta,
+    prKey: string,
+    trigger: JudgeTrigger,
+  ): Promise<ThreadJudgmentDoc[]> {
     if (trigger === 'resolved' && meta.threadId) {
       await this.queue(meta, prKey, meta.threadId);
     }
-    const awaiting = (await this.deps.judgments.findByPr(prKey)).filter(
-      isAwaitingJudgment,
-    );
-    if (awaiting.length === 0) return null;
-    return this.judgeAwaiting(meta, meta.headSha, prKey, awaiting, logger);
+    const docs = await this.deps.judgments.findByPr(prKey);
+    return docs.filter(isAwaitingJudgment);
   }
 
   private async queue(meta: PRMeta, prKey: string, threadId: string) {
@@ -215,7 +251,7 @@ export class CommentJudgeService {
     prKey: string,
     awaiting: ThreadJudgmentDoc[],
     logger?: FastifyBaseLogger,
-  ): Promise<CommentJudgeMetrics> {
+  ): Promise<JudgeRun> {
     const threads = await this.deps.gitAdapterClient.getReviewThreads(
       meta.owner,
       meta.repo,
@@ -223,14 +259,14 @@ export class CommentJudgeService {
     );
     const plans = planAll(awaiting, threads, headSha);
     await this.recordWaiting(plans);
-    const claimed = await this.claim(plans.judge);
-    const metrics = await this.judgeClaimed(meta, headSha, claimed, logger);
-    metrics.pending = plans.pending.length;
-    metrics.skipped = plans.skipped.length;
+    const claimed = await this.claim(plans.judge.slice(0, MAX_THREADS_PER_RUN));
+    const run = await this.judgeClaimed(meta, headSha, claimed, logger);
+    run.metrics.pending = plans.pending.length;
+    run.metrics.skipped = plans.skipped.length;
     await this.deps.prRepository.updatePRStatus(prKey, {
-      lastJudgment: metrics,
+      lastJudgment: run.metrics,
     });
-    return metrics;
+    return run;
   }
 
   /** Stores which threads wait for a push and which were skipped, and why. */
@@ -265,17 +301,23 @@ export class CommentJudgeService {
     headSha: string,
     claimed: Claimed[],
     logger?: FastifyBaseLogger,
-  ): Promise<CommentJudgeMetrics> {
+  ): Promise<JudgeRun> {
     const metrics = emptyMetrics(new Date(this.now()));
-    if (claimed.length === 0) return metrics;
+    if (claimed.length === 0) return { metrics, unjudged: new Set() };
     try {
       const results = await this.judgeBatches(meta, headSha, claimed);
       await this.settle(meta, headSha, claimed, results, metrics);
-      return { ...metrics, usage: results.usage, ...failureOf(results) };
+      return {
+        metrics: { ...metrics, usage: results.usage, ...failureOf(results) },
+        unjudged: unjudgedIds(claimed, results.judged),
+      };
     } catch (error) {
       logger?.warn({ err: error }, '[Core] Comment judge run failed');
       await this.releaseAll(claimed);
-      return { ...metrics, failure: describeError(error) };
+      return {
+        metrics: { ...metrics, failure: describeError(error) },
+        unjudged: unjudgedIds(claimed, []),
+      };
     }
   }
 
@@ -285,10 +327,7 @@ export class CommentJudgeService {
     claimed: Claimed[],
   ): Promise<BatchResults> {
     const results: BatchResults = { judged: [], usage: emptyTokenUsage() };
-    const batches = chunk(claimed, MAX_THREADS_PER_BATCH).slice(
-      0,
-      MAX_BATCHES_PER_RUN,
-    );
+    const batches = chunk(claimed, MAX_THREADS_PER_BATCH);
     const loadWorkspace = this.workspaceLoader(meta, headSha);
     for (const batch of batches) {
       const evidence = await buildJudgeThreads(
@@ -397,6 +436,27 @@ export class CommentJudgeService {
         this.deps.claims.release(item.claimKey).catch(() => undefined),
       ),
     );
+  }
+}
+
+function unjudgedIds(claimed: Claimed[], judged: JudgedThread[]): Set<string> {
+  const judgedIds = new Set(judged.map((item) => item.thread.id));
+  return new Set(
+    claimed
+      .map((item) => item.thread.id)
+      .filter((threadId) => !judgedIds.has(threadId)),
+  );
+}
+
+/**
+ * Only the event's own thread decides. Other threads failed here stay
+ * queued for the next event or push; a thread another run claimed is that
+ * run's to judge.
+ */
+function throwIfLeftUnjudged(run: JudgeRun, threadId?: string): void {
+  const { failure } = run.metrics;
+  if (failure && threadId && run.unjudged.has(threadId)) {
+    throw new CommentJudgeRunError(failure);
   }
 }
 
