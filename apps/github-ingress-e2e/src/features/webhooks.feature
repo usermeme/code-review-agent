@@ -19,3 +19,8 @@ Feature: GitHub Webhook Ingestion & PubSub Publishing
     When GitHub sends a webhook with an invalid HMAC signature
     Then the webhook response status is 401
     And PubSub receives no PR events
+
+  Scenario: Ingesting a resolved review thread for the comment judge
+    When GitHub resolves review thread "PRRT_42" on "usermeme/test-repo" PR #30
+    Then the webhook response status is 200
+    And PubSub receives a PR event with action "thread_resolved" for thread "PRRT_42"

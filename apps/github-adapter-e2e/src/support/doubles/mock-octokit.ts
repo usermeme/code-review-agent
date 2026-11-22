@@ -38,6 +38,21 @@ export class MockOctokit {
     'diff --git a/src/index.ts b/src/index.ts\n--- a/src/index.ts\n+++ b/src/index.ts\n@@ -1,3 +1,4 @@\n+const x = 1;';
   public changedFiles = ['src/index.ts'];
   public headSha = 'mock-head-sha-12345';
+  /** GraphQL operations called, e.g. `Unresolve`, with their variables. */
+  public graphqlCalls: { operation: string; variables: unknown }[] = [];
+
+  graphql = async (query: string, variables: Record<string, unknown>) => {
+    const operation = /(?:mutation|query) (\w+)/.exec(query)?.[1] ?? '';
+    this.graphqlCalls.push({ operation, variables });
+    if (operation === 'Reply') {
+      return {
+        addPullRequestReviewThreadReply: {
+          comment: { author: { login: 'code-review-agent[bot]' } },
+        },
+      };
+    }
+    return {};
+  };
 
   /** Single-page stand-in for Octokit's paginate: returns the method's data. */
   paginate = async <Params, Item>(
@@ -110,6 +125,7 @@ export class MockOctokit {
   };
 
   clear(): void {
+    this.graphqlCalls = [];
     this.postedComments = [];
     this.postedReviews = [];
     this.postedIssueComments = [];

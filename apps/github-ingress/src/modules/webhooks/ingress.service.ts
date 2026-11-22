@@ -109,6 +109,38 @@ function buildPrMeta(
   };
 }
 
+interface ThreadResolution {
+  ref: PrEventRef;
+  threadId: string;
+  pullRequest: Partial<PullRequestPayload>;
+}
+
+function isOpenThreadResolution(payload: GithubWebhookPayload): boolean {
+  return (
+    payload.action === 'resolved' &&
+    (payload.pull_request?.state ?? 'open') === 'open'
+  );
+}
+
+function readThreadId(payload: GithubWebhookPayload): string {
+  return payload.thread?.node_id ?? '';
+}
+
+function readThreadResolution(
+  payload: GithubWebhookPayload,
+): ThreadResolution | (ProcessedWebhookResult & { ignored: true }) {
+  const threadId = readThreadId(payload);
+  if (!isOpenThreadResolution(payload) || !threadId) {
+    return { ignored: true, reason: 'Ignored review thread action' };
+  }
+  const ref = readPrEventRef(payload);
+  if (!hasCompletePrRef(ref)) {
+    return { ignored: true, reason: 'Missing PR owner, repo or number' };
+  }
+  const pullRequest: Partial<PullRequestPayload> = payload.pull_request ?? {};
+  return { ref, threadId, pullRequest };
+}
+
 function isPrCommentCreated(
   payload: GithubWebhookPayload,
 ): payload is PrCommentPayload {
@@ -199,6 +231,8 @@ export class GithubIngressService {
         return this.processPullRequestEvent(ghPayload, logger);
       case 'issue_comment':
         return this.processIssueCommentEvent(ghPayload, logger);
+      case 'pull_request_review_thread':
+        return this.processReviewThreadEvent(ghPayload, logger);
       default:
         return { ignored: true, reason: 'Ignored GitHub event' };
     }
@@ -254,6 +288,27 @@ export class GithubIngressService {
     const pullRequest: Partial<PullRequestPayload> = payload.pull_request ?? {};
     await this.publishPREvent(buildPrMeta(pullRequest, ref, action, false));
     return { ignored: false, reason: 'PR event published to queue' };
+  }
+
+  /**
+   * A resolved review thread on an open PR goes to the comment judge.
+   * Re-opened threads are ignored: there is nothing to verify.
+   */
+  private async processReviewThreadEvent(
+    payload: GithubWebhookPayload,
+    logger: FastifyBaseLogger,
+  ): Promise<ProcessedWebhookResult> {
+    const event = readThreadResolution(payload);
+    if ('ignored' in event) return event;
+
+    logger.info(
+      `Received resolved review thread ${event.threadId} on ${event.pullRequest.html_url}`,
+    );
+    await this.publishPREvent({
+      ...buildPrMeta(event.pullRequest, event.ref, 'thread_resolved', false),
+      threadId: event.threadId,
+    });
+    return { ignored: false, reason: 'Resolved thread published to queue' };
   }
 
   private async processIssueCommentEvent(

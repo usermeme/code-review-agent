@@ -151,4 +151,58 @@ describe('GithubIngressService', () => {
     expect(result.ignored).toBe(true);
     expect(mockTopic.publishMessage).not.toHaveBeenCalled();
   });
+  describe('pull_request_review_thread events', () => {
+    function threadPayload(action: string, state = 'open') {
+      return {
+        action,
+        thread: { node_id: 'PRRT_abc' },
+        repository: { name: 'my-repo', owner: { login: 'my-org' } },
+        pull_request: {
+          number: 42,
+          title: 'Feature PR',
+          html_url: 'https://github.com/my-org/my-repo/pull/42',
+          user: { login: 'octocat' },
+          head: { ref: 'feat/test', sha: 'head-sha' },
+          base: { ref: 'develop' },
+          state,
+        },
+      };
+    }
+
+    async function send(payload: unknown) {
+      return service.processWebhook(
+        { 'x-github-event': 'pull_request_review_thread' },
+        payload,
+        mockLogger as unknown as FastifyBaseLogger,
+      );
+    }
+
+    it('publishes a resolved thread for the comment judge', async () => {
+      const result = await send(threadPayload('resolved'));
+
+      expect(result.ignored).toBe(false);
+      expect(mockTopic.publishMessage).toHaveBeenCalledWith({
+        json: {
+          prMeta: expect.objectContaining({
+            owner: 'my-org',
+            repo: 'my-repo',
+            prNumber: 42,
+            action: 'thread_resolved',
+            threadId: 'PRRT_abc',
+            headSha: 'head-sha',
+            baseRef: 'develop',
+          }),
+        },
+      });
+    });
+
+    it('ignores re-opened threads and threads on closed PRs', async () => {
+      const reopened = await send(threadPayload('unresolved'));
+      const closed = await send(threadPayload('resolved', 'closed'));
+
+      expect(reopened.ignored).toBe(true);
+      expect(closed.ignored).toBe(true);
+      expect(mockTopic.publishMessage).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -46,6 +46,8 @@ services:
       - VERIFIER_MODEL=${VERIFIER_MODEL:-gemini-4-argon}
       - TRIAGE_MODEL=${TRIAGE_MODEL:-gemini-3.5-flash-lite}
       - REVIEW_TIMEOUT_MS=${REVIEW_TIMEOUT_MS:-480000}
+      - CODE_REVIEW_ENABLED=${CODE_REVIEW_ENABLED:-true}
+      - COMMENT_JUDGE_ENABLED=${COMMENT_JUDGE_ENABLED:-true}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-dummy-key}
       - GIT_ADAPTER_URL=http://adapter:8080
     depends_on:

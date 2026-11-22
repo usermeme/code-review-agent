@@ -1,7 +1,12 @@
-import { createRepoTools, RepoWorkspace } from '@code-review-agent/agent-tools';
+import {
+  createLazyRepoTools,
+  createRepoTools,
+  RepoWorkspace,
+} from '@code-review-agent/agent-tools';
 import type { FunctionTool } from '@google/adk';
 import { describe, expect, it } from 'vitest';
 
+import { createSubmitJudgmentsTool } from '../judge/submit-judgments.tool.js';
 import { createSubmitVerdictsTool } from '../verifier/submit-verdicts.tool.js';
 import { createSubmitReviewTool } from './submit-review.tool.js';
 
@@ -69,18 +74,20 @@ function agentTools(): FunctionTool[] {
   });
   return [
     ...createRepoTools(workspace).all,
+    // Same names as the eager tools, so they get their own test-name prefix.
+    ...createLazyRepoTools(async () => workspace).all,
     createSubmitReviewTool(workspace).tool,
     createSubmitVerdictsTool().tool,
+    createSubmitJudgmentsTool().tool,
   ];
 }
 
 describe('agent tool declarations', () => {
-  it.each(agentTools().map((tool) => [tool.name, tool] as const))(
-    '%s only uses schema fields the Gemini API accepts',
-    (_name, tool) => {
-      const declaration = tool._getDeclaration();
+  it.each(
+    agentTools().map((tool, index) => [`${index}:${tool.name}`, tool] as const),
+  )('%s only uses schema fields the Gemini API accepts', (_name, tool) => {
+    const declaration = tool._getDeclaration();
 
-      expect(unsupportedKeys(declaration.parameters)).toEqual([]);
-    },
-  );
+    expect(unsupportedKeys(declaration.parameters)).toEqual([]);
+  });
 });

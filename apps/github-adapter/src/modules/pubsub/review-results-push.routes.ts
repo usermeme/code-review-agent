@@ -2,6 +2,7 @@ import { parsePubSubPushPayload } from '@code-review-agent/pubsub';
 import {
   NonRetryableTaskError,
   ReviewResultPayload,
+  ThreadJudgmentsPayload,
 } from '@code-review-agent/shared-types';
 import {
   FastifyInstance,
@@ -16,12 +17,54 @@ export interface ReviewResultsPushRoutesOptions {
   githubService: GithubService;
 }
 
-function hasValidPrReference(
-  payload: ReviewResultPayload | undefined,
-): boolean {
+type ResultsMessage = ReviewResultPayload | ThreadJudgmentsPayload;
+
+function isThreadJudgments(
+  payload: ResultsMessage,
+): payload is ThreadJudgmentsPayload {
+  return payload.kind === 'thread-judgments';
+}
+
+function hasValidPrReference(payload: ResultsMessage | undefined): boolean {
   return Boolean(
     payload?.owner && payload.repo && typeof payload.prNumber === 'number',
   );
+}
+
+async function applyJudgments(
+  payload: ThreadJudgmentsPayload,
+  options: ReviewResultsPushRoutesOptions,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  const applied = await options.githubService.applyThreadJudgments(payload);
+  request.log.info(
+    `[ReviewResultsPush] Thread judgments for ${describePr(payload)}: ${applied.reopened} re-opened, ${applied.reacted} confirmed, ${applied.failed} failed, ${applied.dismissedApprovals} approvals dismissed`,
+  );
+  return reply
+    .status(200)
+    .send({ success: applied.failed === 0, data: applied });
+}
+
+async function postReviewResult(
+  payload: ReviewResultPayload,
+  options: ReviewResultsPushRoutesOptions,
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<FastifyReply> {
+  logPosting(request, payload);
+  const res = await options.githubService.postReview(
+    buildPostReviewOptions(payload),
+  );
+  if (res.event === 'APPROVE') {
+    request.log.info(
+      `[ReviewResultsPush] Approved ${describePr(payload)} at ${payload.reviewedSha}`,
+    );
+  }
+  return reply.status(200).send({
+    success: res.success,
+    data: res,
+  });
 }
 
 function buildPostReviewOptions(payload: ReviewResultPayload) {
@@ -37,7 +80,7 @@ function buildPostReviewOptions(payload: ReviewResultPayload) {
   };
 }
 
-function describePr(payload: ReviewResultPayload): string {
+function describePr(payload: ResultsMessage): string {
   return `${payload.owner}/${payload.repo} #${payload.prNumber}`;
 }
 
@@ -88,9 +131,9 @@ export const reviewResultsPushRoutes: FastifyPluginAsync<
   options: ReviewResultsPushRoutesOptions,
 ) => {
   fastify.post('/review-results', async (request, reply) => {
-    let payload: ReviewResultPayload;
+    let payload: ResultsMessage;
     try {
-      payload = parsePubSubPushPayload<ReviewResultPayload>(request.body);
+      payload = parsePubSubPushPayload<ResultsMessage>(request.body);
     } catch (err) {
       request.log.warn(
         `[ReviewResultsPush] Malformed Pub/Sub envelope: ${String(err)}`,
@@ -112,19 +155,10 @@ export const reviewResultsPushRoutes: FastifyPluginAsync<
     }
 
     try {
-      logPosting(request, payload);
-      const res = await options.githubService.postReview(
-        buildPostReviewOptions(payload),
-      );
-      if (res.event === 'APPROVE') {
-        request.log.info(
-          `[ReviewResultsPush] Approved ${describePr(payload)} at ${payload.reviewedSha}`,
-        );
+      if (isThreadJudgments(payload)) {
+        return await applyJudgments(payload, options, request, reply);
       }
-      return reply.status(200).send({
-        success: res.success,
-        data: res,
-      });
+      return await postReviewResult(payload, options, request, reply);
     } catch (error) {
       return handlePostReviewError(error, request, reply);
     }

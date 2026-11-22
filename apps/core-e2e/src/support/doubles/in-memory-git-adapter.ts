@@ -44,6 +44,13 @@ new file mode 100644
 `;
 
 export class InMemoryGitAdapterClient implements GitAdapterContract {
+  /** Files at the PR head, by path. */
+  readonly headFiles = new Map<string, string>();
+  /** Review threads returned for every PR. */
+  threads: ReviewThread[] = [];
+  /** Diff returned by every compare. */
+  compareDiff = defaultDiff;
+
   async getPRDiff(
     owner: string,
     repo: string,
@@ -69,7 +76,7 @@ export class InMemoryGitAdapterClient implements GitAdapterContract {
     void base;
     void head;
     return {
-      diff: defaultDiff,
+      diff: this.compareDiff,
       changedFiles: ['src/index.ts'],
       status: 'ahead',
     };
@@ -83,7 +90,19 @@ export class InMemoryGitAdapterClient implements GitAdapterContract {
     void owner;
     void repo;
     void prNumber;
-    return [];
+    return this.threads;
+  }
+
+  async getFileContent(
+    owner: string,
+    repo: string,
+    path: string,
+    ref: string,
+  ): Promise<string | null> {
+    void owner;
+    void repo;
+    void ref;
+    return this.headFiles.get(path) ?? null;
   }
 
   async getRepoTarball(

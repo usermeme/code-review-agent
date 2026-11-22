@@ -140,4 +140,39 @@ describe('providerRoutes', () => {
       nonRetryable: true,
     });
   });
+  it('GET /repos/:owner/:repo/contents returns a file at a ref', async () => {
+    mockGithubService.getFileContent = vi
+      .fn()
+      .mockResolvedValue('const a = 1;');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/contents?path=src%2Fa.ts&ref=sha1',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      path: 'src/a.ts',
+      ref: 'sha1',
+      content: 'const a = 1;',
+    });
+    expect(mockGithubService.getFileContent).toHaveBeenCalledWith(
+      'test-owner',
+      'test-repo',
+      'src/a.ts',
+      'sha1',
+    );
+  });
+
+  it('GET /repos/:owner/:repo/contents requires path and ref', async () => {
+    mockGithubService.getFileContent = vi.fn();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/repos/test-owner/test-repo/contents?path=src%2Fa.ts',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(mockGithubService.getFileContent).not.toHaveBeenCalled();
+  });
 });
