@@ -7,15 +7,16 @@ import {
   type CommentJudgeResult,
   runCommentJudge,
 } from '@code-review-agent/review-agent';
-import type {
-  CommentJudgeMetrics,
-  GitAdapterContract,
-  PRMeta,
-  ReviewThread,
-  ThreadJudgmentAction,
-  ThreadJudgmentDoc,
-  ThreadJudgmentsPayload,
-  TokenUsage,
+import {
+  type CommentJudgeMetrics,
+  type GitAdapterContract,
+  NonRetryableTaskError,
+  type PRMeta,
+  type ReviewThread,
+  type ThreadJudgmentAction,
+  type ThreadJudgmentDoc,
+  type ThreadJudgmentsPayload,
+  type TokenUsage,
 } from '@code-review-agent/shared-types';
 import type { BaseLlm } from '@google/adk';
 import { ThinkingLevel } from '@google/genai';
@@ -43,6 +44,11 @@ const MAX_THREADS_PER_BATCH = 10;
 const MAX_BATCHES_PER_RUN = 3;
 /** Threads beyond this stay queued, unclaimed, for the next event or push. */
 const MAX_THREADS_PER_RUN = MAX_THREADS_PER_BATCH * MAX_BATCHES_PER_RUN;
+/**
+ * Failed attempts at the event's thread before its `resolved` event is
+ * acked instead of redelivered. Each attempt is a paid smart-model session.
+ */
+const MAX_FAILED_ATTEMPTS = 3;
 const JUDGE_PROFILE = {
   thinkingLevel: ThinkingLevel.HIGH,
   maxLlmCalls: 6,
@@ -86,12 +92,15 @@ interface JudgeRun {
   metrics: CommentJudgeMetrics;
   /** Claimed threads this run could not judge; they stay queued. */
   unjudged: Set<string>;
+  /** What a failed run threw, kept so a non-retryable error stays one. */
+  error?: unknown;
 }
 
 /**
  * Thrown on a `resolved` run that failed to judge the event's own thread,
  * so Pub/Sub redelivers the event instead of acking it. The thread stays
- * queued and its claim is released, so the redelivery judges it.
+ * queued and its claim is released, so the redelivery judges it. After
+ * `MAX_FAILED_ATTEMPTS` the run throws `NonRetryableTaskError` instead.
  */
 export class CommentJudgeRunError extends Error {
   constructor(failure: string) {
@@ -152,15 +161,29 @@ function judgedFrom(
   });
 }
 
-/** A re-resolved thread keeps its failed-check count and history. */
+/**
+ * A re-resolved thread keeps its failed-check count and history. Failed
+ * attempts carry over only while the thread is still waiting, which is
+ * what a redelivery of the same event finds.
+ */
 function carriedOver(
   existing: ThreadJudgmentDoc | null,
-): Pick<ThreadJudgmentDoc, 'notFixedCount' | 'history'> {
-  if (!existing) return { notFixedCount: 0, history: [] };
+): Pick<ThreadJudgmentDoc, 'notFixedCount' | 'history' | 'failedAttempts'> {
+  if (!existing) return { notFixedCount: 0, history: [], failedAttempts: 0 };
   return {
     notFixedCount: existing.notFixedCount ?? 0,
     history: existing.history ?? [],
+    failedAttempts: attemptsCarriedOver(existing),
   };
+}
+
+function attemptsCarriedOver(existing: ThreadJudgmentDoc): number {
+  return isAwaitingJudgment(existing) ? (existing.failedAttempts ?? 0) : 0;
+}
+
+/** True when the run failed and left the event's own thread unjudged. */
+function leftUnjudged(run: JudgeRun, threadId?: string): threadId is string {
+  return Boolean(run.metrics.failure && threadId && run.unjudged.has(threadId));
 }
 
 function emptyMetrics(judgedAt: Date): CommentJudgeMetrics {
@@ -192,9 +215,9 @@ export class CommentJudgeService {
   /**
    * `resolved` queues the event's thread first; `push` only picks up
    * threads that were waiting for a new commit. Returns null when there was
-   * nothing to judge. A `resolved` run throws `CommentJudgeRunError` when a
-   * failure left the event's thread unjudged; a `push` run never does, as
-   * its review must not be retried for the judge's sake.
+   * nothing to judge. A `resolved` run throws when a failure left the
+   * event's thread unjudged (see `failIfLeftUnjudged`); a `push` run never
+   * does, as its review must not be retried for the judge's sake.
    */
   async run(
     meta: PRMeta,
@@ -212,8 +235,44 @@ export class CommentJudgeService {
       awaiting,
       logger,
     );
-    if (trigger === 'resolved') throwIfLeftUnjudged(run, meta.threadId);
+    if (trigger === 'resolved') {
+      await this.failIfLeftUnjudged(run, prKey, meta.threadId);
+    }
     return run.metrics;
+  }
+
+  /**
+   * Only the event's own thread decides. Other threads failed here stay
+   * queued for the next event or push; a thread another run claimed is that
+   * run's to judge. A non-retryable error is rethrown as it is, and after
+   * `MAX_FAILED_ATTEMPTS` the event is acked: the thread stays queued.
+   */
+  private async failIfLeftUnjudged(
+    run: JudgeRun,
+    prKey: string,
+    threadId?: string,
+  ): Promise<void> {
+    if (!leftUnjudged(run, threadId)) return;
+    if (run.error instanceof NonRetryableTaskError) throw run.error;
+    const failure = run.metrics.failure ?? 'Comment judge failed.';
+    const attempts = await this.countFailedAttempt(prKey, threadId);
+    if (attempts >= MAX_FAILED_ATTEMPTS) {
+      throw new NonRetryableTaskError(
+        `Comment judge gave up after ${attempts} failed attempts: ${failure}`,
+      );
+    }
+    throw new CommentJudgeRunError(failure);
+  }
+
+  private async countFailedAttempt(
+    prKey: string,
+    threadId: string,
+  ): Promise<number> {
+    const id = threadJudgmentId(prKey, threadId);
+    const doc = await this.deps.judgments.get(id);
+    const failedAttempts = (doc?.failedAttempts ?? 0) + 1;
+    await this.deps.judgments.save(id, { failedAttempts });
+    return failedAttempts;
   }
 
   private async awaitingDocs(
@@ -317,6 +376,7 @@ export class CommentJudgeService {
       return {
         metrics: { ...metrics, failure: describeError(error) },
         unjudged: unjudgedIds(claimed, []),
+        error,
       };
     }
   }
@@ -446,18 +506,6 @@ function unjudgedIds(claimed: Claimed[], judged: JudgedThread[]): Set<string> {
       .map((item) => item.thread.id)
       .filter((threadId) => !judgedIds.has(threadId)),
   );
-}
-
-/**
- * Only the event's own thread decides. Other threads failed here stay
- * queued for the next event or push; a thread another run claimed is that
- * run's to judge.
- */
-function throwIfLeftUnjudged(run: JudgeRun, threadId?: string): void {
-  const { failure } = run.metrics;
-  if (failure && threadId && run.unjudged.has(threadId)) {
-    throw new CommentJudgeRunError(failure);
-  }
 }
 
 function failureOf(

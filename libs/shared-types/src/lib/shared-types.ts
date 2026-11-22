@@ -179,6 +179,12 @@ export interface ThreadJudgmentDoc {
   history: ThreadJudgmentRecord[];
   /** Why the thread was skipped, when `status` is `skipped`. */
   skipReason?: string;
+  /**
+   * Failed attempts to judge the thread for its `resolved` event, counted
+   * across redeliveries; reset when the thread is resolved again after a
+   * verdict. The third one acks the event instead of retrying it.
+   */
+  failedAttempts?: number;
   updatedAt: Date;
 }
 

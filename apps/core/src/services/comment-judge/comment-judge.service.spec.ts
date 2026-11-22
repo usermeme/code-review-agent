@@ -1,10 +1,11 @@
-import type {
-  GitAdapterContract,
-  PRMeta,
-  PRState,
-  ReviewThread,
-  ThreadJudgmentDoc,
-  ThreadJudgmentsPayload,
+import {
+  type GitAdapterContract,
+  NonRetryableTaskError,
+  type PRMeta,
+  type PRState,
+  type ReviewThread,
+  type ThreadJudgmentDoc,
+  type ThreadJudgmentsPayload,
 } from '@code-review-agent/shared-types';
 import {
   BaseLlm,
@@ -346,6 +347,51 @@ describe('CommentJudgeService', () => {
       'Comment judge failed: adapter 502',
     );
     expect((await doc())?.status).toBe('queued');
+  });
+
+  it('stops redelivering after the third failed attempt at the same thread', async () => {
+    const llm = new JudgeLlm(() => null);
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      nowMs += 1_000;
+      await expect(service(llm).run(META, 'resolved')).rejects.toThrow(
+        CommentJudgeRunError,
+      );
+    }
+    nowMs += 1_000;
+    await expect(service(llm).run(META, 'resolved')).rejects.toThrow(
+      NonRetryableTaskError,
+    );
+
+    expect(llm.requests).toHaveLength(3);
+    expect(await doc()).toMatchObject({ status: 'queued', failedAttempts: 3 });
+  });
+
+  it('starts counting failed attempts again once the thread got a verdict', async () => {
+    let answer: Judgment[] | null = null;
+    const llm = new JudgeLlm(() => answer);
+    await expect(service(llm).run(META, 'resolved')).rejects.toThrow(
+      CommentJudgeRunError,
+    );
+    answer = [{ thread: 0, verdict: 'not_fixed', reason: 'Still broken.' }];
+    await service(llm).run({ ...META, threadId: undefined }, 'resolved');
+    expect((await doc())?.status).toBe('not_fixed');
+
+    answer = null;
+    nowMs += 1_000;
+    await expect(service(llm).run(META, 'resolved')).rejects.toThrow(
+      CommentJudgeRunError,
+    );
+    expect((await doc())?.failedAttempts).toBe(1);
+  });
+
+  it('passes a non-retryable adapter error through without counting it', async () => {
+    const error = new NonRetryableTaskError('file is too large');
+    getFileContent.mockRejectedValue(error);
+    const llm = new JudgeLlm(() => []);
+
+    await expect(service(llm).run(META, 'resolved')).rejects.toBe(error);
+    expect(await doc()).toMatchObject({ status: 'queued', failedAttempts: 0 });
   });
 
   it('does not fail a push when judging its waiting threads fails', async () => {
